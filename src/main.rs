@@ -13,11 +13,16 @@ fn launch_server() -> _ {
             "/",
             rocket::routes![
                 threads::index,
-                threads::unauthorized,
+                threads::thread,
+                threads::author_form,
+                threads::author_action,
+                threads::author_unauthorized,
+                threads::reply_action,
                 users::login_action,
                 users::login_form,
                 error::error,
-            ],
+                threads::unauthorized, 
+           ],
         )
         .mount("/static", FileServer::from("static/"))
 }

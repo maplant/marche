@@ -1,47 +1,46 @@
 <head>
   <title>Login</title>
   <link href="static/styles.css" rel="stylesheet">
-  <style type="text/css">
-    div.login-box {
-        margin: auto;
-        width: 70%;x
-        background: #7B904B;
-        padding: 20px;
-        color: white;
-        border-bottom: 1px solid #273B09;
-    }
-  </style>
 </head>
 <body>
-  <form action="login" method="post">
-    <div class="login-box">
-      <div class="form-header">
-        Login to continue
+  <ul>
+    <li>
+      <div class="nav">
+        home | stuff | prison | tags
       </div>
-      <div class="table">
-        <div class="form-row">
-          <div class="form-cell-title">
-            <label for="username">Username: </label>
+    </li>
+    <li>
+      <form action="/login/" method="post">
+        <div class="header">
+          Login
+        </div>
+        <div class="table">
+          <div class="row">
+            <div class="cell-title">
+              <label for="title">Username: </label>
+            </div>
+            <div class="cell">
+              <input type="text" name="username" id="username">
+            </div>
           </div>
-          <div class="form-cell">
-          <input type="text" name="username" id="username" required>
+          <div class="row">
+            <div class="cell-title">
+              <label for="content">Password: </label>
+            </div>
+            <div class="cell">
+              <input type="password" name="password" id="password">
+            </div>
+          </div>
+          <div class="row">
+            <div class="cell-title">
+              <input type="submit" value="Log In">
+            </div>
+            <div class="cell">
+            </div>
           </div>
         </div>
-        <div class="form-row">
-          <div class="form-cell-title">
-            <label for="password">Password: </label>
-          </div>
-          <div class="form-cell">
-            <input type="password" name="password" id="password" required>
-          </div>
-        </div>
-        <div class="form-row">
-          <div class="form-cell-title">
-            <input type="submit" value="Log in">
-          </div>
-        </div>
-      </div>
-    </div>
-  </form>
+      </form>
+    </li>
+  </ul>
 </body>
       

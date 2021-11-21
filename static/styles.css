@@ -5,7 +5,8 @@ ul {
 }
 
 body {
-    background: #58641D;
+    background: white;
+    // background: #58641D;
     font-family: verdana;
 }
 
@@ -45,8 +46,9 @@ div.header {
     display: flex;
     flex-direction: row;
     border-bottom: 1px solid #273B09;
-    color: white;
-    background: #7B904B;
+    background: #DBD2E0;
+    color: gray;
+//    background: #7B904B;
     padding-top: 5px;
     padding-bottom: 5px;
     padding-left: 20px;
@@ -55,7 +57,7 @@ div.header {
 
 div.post {
     align: center;
-    background: #7B904B;
+    background: white;
     padding: 20px;
     color: white;
     border-bottom: 1px solid #273B09;
@@ -65,19 +67,20 @@ div.table {
     display: table;
 }
 
-div.form-row {
+div.row {
     display: table-row;
     border-bottom: 1px solid #273B09;
 }
 
-div.form-cell {
+div.cell {
     display: table-cell;
     padding: 10px;
+    background: white;
     border-right: 1px solid #273B09;
     border-bottom: 1px solid #273B09;
 }
 
-div.form-cell-title {
+div.cell-title {
     display: table-cell;
     padding: 10px;
     width: 5%;
@@ -86,7 +89,7 @@ div.form-cell-title {
     color: grey;
 }
 
-div.form-header {
+div.header {
     text-align: left;
     padding: 10px;
     background: #DBD2E0;

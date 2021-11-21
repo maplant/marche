@@ -1,4 +1,4 @@
-use chrono::prelude::*;
+use chrono::{Duration, prelude::*};
 use diesel::prelude::*;
 use libpasta::{hash_password, verify_password};
 use rocket::form::{Form, FromForm};
@@ -9,29 +9,64 @@ use rocket::response::Redirect;
 use rocket::{uri, Request};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
+use rand::RngCore;
+use rand::rngs::OsRng;
 use std::collections::HashMap;
 
 #[derive(Queryable, Debug)]
 pub struct User {
     /// Id of the user
-    id: i32,
+    pub id: i32,
     /// User name
-    name: String,
+    pub name: String,
     /// Password hash
     password: String,
     /// Rank
     rank_id: i32,
+    /// Last drop
+    last_drop: NaiveDateTime,
 }
 
 impl User {
+    pub fn lookup(conn: &PgConnection, user_id: i32) -> Result<Self, ()> {
+        use crate::schema::users::dsl::*;
+        users
+            .filter(id.eq(user_id))
+            .load::<Self>(conn)
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .ok_or(())
+    }
+
     pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
         use crate::schema::users::dsl::*;
-        dbg!(users
+        users
             .filter(id.eq(session.user_id))
             .load::<Self>(conn)
             .ok()
             .and_then(|v| v.into_iter().next())
-            .ok_or(()))
+            .ok_or(())
+    }
+}
+
+pub struct UserCache<'a> {
+    conn: &'a PgConnection,
+    cached: HashMap<i32, User>,
+}
+
+impl<'a> UserCache<'a> {
+    pub fn new(conn: &'a PgConnection) -> Self {
+        UserCache {
+            conn,
+            cached: Default::default(),
+        }
+    }
+
+    pub fn get(&mut self, id: i32) -> &User {
+        if !self.cached.contains_key(&id) {
+            self.cached.insert(id, User::lookup(self.conn, id).unwrap());
+        }
+        self.cached.get(&id).unwrap()
     }
 }
 
@@ -40,13 +75,13 @@ impl<'r> FromRequest<'r> for User {
     type Error = ();
 
     async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
-        let session_id: i32 = try_outcome!(req
+        let session_id = try_outcome!(req
             .cookies()
             .get_private(USER_SESSION_ID_COOKIE)
-            .and_then(|x| x.value().parse().ok())
+            .map(|x| x.value().to_string())
             .or_forward(()));
         let conn = try_outcome!(crate::establish_db_connection().or_forward(()));
-        let session = try_outcome!(LoginSession::fetch(&conn, session_id).or_forward(()));
+        let session = try_outcome!(LoginSession::fetch(&conn, &session_id).or_forward(()));
         User::from_session(&conn, &session).or_forward(())
     }
 }
@@ -58,6 +93,8 @@ const USER_SESSION_ID_COOKIE: &str = "session_id";
 pub struct LoginSession {
     /// Id of the login session
     id: i32,
+    /// Auth token
+    session_id: String, 
     /// UserId of the session
     user_id: i32,
     /// When the session began
@@ -70,6 +107,7 @@ use crate::schema::login_sessions;
 #[table_name = "login_sessions"]
 pub struct NewSession {
     user_id: i32,
+    session_id: String,
     session_start: NaiveDateTime,
 }
 
@@ -81,16 +119,20 @@ pub enum LoginFailure {
 
 impl LoginSession {
     /// Get session
-    pub fn fetch(conn: &PgConnection, session_id: i32) -> Result<Self, ()> {
+    pub fn fetch(conn: &PgConnection, sess_id: &str) -> Result<Self, ()> {
         use crate::schema::login_sessions::dsl::*;
+        // TODO: If there are more than two sessions with the same id, fail.
         let curr_session = login_sessions
-            .filter(id.eq(session_id))
+            .filter(session_id.eq(sess_id))
             .load::<Self>(conn)
             .ok()
             .and_then(|v| v.into_iter().next())
-            .ok_or(());
-        // TODO: Determine if session is older than a month
-        curr_session
+            .ok_or(())?;
+        if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
+            Err(())
+        } else {
+            Ok(curr_session)
+        }
     }
 
     /// Attempt to login a user
@@ -113,13 +155,19 @@ impl LoginSession {
             return Err(LoginFailure::UserOrPasswordIncorrect);
         }
 
-        // TODO: Delete any old login sessions associated with the
-        // user.
+        use crate::schema::login_sessions::dsl::user_id;
+        diesel::delete(login_sessions::table.filter(user_id.eq(user.id)))
+            .execute(conn)
+            .map_err(|_| LoginFailure::FailedToCreateSession)?;
+
+        let mut key = [0u8; 16];
+        OsRng.fill_bytes(&mut key);
 
         // Found a user, create a new login sessions
         let session_start = Utc::now().naive_utc();
         let new_session = NewSession {
             user_id: user.id,
+            session_id: i128::from_be_bytes(key).to_string(),
             session_start,
         };
         diesel::insert_into(login_sessions::table)
@@ -130,14 +178,14 @@ impl LoginSession {
 }
 
 #[derive(FromForm, Debug)]
-pub struct Login {
+pub struct LoginReq {
     username: String,
     password: String,
 }
 
 #[rocket::post("/login", data = "<login>")]
-pub fn login_action(jar: &CookieJar<'_>, login: Form<Login>) -> Redirect {
-    // let login = login.into_inner();
+pub fn login_action(jar: &CookieJar<'_>, login: Form<LoginReq>) -> Redirect {
+    jar.remove_private(Cookie::new(USER_SESSION_ID_COOKIE, String::new()));
     let conn = match crate::establish_db_connection() {
         Some(conn) => conn,
         None => {
@@ -148,8 +196,8 @@ pub fn login_action(jar: &CookieJar<'_>, login: Form<Login>) -> Redirect {
     };
     let session = LoginSession::login(&conn, &login.username, &login.password);
     match session {
-        Ok(LoginSession { id, .. }) => {
-            jar.add_private(Cookie::new(USER_SESSION_ID_COOKIE, id.to_string()));
+        Ok(LoginSession { session_id, .. }) => {
+            jar.add_private(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
             Redirect::to("/")
         }
         Err(_) => Redirect::to(uri!(crate::error::error("Unauthorized login"))),
@@ -159,4 +207,11 @@ pub fn login_action(jar: &CookieJar<'_>, login: Form<Login>) -> Redirect {
 #[rocket::get("/login")]
 pub fn login_form() -> Template {
     Template::render("login", HashMap::<String, String>::new())
+}
+
+/// User privileges. Access to privileges is determined by rank.
+pub enum Privilege {
+    /// The ability to mint new items. Only the most privileged users users
+    /// should have access to this.
+    Mint,
 }

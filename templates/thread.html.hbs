@@ -1,0 +1,56 @@
+<head>
+  <title>Home</title>
+  <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body>
+  <form action="/reply/{{id}}" method="post">
+  <ul>
+    <li>
+      <div class="nav">
+        home | stuff | prison | tags
+      </div>
+    </li>
+    <li>
+    <div class="table">
+      <div class="row">
+        <div class="cell-title"></div>
+        <div class="cell-title", style="width: 70%;"><b>{{title}}</b></div>
+        <div class="cell-title", style="width: 15%;">date</div>
+      </div>
+    {{#each posts}}
+      <div class="row">
+        <div class="cell-title">
+          <p>{{author}}</p>
+          <img src="/static/default-prof-pic.png">
+        </div>
+        <div class="cell">
+          {{body}}
+        </div>
+        <div class="cell">
+          {{date}}
+        </div>
+      </div>
+    {{/each}}
+    <div class="row">
+      <div class="cell-title" style="text-align: right; vertical-align: top;">
+        <label for="reply">Reply:</label>
+      </div>
+      <div class="cell">
+        <textarea name="reply"></textarea>
+      </div>
+      <div class="cell">
+      </div>
+    </div>
+    <div class="row">
+      <div class="cell-title">
+      </div>
+      <div class="cell">
+        <input type="submit" value="Submit">
+      </div>
+      <div class="cell">
+      </div>
+    </div>
+    </li>
+  </ul>
+  </form>
+</body>

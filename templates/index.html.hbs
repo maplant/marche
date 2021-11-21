@@ -10,17 +10,26 @@
       </div>
     </li>
     <li>
-      <div class="header">
-        <div class="title">title</div>
-        <div class="right">last post</div>
+    <div class="table">
+      <div class="row">
+        <div class="cell-title"><b>#</b></div>
+        <div class="cell-title", style="width: 70%;">title</div>
+        <div class="cell-title", style="width: 10%;">last post</div>
       </div>
-    </li>
     {{#each posts}}
-      <li>
-        <div class="post">
-          {{this}}
+      <div class="row">
+        <div class="cell-title">
+          {{num}}
         </div>
-      </li>
+        <div class="cell">
+          <a href="/thread/{{id}}">{{title}}</a>          
+        </div>
+        <div class="cell">
+          {{date}}
+        </div>
+      </div>
     {{/each}}
-  </div>
+    </div>
+    </li>
+  </ul>
 </body>

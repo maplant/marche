@@ -61,14 +61,16 @@ pub enum ItemType {
     /// Action item that allows the invitation of a new user.
     ActionInvite,
     /// Post action item that allows to sticky the post.
-    PosActionSticky,
+    PostActionSticky,
+    /// Allows for a sticker to be posted on a post.
+    Reaction,
 }
 
 /// An item that can be dropped.
 #[derive(Queryable)]
 pub struct Item {
     /// Id of the available item
-    id: u32,
+    id: i32,
     /// Name of the item
     name: String,
     /// Description of the item
@@ -83,26 +85,26 @@ pub struct Item {
 
 /// A dropped item associated with a user.
 #[derive(Queryable)]
-pub struct OwnedItem {
+pub struct DroppedItem {
     /// Id of the dropped item.
-    id: u32,
+    id: i32,
     /// UserId of the owner.
-    owner: u32,
+    owner: i32,
     /// ItemId of the item.
-    item: u32,
+    item: i32,
 }
 
 /// A trade between two users.
 #[derive(Queryable)]
 pub struct Trade {
     /// Id of the trade.
-    id: u32,
+    id: i32,
     /// UserId of the sender.
-    sender: u32,
+    sender: i32,
     /// Items offered for trade (expressed as a vec of OwnedItemIds).
-    sender_items: Vec<u32>,
+    sender_items: Vec<i32>,
     /// UserId of the receiver.
-    receiver: u32,
+    receiver: i32,
     /// Items requested for trade
-    receiver_items: Vec<u32>,
+    receiver_items: Vec<i32>,
 }
