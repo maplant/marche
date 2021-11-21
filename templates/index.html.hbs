@@ -1,0 +1,26 @@
+<head>
+  <title>Home</title>
+  <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body>
+  <ul>
+    <li>
+      <div class="nav">
+        home | stuff | prison | tags
+      </div>
+    </li>
+    <li>
+      <div class="header">
+        <div class="title">title</div>
+        <div class="right">last post</div>
+      </div>
+    </li>
+    {{#each posts}}
+      <li>
+        <div class="post">
+          {{this}}
+        </div>
+      </li>
+    {{/each}}
+  </div>
+</body>

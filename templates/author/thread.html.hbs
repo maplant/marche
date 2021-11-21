@@ -1,0 +1,44 @@
+<head>
+  <title>Home</title>
+  <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body>
+  <ul>
+    <li>
+      <div class="nav">
+        home | stuff | prison | tags
+      </div>
+    </li>
+    <li>
+      <form action="author/thread" method="post">
+        <div class="form-header">
+          New post
+        </div>
+        <div class="table">
+          <div class="form-row">
+            <div class="form-cell-title">
+              <label for="title">Title: </label>
+            </div>
+            <div class="form-cell">
+              <input type="text" name="title" id="title">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-cell-title">
+              <label for="content">Content: </label>
+            </div>
+            <div class="form-cell">
+              <textarea name="content">
+              </textarea>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-cell-title">
+              <input type="submit" value="Log in">
+            </div>
+          </div>
+        </div>
+      </form>
+    </li>
+  </ul>
+</body>

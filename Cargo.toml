@@ -1,0 +1,19 @@
+[package]
+name = "server"
+version = "0.1.0"
+authors = ["Matthew Plant <maplant95@gmail.com>"]
+edition = "2021"
+default-run = "server"
+
+[dependencies]
+rand = "0.4" 
+diesel = { version = "1.4.4", features = ["postgres", "chrono"] }
+rocket = { version = "0.5.0-rc.1", features = ["secrets"] }
+serde = { version = "1.0", features = ["derive"] }
+libpasta = "0.1"
+chrono = "0.4"
+maplit = "1.0"
+
+[dependencies.rocket_dyn_templates]
+version = "0.1.0-rc.1"
+features = ["handlebars"]
