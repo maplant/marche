@@ -18,11 +18,12 @@ fn launch_server() -> _ {
                 threads::author_action,
                 threads::author_unauthorized,
                 threads::reply_action,
+                users::profile,
                 users::login_action,
                 users::login_form,
                 error::error,
-                threads::unauthorized, 
-           ],
+                threads::unauthorized,
+            ],
         )
         .mount("/static", FileServer::from("static/"))
 }

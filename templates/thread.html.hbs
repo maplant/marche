@@ -14,8 +14,8 @@
     <div class="table">
       <div class="row">
         <div class="cell-title"></div>
-        <div class="cell-title", style="width: 70%;"><b>{{title}}</b></div>
-        <div class="cell-title", style="width: 15%;">date</div>
+        <div class="cell-title" style="width: 70%;"><b>{{title}}</b></div>
+        <div class="cell-title" style="width: 15%;">date</div>
       </div>
     {{#each posts}}
       <div class="row">
@@ -23,8 +23,17 @@
           <p>{{author}}</p>
           <img src="/static/default-prof-pic.png">
         </div>
-        <div class="cell">
-          {{body}}
+        <div class="cell" style="word-break: break-all">
+          <div style="position: relative">
+            <div>
+              {{body}}
+            </div>
+            {{#if reward}}
+              <div class="reward" style="position: absolute; bottom: 0px; right: 5px">
+                ⭐ {{reward.name}} was given for this post
+              </div>
+            {{/if}}
+          </div>
         </div>
         <div class="cell">
           {{date}}

@@ -1,0 +1,42 @@
+<head>
+  <title>Home</title>
+  <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body>
+  <ul>
+    <li>
+      <div class="nav">
+        home | stuff | prison | tags
+      </div>
+    </li>
+    <li>
+      <div class="table">
+        <div class="row">
+          <div class="cell-title"></div>
+          <div class="cell-title" style="width: 70%;"><b>{{name}}</b></div>
+        </div>
+        <div class="row">
+          <div class="cell-title" style="background: linear-gradient(#ffd472, #fe637c, #59547a); text-align: center">
+            <img src="/static/{{picture}}.png">
+          </div>
+          <div class="cell" style="vertical-align: top;">
+            {{bio}}
+          </div>
+        </div>
+        <div class="row">
+          <div class="cell-title" style="vertical-align: top; text-align: right;">
+            Inventory:
+          </div>
+          <div class="cell">
+            {{#each items}}
+              <a href="{{action}}" class="item-common">
+                <p><img src="/static/{{thumbnail}}.png"></p>
+                {{name}}
+              </a>
+            {{/each}}
+          </div>
+        </div>
+      </div>
+    </li>
+  </ul>
+</body>

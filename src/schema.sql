@@ -31,3 +31,20 @@ CREATE TABLE replies (
   body TEXT NOT NULL,
   reward INT
 );
+
+CREATE TYPE rarity_enum AS ENUM ('common', 'uncommon', 'rare', 'ultra_rare', 'legendary');
+
+CREATE TABLE items (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  available BOOLEAN NOT NULL,
+  rarity rarity_enum NOT NULL,
+  action_link TEXT NOT NULL
+);
+
+CREATE TABLE drops (
+  id SERIAL PRIMARY KEY,
+  owner_id INT NOT NULL,
+  item_id INT NOT NULL
+);

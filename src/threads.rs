@@ -1,4 +1,5 @@
 //! Display threads
+use crate::items::{Item, ItemDrop};
 use crate::schema::{replies, threads};
 use crate::users::{login_form, User, UserCache};
 use chrono::{prelude::*, NaiveDateTime};
@@ -36,13 +37,14 @@ pub struct NewThread<'t, 'b> {
     last_post: NaiveDateTime,
     title: &'t str,
     body: &'b str,
+    reward: Option<i32>,
 }
 
 const THREADS_PER_PAGE: i64 = 10;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 
 #[rocket::get("/")]
-pub fn index(user: User) -> Template {
+pub fn index(_user: User) -> Template {
     use crate::schema::threads::dsl::*;
 
     #[derive(Serialize)]
@@ -90,10 +92,16 @@ pub fn thread(user: User, thread_id: i32) -> Template {
     use crate::schema::threads::dsl::*;
 
     #[derive(Serialize)]
+    struct Reward {
+        name: String,
+    }
+
+    #[derive(Serialize)]
     struct Post {
         author: String,
         body: String,
         date: String,
+        reward: Option<Reward>,
     }
     #[derive(Serialize)]
     struct Context {
@@ -116,6 +124,9 @@ pub fn thread(user: User, thread_id: i32) -> Template {
                 author: user_cache.get(t.author_id).name.clone(),
                 body: t.body,
                 date: t.post_date.format(DATE_FMT).to_string(),
+                reward: t.reward.map(|r| Reward {
+                    name: Item::fetch(&conn, r).name,
+                }),
             }
         })
         .collect();
@@ -130,6 +141,9 @@ pub fn thread(user: User, thread_id: i32) -> Template {
                 author: user_cache.get(t.author_id).name.clone(),
                 body: t.body,
                 date: t.post_date.format(DATE_FMT).to_string(),
+                reward: t.reward.map(|r| Reward {
+                    name: Item::fetch(&conn, r).name,
+                }),
             })
             .collect::<Vec<_>>(),
     );
@@ -174,6 +188,7 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         last_post: post_date,
         title: &thread.title,
         body: &thread.body,
+        reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
     };
     let _: Result<Thread, _> = diesel::insert_into(threads::table)
         .values(&new_thread)
@@ -219,7 +234,7 @@ pub struct ReplyReq {
 
 #[rocket::post("/reply/<thread_id>", data = "<reply>")]
 pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redirect {
-    use crate::schema::{threads, replies};
+    use crate::schema::{replies, threads};
 
     let conn = match crate::establish_db_connection() {
         Some(conn) => conn,
@@ -236,7 +251,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         thread_id,
         post_date,
         body: &reply.reply,
-        reward: None,
+        reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
     };
 
     let _: Result<Reply, _> = diesel::insert_into(replies::table)
@@ -246,6 +261,6 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
     let _: Result<Thread, _> = diesel::update(threads::table)
         .set(threads::dsl::last_post.eq(post_date))
         .get_result(&conn);
-    
+
     Redirect::to(uri!(thread(thread_id)))
 }

@@ -39,3 +39,25 @@ table! {
         reward -> Nullable<Integer>,
     }
 }
+
+table! {
+    use diesel::types::*;
+    use crate::items::RarityMapping;
+
+    items(id) {
+        id -> Integer,
+        name -> Text,
+        description -> Text,
+        available -> Bool,
+        rarity -> RarityMapping,
+        action_link -> Text,
+    }
+}
+
+table! {
+    drops(id) {
+        id -> Integer,
+        owner_id -> Integer,
+        item_id -> Integer,
+    }
+}

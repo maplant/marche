@@ -96,3 +96,25 @@ div.header {
     border-bottom: 1px solid #273B09;
     color: grey;
 }
+
+div.reward {
+    text-align: left;
+    padding: 10px;
+    background: #DBD2E0;
+    border-bottom: 1px solid #273B09;
+    border-right: 1px solid #273B09;
+    color: grey;
+}
+
+a.item-common {
+    text-align: center;
+    color: black;
+    background: lightblue;
+    display: inline-block;
+    padding: 10px;
+    font-size: 11pt;
+    border-top: 1px solid lightblue;
+    border-left: 1px solid lightblue;
+    border-right: 1px solid darkblue;
+    border-bottom: 1px solid darkblue;
+}
