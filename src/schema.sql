@@ -2,8 +2,10 @@ CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   password TEXT NOT NULL,
+  bio TEXT NOT NULL, 
   rank_id INTEGER,
-  last_reward TIMESTAMP NOT NULL
+  last_reward TIMESTAMP NOT NULL,
+  equip_slot_prof_pic INTEGER
 );
 
 CREATE TABLE login_sessions (
@@ -32,15 +34,22 @@ CREATE TABLE replies (
   reward INT
 );
 
-CREATE TYPE rarity_enum AS ENUM ('common', 'uncommon', 'rare', 'ultra_rare', 'legendary');
+CREATE TYPE rarity_enum AS ENUM (
+  'common',
+  'uncommon',
+  'rare',
+  'ultra_rare',
+  'legendary'
+);
 
 CREATE TABLE items (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
+  thumbnail TEXT NOT NULL,
   available BOOLEAN NOT NULL,
   rarity rarity_enum NOT NULL,
-  action_link TEXT NOT NULL
+  item_type JSONB NOT NULL
 );
 
 CREATE TABLE drops (
@@ -48,3 +57,4 @@ CREATE TABLE drops (
   owner_id INT NOT NULL,
   item_id INT NOT NULL
 );
+

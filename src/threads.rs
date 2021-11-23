@@ -1,7 +1,7 @@
 //! Display threads
 use crate::items::{Item, ItemDrop};
 use crate::schema::{replies, threads};
-use crate::users::{login_form, User, UserCache};
+use crate::users::{User, UserCache};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use rocket::form::Form;
@@ -87,18 +87,21 @@ pub fn unauthorized() -> Redirect {
 }
 
 #[rocket::get("/thread/<thread_id>")]
-pub fn thread(user: User, thread_id: i32) -> Template {
+pub fn thread(_user: User, thread_id: i32) -> Template {
     use crate::schema::replies;
     use crate::schema::threads::dsl::*;
 
     #[derive(Serialize)]
     struct Reward {
         name: String,
+        rarity: String,
     }
 
     #[derive(Serialize)]
     struct Post {
-        author: String,
+        author_name: String,
+        author_id: i32,
+        profile_pic: String,
         body: String,
         date: String,
         reward: Option<Reward>,
@@ -120,12 +123,19 @@ pub fn thread(user: User, thread_id: i32) -> Template {
         .into_iter()
         .map(|t| {
             post_title = t.title;
+            let cached_user = user_cache.get(t.author_id);
             Post {
-                author: user_cache.get(t.author_id).name.clone(),
+                author_id: t.author_id,
+                author_name: cached_user.user.name.clone(),
+                profile_pic: cached_user.prof_pic.clone(),
                 body: t.body,
                 date: t.post_date.format(DATE_FMT).to_string(),
-                reward: t.reward.map(|r| Reward {
-                    name: Item::fetch(&conn, r).name,
+                reward: t.reward.map(|r| {
+                    let item = Item::fetch(&conn, r);
+                    Reward {
+                        name: item.name,
+                        rarity: item.rarity.to_string(),
+                    }
                 }),
             }
         })
@@ -137,13 +147,22 @@ pub fn thread(user: User, thread_id: i32) -> Template {
             .load::<Reply>(&conn)
             .unwrap()
             .into_iter()
-            .map(|t| Post {
-                author: user_cache.get(t.author_id).name.clone(),
-                body: t.body,
-                date: t.post_date.format(DATE_FMT).to_string(),
-                reward: t.reward.map(|r| Reward {
-                    name: Item::fetch(&conn, r).name,
-                }),
+            .map(|t| {
+                let cached_user = user_cache.get(t.author_id);
+                Post {
+                    author_id: t.author_id,
+                    author_name: cached_user.user.name.clone(),
+                    profile_pic: cached_user.prof_pic.clone(),
+                    body: t.body,
+                    date: t.post_date.format(DATE_FMT).to_string(),
+                    reward: t.reward.map(|r| {
+                        let item = Item::fetch(&conn, r);
+                        Reward {
+                            name: item.name,
+                            rarity: item.rarity.to_string(),
+                        }
+                    }),
+                }
             })
             .collect::<Vec<_>>(),
     );
@@ -159,7 +178,7 @@ pub fn thread(user: User, thread_id: i32) -> Template {
 }
 
 #[rocket::get("/author")]
-pub fn author_form(user: User) -> Template {
+pub fn author_form(_user: User) -> Template {
     Template::render("author/thread", HashMap::<String, String>::new())
 }
 
@@ -204,17 +223,17 @@ pub fn author_unauthorized() -> Redirect {
 #[derive(Queryable)]
 pub struct Reply {
     /// Id of the reply
-    id: i32,
+    pub id: i32,
     /// Id of the author
-    author_id: i32,
+    pub author_id: i32,
     /// Id of the thread
-    thread_id: i32,
+    pub thread_id: i32,
     /// Date of posting
-    post_date: NaiveDateTime,
+    pub post_date: NaiveDateTime,
     /// Body of the reply
-    body: String,
+    pub body: String,
     /// Any item that was rewarded for this post
-    reward: Option<i32>,
+    pub reward: Option<i32>,
 }
 
 #[derive(Insertable)]

@@ -1,0 +1,48 @@
+<head>
+  <title>Item</title>
+  <link href="/static/styles.css" rel="stylesheet">
+</head>
+<body>
+  <ul>
+    <li>
+      <div class="nav">
+        home | stuff | prison | tags
+      </div>
+    </li>
+    <li>
+      <div class="table">
+        <div class="row">
+          <div class="cell-title"></div>
+          <div class="cell-title" style="width: 70%;">
+            <div class="item-{{rarity}}">
+              <img src="/static/{{thumbnail}}.png">
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="cell-title">Name:</div>
+          <div class="cell">{{name}}</div>
+        </div>
+        <div class="row">
+          <div class="cell-title">Description:</div>
+          <div class="cell">{{description}}</div>
+        </div>
+        <div class="row">
+          <div class="cell-title">Rarity:</div>
+          <div class="cell"><div class="item-{{rarity}}">{{rarity}}</div></div>
+        </div>
+        <div class="row">
+          <div class="cell-title">
+            <button>Back</button>
+          </div>
+          <div class="cell-title">
+            <form action="/equip/{{id}}">
+            <input type="submit" value="Equip" />
+            </form>
+          </div>
+        </div>
+      </div>
+    </li>
+  </ul>
+</body>
+      

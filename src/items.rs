@@ -1,13 +1,17 @@
-use crate::schema::{drops, items};
+use crate::schema::drops;
 use crate::users::User;
-use chrono::NaiveDateTime;
+use diesel::pg::Pg;
 use diesel::prelude::*;
+use diesel::serialize::Output;
+use diesel::sql_types::Jsonb;
+use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
 use rand::prelude::{thread_rng, IteratorRandom};
+use rocket_dyn_templates::Template;
 use serde::{Deserialize, Serialize};
 
 /// Rarity of an item.
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, Serialize, Deserialize, DbEnum)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, DbEnum)]
 pub enum Rarity {
     /// Corresponds to a ~84% chance of being dropped
     Common,
@@ -23,6 +27,22 @@ pub enum Rarity {
 
     /// Corresponds to a ~0.01% chance of being dropped
     Legendary,
+
+    /// Unique items have no chance of being dropped, and must be minted
+    Unique,
+}
+
+impl ToString for Rarity {
+    fn to_string(&self) -> String {
+        String::from(match self {
+            Self::Common => "common",
+            Self::Uncommon => "uncommon",
+            Self::Rare => "rare",
+            Self::UltraRare => "ultra-rare",
+            Self::Legendary => "legendary",
+            Self::Unique => "unique",
+        })
+    }
 }
 
 const LEGENDARY: u32 = u32::MAX - 429497;
@@ -48,32 +68,35 @@ impl Rarity {
     }
 }
 
-/*
 /// The type of an item. Determines if the item has any associated actions or is purely cosmetic,
-/// and further if the item is cosmetic how many can be equipped.
-///
-/// Cosmetic items are effectively associated with a CSS style.
+/// and further if the item is cosmetic how many can be equipped
+#[derive(Clone, Debug, Serialize, Deserialize, FromSqlRow, AsExpression)]
+#[sql_type = "Jsonb"]
 pub enum ItemType {
-    /// Cosmetic profile picture, displayable in user profile and next to all posts.
-    CosmeticProfilePic,
-    /// Cosmetic background, displayed behind the profile.
-    CosmeticUserBackground,
-    /// Cosmetic profile picture boarder.
-    CosmeticBorder,
-    /// Cosmetic badge, [MAX_EQUIPABLE] of these can be shown under the pfoile.
-    CosmeticBadge,
-    /// Cosmetic badge that appears directly under the profile picture. Only one is equipable.
-    CosmeticCommendation,
-    /// Action item that allows the invitation of a new user.
-    ActionInvite,
-    /// Post action item that allows to sticky the post.
-    PostActionSticky,
-    /// Allows for a sticker to be posted on a post.
-    Reaction,
+    /// An item with no use
+    Useless,
+    /// Cosmetic profile picture, displayable in user profile and next to all posts
+    ProfilePic { filename: String },
+    /// Cosmetic background, displayed behind the profile
+    ProfileBackground,
 }
-*/
 
-/// An item that can be dropped.
+impl ToSql<Jsonb, Pg> for ItemType {
+    fn to_sql<W: std::io::Write>(&self, out: &mut Output<'_, W, Pg>) -> diesel::serialize::Result {
+        out.write_all(&[1])?;
+        serde_json::to_writer(out, self)
+            .map(|_| diesel::serialize::IsNull::No)
+            .map_err(Into::into)
+    }
+}
+
+impl FromSql<Jsonb, Pg> for ItemType {
+    fn from_sql(bytes: Option<&[u8]>) -> diesel::deserialize::Result<Self> {
+        serde_json::from_slice(&bytes.unwrap_or(&[])[1..]).map_err(|_| "Invalid Json".into())
+    }
+}
+
+/// An item that can be dropped
 #[derive(Queryable)]
 pub struct Item {
     /// Id of the available item
@@ -81,13 +104,16 @@ pub struct Item {
     /// Name of the item
     pub name: String,
     /// Description of the item
-    description: String,
+    pub description: String,
+    /// Thumbnail of the item when viewed in inventory
+    pub thumbnail: String,
     /// Availability of the item (can the item be dropped?)
-    available: bool,
+    pub available: bool,
     /// Rarity of the item
-    rarity: Rarity,
-    /// Link to the action provided by the item
-    action_link: String,
+    pub rarity: Rarity,
+    /// Type of the item
+    #[diesel(sql_type = "ItemType")]
+    pub item_type: ItemType,
 }
 
 impl Item {
@@ -100,6 +126,13 @@ impl Item {
             .into_iter()
             .next()
             .unwrap()
+    }
+
+    pub fn into_profile_pic(self) -> String {
+        match self.item_type {
+            ItemType::ProfilePic { filename } => filename,
+            _ => panic!("Item is not a profile picture"),
+        }
     }
 }
 
@@ -115,14 +148,14 @@ pub struct NewItem<'n, 'd> {
 }
 */
 
-/// A dropped item associated with a user.
+/// A dropped item associated with a user
 #[derive(Queryable)]
 pub struct ItemDrop {
-    /// Id of the dropped item.
-    id: i32,
-    /// UserId of the owner.
-    owner_id: i32,
-    /// ItemId of the item.
+    /// Id of the dropped item
+    pub id: i32,
+    /// UserId of the owner
+    pub owner_id: i32,
+    /// ItemId of the item
     pub item_id: i32,
 }
 
@@ -147,6 +180,17 @@ pub struct NewDrop {
 impl ItemDrop {
     pub fn item_id(self) -> i32 {
         self.item_id
+    }
+
+    pub fn fetch(conn: &PgConnection, drop_id: i32) -> Self {
+        use crate::schema::drops::dsl::*;
+        drops
+            .filter(id.eq(drop_id))
+            .load::<Self>(conn)
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap()
     }
 
     /// Possibly selects an item, depending on the last drop.
@@ -203,17 +247,45 @@ impl ItemDrop {
     }
 }
 
+#[rocket::get("/item/<drop_id>")]
+pub fn item(_user: User, drop_id: i32) -> Template {
+    #[derive(Serialize)]
+    struct Context {
+        id: i32,
+        name: String,
+        description: String,
+        rarity: String,
+        thumbnail: String,
+    }
+
+    let conn = crate::establish_db_connection().unwrap();
+
+    let drop = ItemDrop::fetch(&conn, drop_id);
+    let item = Item::fetch(&conn, drop.item_id);
+
+    Template::render(
+        "item",
+        Context {
+            id: drop_id,
+            name: item.name,
+            description: item.description,
+            rarity: item.rarity.to_string(),
+            thumbnail: item.thumbnail,
+        },
+    )
+}
+
 /// A trade between two users.
 #[derive(Queryable)]
 pub struct Trade {
     /// Id of the trade.
-    id: i32,
+    pub id: i32,
     /// UserId of the sender.
-    sender: i32,
+    pub sender: i32,
     /// Items offered for trade (expressed as a vec of OwnedItemIds).
-    sender_items: Vec<i32>,
+    pub sender_items: Vec<i32>,
     /// UserId of the receiver.
-    receiver: i32,
+    pub receiver: i32,
     /// Items requested for trade
-    receiver_items: Vec<i32>,
+    pub receiver_items: Vec<i32>,
 }

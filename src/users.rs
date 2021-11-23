@@ -1,18 +1,18 @@
-use crate::items::{Item, ItemDrop};
+use crate::items::{Item, ItemDrop, ItemType};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
-use libpasta::{hash_password, verify_password};
+use libpasta::verify_password;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rocket::form::{Form, FromForm};
-use rocket::http::{Cookie, CookieJar, Status};
+use rocket::http::{Cookie, CookieJar};
 use rocket::outcome::{try_outcome, IntoOutcome};
 use rocket::request::{self, FromRequest};
 use rocket::response::Redirect;
 use rocket::{uri, Request};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Queryable, Debug)]
 pub struct User {
@@ -21,14 +21,58 @@ pub struct User {
     /// User name
     pub name: String,
     /// Password hash
-    password: String,
+    pub password: String,
+    /// Biography of the user
+    pub bio: String,
     /// Rank
-    rank_id: i32,
+    pub rank_id: i32,
     /// Last reward
     pub last_reward: NaiveDateTime,
+    /// ProfilePic equipment slot
+    pub equip_slot_prof_pic: Option<i32>,
 }
 
 impl User {
+    /// Equips an item
+    pub fn equip(&self, conn: &PgConnection, item_drop: ItemDrop) {
+        use crate::schema::users::dsl::*;
+
+        if item_drop.owner_id != self.id {
+            return;
+        }
+
+        let item_desc = Item::fetch(conn, item_drop.item_id);
+        match item_desc.item_type {
+            ItemType::ProfilePic { .. } => {
+                diesel::update(users.find(self.id))
+                    .set(equip_slot_prof_pic.eq(Some(item_drop.id)))
+                    .get_result::<Self>(conn)
+                    .unwrap();
+            }
+            _ => (),
+        }
+    }
+
+    /// Returns a vec of equipped items.
+    pub fn equipped(&self, conn: &PgConnection) -> Vec<ItemDrop> {
+        let mut items = Vec::new();
+
+        if let Some(prof_pic) = self.equip_slot_prof_pic {
+            items.push(ItemDrop::fetch(conn, prof_pic));
+        }
+
+        items
+    }
+
+    /// Returns the profile picture of the user
+    pub fn get_profile_pic(&self, conn: &PgConnection) -> String {
+        self.equip_slot_prof_pic
+            .map(|drop_id| {
+                Item::fetch(&conn, ItemDrop::fetch(&conn, drop_id).item_id).into_profile_pic()
+            })
+            .unwrap_or_else(|| String::from("default-prof-pic"))
+    }
+
     /// Attempt to update the last drop time. If we fail, return false.
     pub fn update_last_reward(&self, conn: &PgConnection) -> Result<Self, ()> {
         use crate::schema::users::dsl::{last_reward, users};
@@ -79,14 +123,29 @@ impl<'r> FromRequest<'r> for User {
     }
 }
 
+#[rocket::get("/equip/<drop_id>")]
+pub fn equip(user: User, drop_id: i32) -> Redirect {
+    let conn = crate::establish_db_connection().unwrap();
+    let item_drop = ItemDrop::fetch(&conn, drop_id);
+    user.equip(&conn, item_drop);
+    Redirect::to(uri!(profile(user.id)))
+}
+
 #[rocket::get("/profile")]
-pub fn profile(user: User) -> Template {
+pub fn curr_profile(user: User) -> Redirect {
+    Redirect::to(uri!(profile(user.id)))
+}
+
+#[rocket::get("/profile/<id>")]
+pub fn profile(_user: User, id: i32) -> Template {
     use crate::schema::drops;
 
+    // TODO: Take this struct and extract it somewhere
     #[derive(Serialize)]
     struct ItemThumb {
+        id: i32,
         name: String,
-        action: String,
+        rarity: String,
         thumbnail: String,
     }
 
@@ -95,41 +154,81 @@ pub fn profile(user: User) -> Template {
         name: &'n str,
         picture: &'p str,
         bio: &'b str,
-        items: Vec<ItemThumb>,
+        equipped: Vec<ItemThumb>,
+        inventory: Vec<ItemThumb>,
     }
 
     let conn = crate::establish_db_connection().unwrap();
+    let user = User::lookup(&conn, id).unwrap();
 
-    let items = drops::table
+    let mut is_equipped = HashSet::new();
+
+    let equipped = user
+        .equipped(&conn)
+        .into_iter()
+        .map(|drop| {
+            // TODO: extract this to function.
+            is_equipped.insert(drop.id);
+            let item = Item::fetch(&conn, drop.item_id);
+            ItemThumb {
+                id: drop.id,
+                name: item.name,
+                rarity: item.rarity.to_string(),
+                thumbnail: item.thumbnail,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let mut inventory = drops::table
         .filter(drops::dsl::owner_id.eq(user.id))
         .load::<ItemDrop>(&conn)
         .ok()
         .unwrap_or_else(Vec::new)
         .into_iter()
-        .map(|drop| {
-            let item = Item::fetch(&conn, drop.item_id);
-            ItemThumb {
-                name: item.name,
-                action: String::from("#"),
-                thumbnail: String::from("denarius_thumb"),
-            }
+        .filter_map(|drop| {
+            (!is_equipped.contains(&drop.id)).then(|| (drop.id, Item::fetch(&conn, drop.item_id)))
         })
         .collect::<Vec<_>>();
+
+    inventory.sort_by(|a, b| a.1.rarity.cmp(&b.1.rarity).reverse());
+
+    let inventory = inventory
+        .into_iter()
+        .map(|(drop_id, item)| ItemThumb {
+            id: drop_id,
+            name: item.name,
+            rarity: item.rarity.to_string(),
+            thumbnail: item.thumbnail,
+        })
+        .collect::<Vec<_>>();
+
+    let picture = &user
+        .equip_slot_prof_pic
+        .map(|drop_id| {
+            Item::fetch(&conn, ItemDrop::fetch(&conn, drop_id).item_id).into_profile_pic()
+        })
+        .unwrap_or_else(|| String::from("default-prof-pic"));
 
     Template::render(
         "profile",
         Context {
             name: &user.name,
-            picture: "default-prof-pic",
+            picture,
             bio: "No bio",
-            items,
+            equipped,
+            inventory,
         },
     )
 }
 
 pub struct UserCache<'a> {
     conn: &'a PgConnection,
-    cached: HashMap<i32, User>,
+    cached: HashMap<i32, CachedUserData>,
+}
+
+pub struct CachedUserData {
+    pub user: User,
+    pub prof_pic: String,
 }
 
 impl<'a> UserCache<'a> {
@@ -140,9 +239,11 @@ impl<'a> UserCache<'a> {
         }
     }
 
-    pub fn get(&mut self, id: i32) -> &User {
+    pub fn get(&mut self, id: i32) -> &CachedUserData {
         if !self.cached.contains_key(&id) {
-            self.cached.insert(id, User::lookup(self.conn, id).unwrap());
+            let user = User::lookup(self.conn, id).unwrap();
+            let prof_pic = user.get_profile_pic(self.conn);
+            self.cached.insert(id, CachedUserData { user, prof_pic });
         }
         self.cached.get(&id).unwrap()
     }
@@ -152,13 +253,13 @@ impl<'a> UserCache<'a> {
 #[derive(Queryable)]
 pub struct LoginSession {
     /// Id of the login session
-    id: i32,
+    pub id: i32,
     /// Auth token
-    session_id: String,
+    pub session_id: String,
     /// UserId of the session
-    user_id: i32,
+    pub user_id: i32,
     /// When the session began
-    session_start: NaiveDateTime,
+    pub session_start: NaiveDateTime,
 }
 
 use crate::schema::login_sessions;

@@ -19,8 +19,21 @@
           <div class="cell-title" style="background: linear-gradient(#ffd472, #fe637c, #59547a); text-align: center">
             <img src="/static/{{picture}}.png">
           </div>
-          <div class="cell" style="vertical-align: top;">
+          <div class="cell" style="vertical-align: top; padding: 15px">
             {{bio}}
+          </div>
+        </div>
+        <div class="row">
+          <div class="cell-title" style="vertical-align: top; text-align: right;">
+            Equipped:
+          </div>
+          <div class="cell">
+            {{#each equipped}}
+              <a href="/item/{{id}}" class="item-{{rarity}}">
+                <p><img src="/static/{{thumbnail}}.png"></p>
+                {{name}}
+              </a>
+            {{/each}}
           </div>
         </div>
         <div class="row">
@@ -28,8 +41,8 @@
             Inventory:
           </div>
           <div class="cell">
-            {{#each items}}
-              <a href="{{action}}" class="item-common">
+            {{#each inventory}}
+              <a href="/item/{{id}}" class="item-{{rarity}}">
                 <p><img src="/static/{{thumbnail}}.png"></p>
                 {{name}}
               </a>

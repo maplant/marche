@@ -20,20 +20,18 @@
     {{#each posts}}
       <div class="row">
         <div class="cell-title">
-          <p>{{author}}</p>
-          <img src="/static/default-prof-pic.png">
+          <p><a href="/profile/{{author_id}}">{{author_name}}</a></p>
+          <img src="/static/{{profile_pic}}.png">
         </div>
-        <div class="cell" style="word-break: break-all">
-          <div style="position: relative">
+        <div class="cell" style="word-break: break-all; position: relative;">
             <div>
               {{body}}
             </div>
             {{#if reward}}
-              <div class="reward" style="position: absolute; bottom: 0px; right: 5px">
-                ⭐ {{reward.name}} was given for this post
+              <div class="item-{{reward.rarity}}" style="position: absolute; bottom: 5px; right: 5px">
+                ⭐ <b>{{reward.name}}</b> was given for this post
               </div>
             {{/if}}
-          </div>
         </div>
         <div class="cell">
           {{date}}

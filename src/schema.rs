@@ -3,8 +3,10 @@ table! {
         id -> Integer,
         name -> Text,
         password -> Text,
+        bio -> Text,
         rank_id -> Integer,
         last_reward -> Timestamp,
+        equip_slot_prof_pic -> Nullable<Integer>,
     }
 }
 
@@ -41,16 +43,17 @@ table! {
 }
 
 table! {
-    use diesel::types::*;
+    use diesel::sql_types::*;
     use crate::items::RarityMapping;
 
     items(id) {
         id -> Integer,
         name -> Text,
         description -> Text,
+        thumbnail -> Text,
         available -> Bool,
         rarity -> RarityMapping,
-        action_link -> Text,
+        item_type -> Jsonb,
     }
 }
 

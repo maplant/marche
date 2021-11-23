@@ -106,15 +106,29 @@ div.reward {
     color: grey;
 }
 
-a.item-common {
+.item-common {
     text-align: center;
-    color: black;
-    background: lightblue;
+    color: #006daa;
+    background: #b9d6f2;
     display: inline-block;
     padding: 10px;
     font-size: 11pt;
-    border-top: 1px solid lightblue;
-    border-left: 1px solid lightblue;
-    border-right: 1px solid darkblue;
-    border-bottom: 1px solid darkblue;
+    border: 1px solid #006daa;
+    border-radius: 5px;
+}
+
+.item-legendary {
+    display: inline-block;
+    text-align: center;
+    background: #f7ce5b;
+    //    color: #af9b46;
+    color: ##776a31;
+    padding: 10px;
+    font-size: 11pt;
+    border: 1px solid #af9b46;
+    border-radius: 5px;
+}
+
+a {
+    text-decoration: none;
 }

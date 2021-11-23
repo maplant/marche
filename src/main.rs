@@ -1,9 +1,6 @@
 use rocket::fs::FileServer;
 use rocket_dyn_templates::*;
-use serde::{Deserialize, Serialize};
-use server::items::Rarity;
-use server::{error, threads, users};
-use std::path::{Path, PathBuf};
+use server::{error, items, threads, users};
 
 #[rocket::launch]
 fn launch_server() -> _ {
@@ -18,6 +15,9 @@ fn launch_server() -> _ {
                 threads::author_action,
                 threads::author_unauthorized,
                 threads::reply_action,
+                items::item,
+                users::equip,
+                users::curr_profile,
                 users::profile,
                 users::login_action,
                 users::login_form,
