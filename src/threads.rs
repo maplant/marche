@@ -102,6 +102,7 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
         author_name: String,
         author_id: i32,
         profile_pic: String,
+        background: String,
         body: String,
         date: String,
         reward: Option<Reward>,
@@ -128,6 +129,7 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
                 author_id: t.author_id,
                 author_name: cached_user.user.name.clone(),
                 profile_pic: cached_user.prof_pic.clone(),
+                background: cached_user.back_style.clone(),
                 body: t.body,
                 date: t.post_date.format(DATE_FMT).to_string(),
                 reward: t.reward.map(|r| {
@@ -153,6 +155,7 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
                     author_id: t.author_id,
                     author_name: cached_user.user.name.clone(),
                     profile_pic: cached_user.prof_pic.clone(),
+                    background: cached_user.back_style.clone(),
                     body: t.body,
                     date: t.post_date.format(DATE_FMT).to_string(),
                     reward: t.reward.map(|r| {

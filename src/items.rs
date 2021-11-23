@@ -78,7 +78,7 @@ pub enum ItemType {
     /// Cosmetic profile picture, displayable in user profile and next to all posts
     ProfilePic { filename: String },
     /// Cosmetic background, displayed behind the profile
-    ProfileBackground,
+    ProfileBackground { colors: Vec<String> },
 }
 
 impl ToSql<Jsonb, Pg> for ItemType {
@@ -127,26 +127,7 @@ impl Item {
             .next()
             .unwrap()
     }
-
-    pub fn into_profile_pic(self) -> String {
-        match self.item_type {
-            ItemType::ProfilePic { filename } => filename,
-            _ => panic!("Item is not a profile picture"),
-        }
-    }
 }
-
-/*
-#[derive(Insertable)]
-#[table_name = "items"]
-pub struct NewItem<'n, 'd> {
-    name: &'n str,
-    description: &'d str,
-    available: bool,
-    rarity: Rarity,
-    action_link: String,
-}
-*/
 
 /// A dropped item associated with a user
 #[derive(Queryable)]
@@ -157,6 +138,8 @@ pub struct ItemDrop {
     pub owner_id: i32,
     /// ItemId of the item
     pub item_id: i32,
+    /// Unique pattern Id for the item
+    pub pattern: i16,
 }
 
 use chrono::{Duration, Utc};
@@ -175,6 +158,7 @@ pub const DROP_CHANCE: u32 = u32::MAX - 644245090;
 pub struct NewDrop {
     owner_id: i32,
     item_id: i32,
+    pattern: i16,
 }
 
 impl ItemDrop {
@@ -191,6 +175,35 @@ impl ItemDrop {
             .into_iter()
             .next()
             .unwrap()
+    }
+
+    pub fn into_profile_pic(&self, conn: &PgConnection) -> String {
+        let item = Item::fetch(&conn, self.item_id);
+        match item.item_type {
+            ItemType::ProfilePic { filename } => filename,
+            _ => panic!("Item is not a profile picture"),
+        }
+    }
+
+    pub fn into_background_style(&self, conn: &PgConnection) -> String {
+        let item = Item::fetch(&conn, self.item_id);
+        match item.item_type {
+            ItemType::ProfileBackground { colors } => {
+                let mut style = format!(
+                    r#"background: linear-gradient({}deg"#,
+                    // Convert patten to unsigned integer and then convert to a
+                    // degree value.
+                    ((self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0) as u16,
+                );
+                for color in colors {
+                    style += ", ";
+                    style += &color;
+                }
+                style += ");";
+                style
+            }
+            _ => panic!("Item is not a profile picture"),
+        }
     }
 
     /// Possibly selects an item, depending on the last drop.
@@ -220,6 +233,7 @@ impl ItemDrop {
                                 .values(NewDrop {
                                     owner_id: user.id,
                                     item_id: chosen.id,
+                                    pattern: rand::random(),
                                 })
                                 .get_result(conn)
                                 .ok()
@@ -254,6 +268,7 @@ pub fn item(_user: User, drop_id: i32) -> Template {
         id: i32,
         name: String,
         description: String,
+        pattern: u16,
         rarity: String,
         thumbnail: String,
     }
@@ -269,6 +284,7 @@ pub fn item(_user: User, drop_id: i32) -> Template {
             id: drop_id,
             name: item.name,
             description: item.description,
+            pattern: drop.pattern as u16,
             rarity: item.rarity.to_string(),
             thumbnail: item.thumbnail,
         },

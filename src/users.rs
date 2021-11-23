@@ -30,6 +30,8 @@ pub struct User {
     pub last_reward: NaiveDateTime,
     /// ProfilePic equipment slot
     pub equip_slot_prof_pic: Option<i32>,
+    /// ProfileBackground equipment slot
+    pub equip_slot_background: Option<i32>,
 }
 
 impl User {
@@ -49,6 +51,12 @@ impl User {
                     .get_result::<Self>(conn)
                     .unwrap();
             }
+            ItemType::ProfileBackground { .. } => {
+                diesel::update(users.find(self.id))
+                    .set(equip_slot_background.eq(Some(item_drop.id)))
+                    .get_result::<Self>(conn)
+                    .unwrap();
+            }
             _ => (),
         }
     }
@@ -61,16 +69,24 @@ impl User {
             items.push(ItemDrop::fetch(conn, prof_pic));
         }
 
+        if let Some(background) = self.equip_slot_background {
+            items.push(ItemDrop::fetch(conn, background));
+        }
+
         items
     }
 
     /// Returns the profile picture of the user
     pub fn get_profile_pic(&self, conn: &PgConnection) -> String {
         self.equip_slot_prof_pic
-            .map(|drop_id| {
-                Item::fetch(&conn, ItemDrop::fetch(&conn, drop_id).item_id).into_profile_pic()
-            })
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_profile_pic(&conn))
             .unwrap_or_else(|| String::from("default-prof-pic"))
+    }
+
+    pub fn get_background_style(&self, conn: &PgConnection) -> String {
+        self.equip_slot_background
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_background_style(&conn))
+            .unwrap_or_else(|| String::from(""))
     }
 
     /// Attempt to update the last drop time. If we fail, return false.
@@ -150,12 +166,13 @@ pub fn profile(_user: User, id: i32) -> Template {
     }
 
     #[derive(Serialize)]
-    struct Context<'n, 'p, 'b> {
+    struct Context<'n, 'p, 'b, 'bg> {
         name: &'n str,
         picture: &'p str,
         bio: &'b str,
         equipped: Vec<ItemThumb>,
         inventory: Vec<ItemThumb>,
+        background: &'bg str,
     }
 
     let conn = crate::establish_db_connection().unwrap();
@@ -202,21 +219,15 @@ pub fn profile(_user: User, id: i32) -> Template {
         })
         .collect::<Vec<_>>();
 
-    let picture = &user
-        .equip_slot_prof_pic
-        .map(|drop_id| {
-            Item::fetch(&conn, ItemDrop::fetch(&conn, drop_id).item_id).into_profile_pic()
-        })
-        .unwrap_or_else(|| String::from("default-prof-pic"));
-
     Template::render(
         "profile",
         Context {
             name: &user.name,
-            picture,
-            bio: "No bio",
+            picture: &user.get_profile_pic(&conn),
+            bio: &user.bio,
             equipped,
             inventory,
+            background: &user.get_background_style(&conn),
         },
     )
 }
@@ -229,6 +240,7 @@ pub struct UserCache<'a> {
 pub struct CachedUserData {
     pub user: User,
     pub prof_pic: String,
+    pub back_style: String,
 }
 
 impl<'a> UserCache<'a> {
@@ -243,7 +255,15 @@ impl<'a> UserCache<'a> {
         if !self.cached.contains_key(&id) {
             let user = User::lookup(self.conn, id).unwrap();
             let prof_pic = user.get_profile_pic(self.conn);
-            self.cached.insert(id, CachedUserData { user, prof_pic });
+            let back_style = user.get_background_style(self.conn);
+            self.cached.insert(
+                id,
+                CachedUserData {
+                    user,
+                    prof_pic,
+                    back_style,
+                },
+            );
         }
         self.cached.get(&id).unwrap()
     }

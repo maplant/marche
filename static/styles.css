@@ -117,11 +117,21 @@ div.reward {
     border-radius: 5px;
 }
 
+.item-ultra-rare {
+    display: inline-block;
+    text-align: center;
+    background: #ff674d;
+    color: #8a1824;
+    padding: 10px;
+    font-size: 11pt;
+    border: 1px solid #8a1824;
+    border-radius: 5px;
+}
+
 .item-legendary {
     display: inline-block;
     text-align: center;
     background: #f7ce5b;
-    //    color: #af9b46;
     color: ##776a31;
     padding: 10px;
     font-size: 11pt;

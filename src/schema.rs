@@ -7,6 +7,7 @@ table! {
         rank_id -> Integer,
         last_reward -> Timestamp,
         equip_slot_prof_pic -> Nullable<Integer>,
+        equip_slot_background -> Nullable<Integer>,
     }
 }
 
@@ -62,5 +63,6 @@ table! {
         id -> Integer,
         owner_id -> Integer,
         item_id -> Integer,
+        pattern -> SmallInt,
     }
 }

@@ -5,7 +5,8 @@ CREATE TABLE users (
   bio TEXT NOT NULL, 
   rank_id INTEGER,
   last_reward TIMESTAMP NOT NULL,
-  equip_slot_prof_pic INTEGER
+  equip_slot_prof_pic INTEGER,
+  equip_slot_background INTEGER
 );
 
 CREATE TABLE login_sessions (
@@ -55,6 +56,7 @@ CREATE TABLE items (
 CREATE TABLE drops (
   id SERIAL PRIMARY KEY,
   owner_id INT NOT NULL,
-  item_id INT NOT NULL
+  item_id INT NOT NULL,
+  pattern SMALLINT NOT NULL 
 );
 
