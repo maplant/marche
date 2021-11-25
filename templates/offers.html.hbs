@@ -1,0 +1,127 @@
+{{> header title=title }}
+    <li>
+    <div class="table">
+      <div class="row">
+        <div class="cell-title"></div>
+        <div class="cell-title"><b>Incoming Trade Offers</b></div>
+        <div class="cell-title"></div>
+        <div class="cell-title"></div>
+      </div>
+      <div class="row">
+        <div class="cell-title">Sender</div>
+        <div class="cell-title">Sender's offer</div>
+        <div class="cell-title"></div>
+        <div class="cell-title">Requested</div>
+      </div>
+    {{#each incoming_offers}}
+      <div class="row">
+        {{#with sender}}
+        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+          <p><a href="/profile/{{id}}">{{name}}</a></p>
+          {{> profile-pic }}
+        </div>
+        {{/with}}
+        <div class="cell">
+          {{#each sender_items}}
+            <div class="item-{{rarity}}">
+              <p><img src="/static/{{thumbnail}}.png"></p>
+              {{name}}
+            </div>
+          {{/each}}
+        </div>
+        {{#with ../user}}
+          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+            <p><a href="/profile/{{id}}">{{name}}</a></p>
+            {{> profile-pic }}
+          </div>
+        {{/with}}
+        <div class="cell">
+          {{#each receiver_items}}
+            <div class="item-{{rarity}}">
+              <p><img src="/static/{{thumbnail}}.png"></p>
+              {{name}}
+            </div>
+          {{/each}}
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell-title">
+        </div>
+        <div class="cell-title">
+          <div style="display: table-row">
+            <div style="display: table-cell; padding: 10px">
+              <form action="/accept/{{id}}">
+              <input type="submit" value="Accept">
+              </form>
+            </div>
+            <div style="display: table-cell; padding: 10px">
+              <form action="/decline/{{id}}">
+              <input type="submit" value="Decline">
+              </form>
+            </div>
+          </div>
+        </div>
+        <div class="cell-title"></div>
+        <div class="cell-title"></div>
+      </div>
+    {{/each}}
+    <div class="row">
+      <div class="cell-title"></div>
+      <div class="cell-title"><b>Outgoing Trade Offers</b></div>
+      <div class="cell-title"></div>
+      <div class="cell-title"></div>
+    </div>
+    <div class="row">
+      <div class="cell-title"></div>
+      <div class="cell-title">Your offer</div>
+      <div class="cell-title"></div>
+      <div class="cell-title">For</div>
+    </div>
+    {{#each outgoing_offers}}
+      <div class="row">
+        {{#with ../user}}
+          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+            <p><a href="/profile/{{id}}">{{name}}</a></p>
+            {{> profile-pic }}
+          </div>
+        {{/with}}
+        <div class="cell">
+          {{#each sender_items}}
+            <div class="item-{{rarity}}">
+              <p><img src="/static/{{thumbnail}}.png"></p>
+              {{name}}
+            </div>
+          {{/each}}
+        </div>
+        {{#with receiver}}
+        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+          <p><a href="/profile/{{id}}">{{name}}</a></p>
+          {{> profile-pic }}
+        </div>
+        {{/with}}
+        <div class="cell">
+          {{#each receiver_items}}
+            <div class="item-{{rarity}}">
+              <p><img src="/static/{{thumbnail}}.png"></p>
+              {{name}}
+            </div>
+          {{/each}}
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell-title">
+        </div>
+        <div class="cell-title">
+          <div style="display: table-cell; padding: 10px">
+            <form action="/decline/{{id}}">
+            <input type="submit" value="Decline">
+            </form>
+          </div>
+        </div>
+        <div class="cell-title"></div>
+        <div class="cell-title"></div>
+      </div>
+    {{/each}}
+    </li>
+  </ul>
+</body>

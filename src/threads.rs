@@ -1,7 +1,7 @@
 //! Display threads
 use crate::items::{Item, ItemDrop};
 use crate::schema::{replies, threads};
-use crate::users::{User, UserCache};
+use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use rocket::form::Form;
@@ -99,10 +99,7 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
 
     #[derive(Serialize)]
     struct Post {
-        author_name: String,
-        author_id: i32,
-        profile_pic: String,
-        background: String,
+        author: UserProfile,
         body: String,
         date: String,
         reward: Option<Reward>,
@@ -124,12 +121,8 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
         .into_iter()
         .map(|t| {
             post_title = t.title;
-            let cached_user = user_cache.get(t.author_id);
             Post {
-                author_id: t.author_id,
-                author_name: cached_user.user.name.clone(),
-                profile_pic: cached_user.prof_pic.clone(),
-                background: cached_user.back_style.clone(),
+                author: user_cache.get(t.author_id).clone(),
                 body: t.body,
                 date: t.post_date.format(DATE_FMT).to_string(),
                 reward: t.reward.map(|r| {
@@ -149,23 +142,17 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
             .load::<Reply>(&conn)
             .unwrap()
             .into_iter()
-            .map(|t| {
-                let cached_user = user_cache.get(t.author_id);
-                Post {
-                    author_id: t.author_id,
-                    author_name: cached_user.user.name.clone(),
-                    profile_pic: cached_user.prof_pic.clone(),
-                    background: cached_user.back_style.clone(),
-                    body: t.body,
-                    date: t.post_date.format(DATE_FMT).to_string(),
-                    reward: t.reward.map(|r| {
-                        let item = Item::fetch(&conn, r);
-                        Reward {
-                            name: item.name,
-                            rarity: item.rarity.to_string(),
-                        }
-                    }),
-                }
+            .map(|t| Post {
+                author: user_cache.get(t.author_id).clone(),
+                body: t.body,
+                date: t.post_date.format(DATE_FMT).to_string(),
+                reward: t.reward.map(|r| {
+                    let item = Item::fetch(&conn, r);
+                    Reward {
+                        name: item.name,
+                        rarity: item.rarity.to_string(),
+                    }
+                }),
             })
             .collect::<Vec<_>>(),
     );

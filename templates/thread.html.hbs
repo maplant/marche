@@ -1,29 +1,21 @@
-<head>
-  <title>Home</title>
-  <link href="/static/styles.css" rel="stylesheet">
-</head>
-<body>
-  <form action="/reply/{{id}}" method="post">
-  <ul>
-    <li>
-      <div class="nav">
-        home | stuff | prison | tags
-      </div>
-    </li>
+{{> header title=title }}
+    <form action="/reply/{{id}}" method="post">
     <li>
     <div class="table">
       <div class="row">
         <div class="cell-title"></div>
-        <div class="cell-title" style="width: 70%;"><b>{{title}}</b></div>
+        <div class="cell-title" style="width: 50%;"><b>{{title}}</b></div>
         <div class="cell-title" style="width: 15%;">date</div>
       </div>
     {{#each posts}}
       <div class="row">
+        {{#with author}}
         <div class="cell-title" style="{{background}} text-align: center">
-          <p><a href="/profile/{{author_id}}">{{author_name}}</a></p>
-          <img src="/static/{{profile_pic}}.png">
+          <p><a href="/profile/{{id}}">{{name}}</a></p>
+          {{> profile-pic }}
         </div>
-        <div class="cell" style="word-break: break-all; position: relative;">
+        {{/with}}
+        <div class="cell" style="word-wrap: wrap-word; position: relative;">
             <div>
               {{body}}
             </div>
@@ -58,6 +50,6 @@
       </div>
     </div>
     </li>
+    </form>
   </ul>
-  </form>
 </body>

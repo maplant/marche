@@ -66,3 +66,13 @@ table! {
         pattern -> SmallInt,
     }
 }
+
+table! {
+    trade_requests(id) {
+        id -> Integer,
+        sender_id -> Integer,
+        sender_items -> Array<Integer>,
+        receiver_id -> Integer,
+        receiver_items -> Array<Integer>,
+    }
+}

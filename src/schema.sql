@@ -60,3 +60,10 @@ CREATE TABLE drops (
   pattern SMALLINT NOT NULL 
 );
 
+CREATE TABLE trade_requests (
+  id SERIAL PRIMARY KEY,
+  sender_id INTEGER NOT NULL,
+  sender_items INTEGER[] NOT NULL,
+  receiver_id INTEGER NOT NULL,
+  receiver_items INTEGER[] NOT NULL
+);

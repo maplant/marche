@@ -1,14 +1,4 @@
-<head>
-  <title>Item</title>
-  <link href="/static/styles.css" rel="stylesheet">
-</head>
-<body>
-  <ul>
-    <li>
-      <div class="nav">
-        home | stuff | prison | tags
-      </div>
-    </li>
+{{> header title="Item"}}
     <li>
       <div class="table">
         <div class="row">
@@ -37,11 +27,10 @@
         </div>
         <div class="row">
           <div class="cell-title">
-            <button>Back</button>
           </div>
           <div class="cell-title">
             <form action="/equip/{{id}}">
-            <input type="submit" value="Equip" />
+            <input type="submit" value="Equip" {{#unless can_equip }} disabled {{/unless}}/>
             </form>
           </div>
         </div>

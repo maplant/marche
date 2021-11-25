@@ -1,0 +1,62 @@
+{{> header title="Trade offer"}}
+    <li>
+      <form action="/offer/{{receiver.id}}" method="post">
+      <div class="table">
+        <div class="row">
+          <div class="cell-title"></div>
+          <div class="cell-title" style="width: 65%;"><b>{{sender.name}} offers:</b></div>
+        </div>
+        <div class="row">
+          {{#with sender}}
+          <div class="cell-title" style="{{background}} text-align:center; vertical-align:top">
+            <p><a href="/profile/{{id}}">{{name}}</a></p>
+            {{> profile-pic }}
+          </div>
+          {{/with}}
+          <div class="cell">
+            {{#each sender_inventory}}
+              <label class="item-{{rarity}}" for="{{id}}">
+                <p><img src="/static/{{thumbnail}}.png"></p>
+                <input type="checkbox" name="{{id}}" id="{{id}}" value="{{../sender.id}}" />
+                {{name}}
+              </label>
+            {{/each}}
+          </div>
+        </div>
+        <div class="row">
+          <div class="cell-title"></div>
+          <div class="cell-title">
+            <b>
+              in exchange for {{receiver.name}}'s:
+            </b>
+          </div>
+        </div>
+        <div class="row">
+          {{#with receiver}}
+          <div class="cell-title" style="{{background}} text-align:center; vertical-align:top">
+            <p><a href="/profile/{{id}}">{{name}}</a></p>
+            {{> profile-pic }}
+          </div>
+          {{/with}}
+          <div class="cell">
+            {{#each receiver_inventory}}
+              <label class="item-{{rarity}}" for="{{id}}">
+                <p><img src="/static/{{thumbnail}}.png"></p>
+                <input type="checkbox" name="{{id}}" id="{{id}}" value="{{../receiver.id}}" />
+                {{name}}
+              </label>
+            {{/each}}
+          </div>
+        </div>
+        <div class="row">
+          <div class="cell-title">
+          </div>
+          <div class="cell-title">
+            <input type="submit" value="Submit trade offer" />
+          </div>
+        </div>
+      </div>
+      </form>
+    </li>
+  </ul>
+</body>

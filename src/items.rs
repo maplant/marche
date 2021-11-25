@@ -1,5 +1,5 @@
-use crate::schema::drops;
-use crate::users::User;
+use crate::schema::{drops, trade_requests};
+use crate::users::{User, UserCache, UserProfile};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::serialize::Output;
@@ -7,8 +7,12 @@ use diesel::sql_types::Jsonb;
 use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
 use rand::prelude::{thread_rng, IteratorRandom};
+use rocket::form::Form;
+use rocket::response::Redirect;
+use rocket::uri;
 use rocket_dyn_templates::Template;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Rarity of an item.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, DbEnum)]
@@ -114,6 +118,26 @@ pub struct Item {
     /// Type of the item
     #[diesel(sql_type = "ItemType")]
     pub item_type: ItemType,
+}
+
+// TODO: Take this struct and extract it somewhere
+#[derive(Serialize)]
+pub struct ItemThumbnail {
+    pub id: i32,
+    pub name: String,
+    pub rarity: String,
+    pub thumbnail: String,
+}
+
+impl From<Item> for ItemThumbnail {
+    fn from(item: Item) -> Self {
+        Self {
+            id: item.id,
+            name: item.name.clone(),
+            rarity: item.rarity.to_string(),
+            thumbnail: item.thumbnail.clone(),
+        }
+    }
 }
 
 impl Item {
@@ -243,7 +267,7 @@ impl ItemDrop {
 
             // Check if the user has had a drop since this time
             if item.is_some() {
-                if User::lookup(conn, user.id).unwrap().last_reward != user.last_reward {
+                if User::fetch(conn, user.id).unwrap().last_reward != user.last_reward {
                     // Rollback the transaction
                     Err(diesel::result::Error::RollbackTransaction)
                 } else {
@@ -262,7 +286,7 @@ impl ItemDrop {
 }
 
 #[rocket::get("/item/<drop_id>")]
-pub fn item(_user: User, drop_id: i32) -> Template {
+pub fn item(user: User, drop_id: i32) -> Template {
     #[derive(Serialize)]
     struct Context {
         id: i32,
@@ -271,6 +295,7 @@ pub fn item(_user: User, drop_id: i32) -> Template {
         pattern: u16,
         rarity: String,
         thumbnail: String,
+        can_equip: bool,
     }
 
     let conn = crate::establish_db_connection().unwrap();
@@ -287,21 +312,280 @@ pub fn item(_user: User, drop_id: i32) -> Template {
             pattern: drop.pattern as u16,
             rarity: item.rarity.to_string(),
             thumbnail: item.thumbnail,
+            can_equip: user.id == drop.owner_id,
         },
     )
 }
 
 /// A trade between two users.
 #[derive(Queryable)]
-pub struct Trade {
+pub struct TradeRequest {
     /// Id of the trade.
     pub id: i32,
     /// UserId of the sender.
-    pub sender: i32,
+    pub sender_id: i32,
     /// Items offered for trade (expressed as a vec of OwnedItemIds).
     pub sender_items: Vec<i32>,
     /// UserId of the receiver.
-    pub receiver: i32,
+    pub receiver_id: i32,
     /// Items requested for trade
     pub receiver_items: Vec<i32>,
+}
+
+impl TradeRequest {
+    pub fn fetch(conn: &PgConnection, req_id: i32) -> Self {
+        use crate::schema::trade_requests::dsl::*;
+
+        trade_requests
+            .filter(id.eq(req_id))
+            .load::<Self>(conn)
+            .ok()
+            .and_then(|v| v.into_iter().next())
+            .unwrap()
+    }
+
+    pub fn accept(&self, conn: &PgConnection) {
+        use crate::schema::drops::dsl::*;
+
+        let res = conn.transaction(|| -> Result<(), diesel::result::Error> {
+            let sender = User::fetch(conn, self.sender_id).unwrap();
+            let receiver = User::fetch(conn, self.receiver_id).unwrap();
+
+            for sender_item in &self.sender_items {
+                sender.unequip(
+                    conn,
+                    diesel::update(drops.find(sender_item))
+                        .set(owner_id.eq(self.receiver_id))
+                        .filter(owner_id.eq(self.sender_id))
+                        .get_result::<ItemDrop>(conn)
+                        .map_err(|_| diesel::result::Error::RollbackTransaction)?,
+                );
+            }
+            for receiver_item in &self.receiver_items {
+                receiver.unequip(
+                    conn,
+                    diesel::update(drops.find(receiver_item))
+                        .set(owner_id.eq(self.sender_id))
+                        .filter(owner_id.eq(self.receiver_id))
+                        .get_result::<ItemDrop>(conn)
+                        .map_err(|_| diesel::result::Error::RollbackTransaction)?,
+                );
+            }
+            // Check if any item no longer belongs to their respective owner
+            for sender_item in &self.sender_items {
+                if drops
+                    .filter(id.eq(sender_item))
+                    .load::<ItemDrop>(conn)
+                    .unwrap_or_else(|_| Vec::new())
+                    .into_iter()
+                    .next()
+                    .ok_or(diesel::result::Error::RollbackTransaction)?
+                    .owner_id
+                    != self.receiver_id
+                {
+                    return Err(diesel::result::Error::RollbackTransaction);
+                }
+            }
+            for receiver_item in &self.receiver_items {
+                if drops
+                    .filter(id.eq(receiver_item))
+                    .load::<ItemDrop>(conn)
+                    .unwrap_or_else(|_| Vec::new())
+                    .into_iter()
+                    .next()
+                    .ok_or(diesel::result::Error::RollbackTransaction)?
+                    .owner_id
+                    != self.sender_id
+                {
+                    return Err(diesel::result::Error::RollbackTransaction);
+                }
+            }
+            // delete the transaction
+            self.decline(&conn);
+            Ok(())
+        });
+
+        // Decline the request if we got an error
+        if res.is_err() {
+            self.decline(&conn);
+        }
+    }
+
+    pub fn decline(&self, conn: &PgConnection) {
+        use crate::schema::trade_requests::dsl::*;
+
+        diesel::delete(trade_requests.filter(id.eq(self.id)))
+            .execute(conn)
+            .unwrap();
+    }
+}
+
+#[derive(Insertable)]
+#[table_name = "trade_requests"]
+pub struct NewTradeRequest {
+    sender_id: i32,
+    sender_items: Vec<i32>,
+    receiver_id: i32,
+    receiver_items: Vec<i32>,
+}
+
+#[rocket::get("/offer/<receiver_id>")]
+pub fn offer(sender: User, receiver_id: i32) -> Template {
+    #[derive(Serialize)]
+    struct Context {
+        sender: UserProfile,
+        sender_inventory: Vec<ItemThumbnail>,
+        receiver: UserProfile,
+        receiver_inventory: Vec<ItemThumbnail>,
+    }
+
+    let conn = crate::establish_db_connection().unwrap();
+    let receiver = User::fetch(&conn, receiver_id).unwrap();
+
+    Template::render(
+        "offer",
+        Context {
+            sender: sender.profile(&conn),
+            sender_inventory: sender.inventory(&conn),
+            receiver: receiver.profile(&conn),
+            receiver_inventory: receiver.inventory(&conn),
+        },
+    )
+}
+
+#[rocket::post("/offer/<receiver_id>", data = "<trade>")]
+pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32>>) -> Redirect {
+    let mut sender_items = Vec::new();
+    let mut receiver_items = Vec::new();
+
+    let conn = crate::establish_db_connection().unwrap();
+
+    for (&item, &trader) in trade.iter() {
+        let drop = ItemDrop::fetch(&conn, item);
+        if trader != drop.owner_id {
+            return Redirect::to(uri!(crate::threads::index()));
+        }
+        if trader == sender.id {
+            sender_items.push(drop.id);
+        } else {
+            receiver_items.push(drop.id);
+        }
+    }
+
+    let _: Result<TradeRequest, _> = diesel::insert_into(trade_requests::table)
+        .values(&NewTradeRequest {
+            sender_id: sender.id,
+            sender_items,
+            receiver_id: receiver_id,
+            receiver_items,
+        })
+        .get_result(&conn);
+
+    Redirect::to(uri!(offers()))
+}
+
+#[rocket::get("/decline/<trade_id>")]
+pub fn decline(_user: User, trade_id: i32) -> Redirect {
+    let conn = crate::establish_db_connection().unwrap();
+    TradeRequest::fetch(&conn, trade_id).decline(&conn);
+    Redirect::to(uri!(offers()))
+}
+
+#[rocket::get("/accept/<trade_id>")]
+pub fn accept(_user: User, trade_id: i32) -> Redirect {
+    let conn = crate::establish_db_connection().unwrap();
+    TradeRequest::fetch(&conn, trade_id).accept(&conn);
+    Redirect::to(uri!(offers()))
+}
+
+#[rocket::get("/offers")]
+pub fn offers(user: User) -> Template {
+    use crate::schema::trade_requests::dsl::*;
+
+    #[derive(Serialize)]
+    struct InOffer {
+        id: i32,
+        sender: UserProfile,
+        sender_items: Vec<ItemThumbnail>,
+        receiver_items: Vec<ItemThumbnail>,
+    }
+
+    #[derive(Serialize)]
+    struct OutOffer {
+        id: i32,
+        sender_items: Vec<ItemThumbnail>,
+        receiver: UserProfile,
+        receiver_items: Vec<ItemThumbnail>,
+    }
+
+    #[derive(Serialize)]
+    struct Context {
+        user: UserProfile,
+        incoming_offers: Vec<InOffer>,
+        outgoing_offers: Vec<OutOffer>,
+    }
+
+    let conn = crate::establish_db_connection().unwrap();
+    let mut user_cache = UserCache::new(&conn);
+    let incoming_offers: Vec<_> = trade_requests
+        .filter(receiver_id.eq(user.id))
+        .load::<TradeRequest>(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|trade| -> InOffer {
+            InOffer {
+                id: trade.id,
+                sender: user_cache.get(trade.sender_id).clone(),
+                sender_items: trade
+                    .sender_items
+                    .into_iter()
+                    .map(|i| {
+                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
+                    })
+                    .collect(),
+                receiver_items: trade
+                    .receiver_items
+                    .into_iter()
+                    .map(|i| {
+                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    let outgoing_offers: Vec<_> = trade_requests
+        .filter(sender_id.eq(user.id))
+        .load::<TradeRequest>(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|trade| -> OutOffer {
+            OutOffer {
+                id: trade.id,
+                receiver: user_cache.get(trade.receiver_id).clone(),
+                sender_items: trade
+                    .sender_items
+                    .into_iter()
+                    .map(|i| {
+                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
+                    })
+                    .collect(),
+                receiver_items: trade
+                    .receiver_items
+                    .into_iter()
+                    .map(|i| {
+                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    Template::render(
+        "offers",
+        Context {
+            user: user.profile(&conn),
+            incoming_offers,
+            outgoing_offers,
+        },
+    )
 }

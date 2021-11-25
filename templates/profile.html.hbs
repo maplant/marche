@@ -1,14 +1,4 @@
-<head>
-  <title>Home</title>
-  <link href="/static/styles.css" rel="stylesheet">
-</head>
-<body>
-  <ul>
-    <li>
-      <div class="nav">
-        home | stuff | prison | tags
-      </div>
-    </li>
+{{> header title="Profile" }}
     <li>
       <div class="table">
         <div class="row">
@@ -17,7 +7,7 @@
         </div>
         <div class="row">
           <div class="cell-title" style="{{background}} text-align: center">
-            <img src="/static/{{picture}}.png">
+            {{> profile-pic }}
           </div>
           <div class="cell" style="vertical-align: top; padding: 15px">
             {{bio}}
@@ -49,6 +39,16 @@
             {{/each}}
           </div>
         </div>
+        {{#if can_trade}}
+          <div class="row">
+          <div class="cell-title"></div>
+          <div class="cell-title">
+            <form action="/offer/{{id}}">
+            <input type="submit" value="Make trade offer" />
+            </form>
+          </div>
+          </div>
+        {{/if}}
       </div>
     </li>
   </ul>

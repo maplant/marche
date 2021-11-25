@@ -1,4 +1,4 @@
-use crate::items::{Item, ItemDrop, ItemType};
+use crate::items::{Item, ItemDrop, ItemThumbnail, ItemType};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use libpasta::verify_password;
@@ -61,6 +61,28 @@ impl User {
         }
     }
 
+    /// Un-Equips an item
+    pub fn unequip(&self, conn: &PgConnection, item_drop: ItemDrop) {
+        use crate::schema::users::dsl::*;
+
+        let item_desc = Item::fetch(conn, item_drop.item_id);
+        match item_desc.item_type {
+            ItemType::ProfilePic { .. } => {
+                let _ = diesel::update(users.find(self.id))
+                    .filter(equip_slot_prof_pic.eq(Some(item_drop.id)))
+                    .set(equip_slot_prof_pic.eq(Option::<i32>::None))
+                    .get_result::<Self>(conn);
+            }
+            ItemType::ProfileBackground { .. } => {
+                let _ = diesel::update(users.find(self.id))
+                    .filter(equip_slot_background.eq(Some(item_drop.id)))
+                    .set(equip_slot_background.eq(Option::<i32>::None))
+                    .get_result::<Self>(conn);
+            }
+            _ => (),
+        }
+    }
+
     /// Returns a vec of equipped items.
     pub fn equipped(&self, conn: &PgConnection) -> Vec<ItemDrop> {
         let mut items = Vec::new();
@@ -76,14 +98,38 @@ impl User {
         items
     }
 
-    /// Returns the profile picture of the user
-    pub fn get_profile_pic(&self, conn: &PgConnection) -> String {
-        self.equip_slot_prof_pic
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_profile_pic(&conn))
-            .unwrap_or_else(|| String::from("default-prof-pic"))
+    pub fn inventory(&self, conn: &PgConnection) -> Vec<ItemThumbnail> {
+        use crate::schema::drops;
+
+        let mut inventory = drops::table
+            .filter(drops::dsl::owner_id.eq(self.id))
+            .load::<ItemDrop>(conn)
+            .ok()
+            .unwrap_or_else(Vec::new)
+            .into_iter()
+            .map(|drop| (drop.id, Item::fetch(conn, drop.item_id)))
+            .collect::<Vec<_>>();
+
+        inventory.sort_by(|a, b| a.1.rarity.cmp(&b.1.rarity).reverse());
+
+        inventory
+            .into_iter()
+            .map(|(drop_id, item)| ItemThumbnail {
+                id: drop_id,
+                name: item.name,
+                rarity: item.rarity.to_string(),
+                thumbnail: item.thumbnail,
+            })
+            .collect()
     }
 
-    pub fn get_background_style(&self, conn: &PgConnection) -> String {
+    /// Returns the profile picture of the user
+    fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
+        self.equip_slot_prof_pic
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_profile_pic(&conn))
+    }
+
+    fn get_background_style(&self, conn: &PgConnection) -> String {
         self.equip_slot_background
             .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_background_style(&conn))
             .unwrap_or_else(|| String::from(""))
@@ -99,7 +145,16 @@ impl User {
             .map_err(|_| ())
     }
 
-    pub fn lookup(conn: &PgConnection, user_id: i32) -> Result<Self, ()> {
+    pub fn profile(&self, conn: &PgConnection) -> UserProfile {
+        UserProfile {
+            id: self.id,
+            name: self.name.clone(),
+            picture: self.get_profile_pic(conn),
+            background: self.get_background_style(conn),
+        }
+    }
+
+    pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, ()> {
         use crate::schema::users::dsl::*;
         users
             .filter(id.eq(user_id))
@@ -118,6 +173,15 @@ impl User {
             .and_then(|v| v.into_iter().next())
             .ok_or(())
     }
+}
+
+/// Displayable user profile
+#[derive(Clone, Serialize)]
+pub struct UserProfile {
+    pub id: i32,
+    pub name: String,
+    pub picture: Option<String>,
+    pub background: String,
 }
 
 /// Name of the cookie we use to store the session Id.
@@ -153,30 +217,23 @@ pub fn curr_profile(user: User) -> Redirect {
 }
 
 #[rocket::get("/profile/<id>")]
-pub fn profile(_user: User, id: i32) -> Template {
+pub fn profile(curr_user: User, id: i32) -> Template {
     use crate::schema::drops;
-
-    // TODO: Take this struct and extract it somewhere
-    #[derive(Serialize)]
-    struct ItemThumb {
-        id: i32,
-        name: String,
-        rarity: String,
-        thumbnail: String,
-    }
 
     #[derive(Serialize)]
     struct Context<'n, 'p, 'b, 'bg> {
+        id: i32,
         name: &'n str,
-        picture: &'p str,
+        picture: Option<&'p str>,
         bio: &'b str,
-        equipped: Vec<ItemThumb>,
-        inventory: Vec<ItemThumb>,
+        equipped: Vec<ItemThumbnail>,
+        inventory: Vec<ItemThumbnail>,
         background: &'bg str,
+        can_trade: bool,
     }
 
     let conn = crate::establish_db_connection().unwrap();
-    let user = User::lookup(&conn, id).unwrap();
+    let user = User::fetch(&conn, id).unwrap();
 
     let mut is_equipped = HashSet::new();
 
@@ -187,7 +244,7 @@ pub fn profile(_user: User, id: i32) -> Template {
             // TODO: extract this to function.
             is_equipped.insert(drop.id);
             let item = Item::fetch(&conn, drop.item_id);
-            ItemThumb {
+            ItemThumbnail {
                 id: drop.id,
                 name: item.name,
                 rarity: item.rarity.to_string(),
@@ -211,7 +268,7 @@ pub fn profile(_user: User, id: i32) -> Template {
 
     let inventory = inventory
         .into_iter()
-        .map(|(drop_id, item)| ItemThumb {
+        .map(|(drop_id, item)| ItemThumbnail {
             id: drop_id,
             name: item.name,
             rarity: item.rarity.to_string(),
@@ -222,25 +279,21 @@ pub fn profile(_user: User, id: i32) -> Template {
     Template::render(
         "profile",
         Context {
+            id,
             name: &user.name,
-            picture: &user.get_profile_pic(&conn),
+            picture: user.get_profile_pic(&conn).as_deref(),
             bio: &user.bio,
             equipped,
             inventory,
             background: &user.get_background_style(&conn),
+            can_trade: user.id != curr_user.id,
         },
     )
 }
 
 pub struct UserCache<'a> {
     conn: &'a PgConnection,
-    cached: HashMap<i32, CachedUserData>,
-}
-
-pub struct CachedUserData {
-    pub user: User,
-    pub prof_pic: String,
-    pub back_style: String,
+    cached: HashMap<i32, UserProfile>,
 }
 
 impl<'a> UserCache<'a> {
@@ -251,25 +304,18 @@ impl<'a> UserCache<'a> {
         }
     }
 
-    pub fn get(&mut self, id: i32) -> &CachedUserData {
+    pub fn get(&mut self, id: i32) -> &UserProfile {
         if !self.cached.contains_key(&id) {
-            let user = User::lookup(self.conn, id).unwrap();
-            let prof_pic = user.get_profile_pic(self.conn);
-            let back_style = user.get_background_style(self.conn);
-            self.cached.insert(
-                id,
-                CachedUserData {
-                    user,
-                    prof_pic,
-                    back_style,
-                },
-            );
+            let user = User::fetch(self.conn, id).unwrap();
+            self.cached.insert(id, user.profile(self.conn));
         }
         self.cached.get(&id).unwrap()
     }
 }
 
 /// User login sessions
+// TODO(map): Add the IP address used to create the session for added
+// security.
 #[derive(Queryable)]
 pub struct LoginSession {
     /// Id of the login session
@@ -309,6 +355,7 @@ impl LoginSession {
             .ok()
             .and_then(|v| v.into_iter().next())
             .ok_or(())?;
+        // The session is automatically invalid if the session is longer than a month old.
         if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
             Err(())
         } else {
