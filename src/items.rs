@@ -476,7 +476,7 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
         .values(&NewTradeRequest {
             sender_id: sender.id,
             sender_items,
-            receiver_id: receiver_id,
+            receiver_id,
             receiver_items,
         })
         .get_result(&conn);
@@ -485,16 +485,22 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
 }
 
 #[rocket::get("/decline/<trade_id>")]
-pub fn decline(_user: User, trade_id: i32) -> Redirect {
+pub fn decline(user: User, trade_id: i32) -> Redirect {
     let conn = crate::establish_db_connection().unwrap();
-    TradeRequest::fetch(&conn, trade_id).decline(&conn);
+    let req = TradeRequest::fetch(&conn, trade_id);
+    if req.sender_id == user.id || req.receiver_id == user.id {
+        req.decline(&conn);
+    }
     Redirect::to(uri!(offers()))
 }
 
 #[rocket::get("/accept/<trade_id>")]
-pub fn accept(_user: User, trade_id: i32) -> Redirect {
+pub fn accept(user: User, trade_id: i32) -> Redirect {
     let conn = crate::establish_db_connection().unwrap();
-    TradeRequest::fetch(&conn, trade_id).accept(&conn);
+    let req = TradeRequest::fetch(&conn, trade_id);
+    if req.sender_id == user.id || req.receiver_id == user.id {
+        req.accept(&conn);
+    }
     Redirect::to(uri!(offers()))
 }
 
