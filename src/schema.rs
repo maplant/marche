@@ -23,12 +23,8 @@ table! {
 table! {
     threads(id) {
         id -> Integer,
-        author_id -> Integer,
-        post_date -> Timestamp,
         last_post -> Timestamp,
         title -> Text,
-        body -> Text,
-        reward -> Nullable<Integer>,
     }
 }
 
@@ -51,7 +47,6 @@ table! {
         id -> Integer,
         name -> Text,
         description -> Text,
-        thumbnail -> Text,
         available -> Bool,
         rarity -> RarityMapping,
         item_type -> Jsonb,

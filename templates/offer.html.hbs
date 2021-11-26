@@ -16,7 +16,7 @@
           <div class="cell">
             {{#each sender_inventory}}
               <label class="item-{{rarity}}" for="{{id}}">
-                <p><img src="/static/{{thumbnail}}.png"></p>
+                <p>{{{thumbnail}}}</p>
                 <input type="checkbox" name="{{id}}" id="{{id}}" value="{{../sender.id}}" />
                 {{name}}
               </label>
@@ -41,7 +41,7 @@
           <div class="cell">
             {{#each receiver_inventory}}
               <label class="item-{{rarity}}" for="{{id}}">
-                <p><img src="/static/{{thumbnail}}.png"></p>
+                <p>{{{thumbnail}}}</p>
                 <input type="checkbox" name="{{id}}" id="{{id}}" value="{{../receiver.id}}" />
                 {{name}}
               </label>

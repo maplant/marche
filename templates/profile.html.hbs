@@ -20,7 +20,7 @@
           <div class="cell">
             {{#each equipped}}
               <a href="/item/{{id}}" class="item-{{rarity}}">
-                <p><img src="/static/{{thumbnail}}.png"></p>
+                <p>{{{thumbnail}}}</p>
                 {{name}}
               </a>
             {{/each}}
@@ -33,7 +33,7 @@
           <div class="cell">
             {{#each inventory}}
               <a href="/item/{{id}}" class="item-{{rarity}}">
-                <p><img src="/static/{{thumbnail}}.png"></p>
+                <p>{{{thumbnail}}}</p>
                 {{name}}
               </a>
             {{/each}}

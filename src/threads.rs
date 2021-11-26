@@ -14,30 +14,18 @@ use std::collections::HashMap;
 #[derive(Queryable)]
 pub struct Thread {
     /// Id of the thread
-    id: i32,
-    /// Id of the author
-    author_id: i32,
-    /// Date of posting
-    post_date: NaiveDateTime,
+    pub id: i32,
     /// Date of the latest post
-    last_post: NaiveDateTime,
+    pub last_post: NaiveDateTime,
     /// Title of the thread
-    title: String,
-    /// Body of the thread, rendered from markup
-    body: String,
-    /// Any item that was rewarded for this post
-    reward: Option<i32>,
+    pub title: String,
 }
 
 #[derive(Insertable)]
 #[table_name = "threads"]
-pub struct NewThread<'t, 'b> {
-    author_id: i32,
-    post_date: NaiveDateTime,
-    last_post: NaiveDateTime,
+pub struct NewThread<'t> {
     title: &'t str,
-    body: &'b str,
-    reward: Option<i32>,
+    last_post: NaiveDateTime,
 }
 
 const THREADS_PER_PAGE: i64 = 10;
@@ -105,57 +93,38 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
         reward: Option<Reward>,
     }
     #[derive(Serialize)]
-    struct Context {
+    struct Context<'t> {
         id: i32,
-        title: String,
+        title: &'t str,
         posts: Vec<Post>,
     }
 
     let conn = crate::establish_db_connection().unwrap();
     let mut user_cache = UserCache::new(&conn);
-    let mut post_title = String::new();
-    let mut posts: Vec<_> = threads
+    let post_title = &threads
         .filter(id.eq(thread_id))
         .load::<Thread>(&conn)
+        .unwrap()[0]
+        .title;
+
+    let posts = replies::dsl::replies
+        .filter(replies::dsl::thread_id.eq(thread_id))
+        .load::<Reply>(&conn)
         .unwrap()
         .into_iter()
-        .map(|t| {
-            post_title = t.title;
-            Post {
-                author: user_cache.get(t.author_id).clone(),
-                body: t.body,
-                date: t.post_date.format(DATE_FMT).to_string(),
-                reward: t.reward.map(|r| {
-                    let item = Item::fetch(&conn, r);
-                    Reward {
-                        name: item.name,
-                        rarity: item.rarity.to_string(),
-                    }
-                }),
-            }
+        .map(|t| Post {
+            author: user_cache.get(t.author_id).clone(),
+            body: t.body,
+            date: t.post_date.format(DATE_FMT).to_string(),
+            reward: t.reward.map(|r| {
+                let item = Item::fetch(&conn, r);
+                Reward {
+                    name: item.name,
+                    rarity: item.rarity.to_string(),
+                }
+            }),
         })
-        .collect();
-
-    posts.extend(
-        replies::dsl::replies
-            .filter(replies::dsl::thread_id.eq(thread_id))
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .map(|t| Post {
-                author: user_cache.get(t.author_id).clone(),
-                body: t.body,
-                date: t.post_date.format(DATE_FMT).to_string(),
-                reward: t.reward.map(|r| {
-                    let item = Item::fetch(&conn, r);
-                    Reward {
-                        name: item.name,
-                        rarity: item.rarity.to_string(),
-                    }
-                }),
-            })
-            .collect::<Vec<_>>(),
-    );
+        .collect::<Vec<_>>();
 
     Template::render(
         "thread",
@@ -180,7 +149,7 @@ pub struct NewThreadReq {
 
 #[rocket::post("/author", data = "<thread>")]
 pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
-    use crate::schema::threads;
+    use crate::schema::{replies, threads};
 
     let conn = match crate::establish_db_connection() {
         Some(conn) => conn,
@@ -190,18 +159,31 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
             )))
         }
     };
+
+    // TODO: Move into transaction so that can't post a thread
+    // without the first reply.
+
     let post_date = Utc::now().naive_utc();
-    let new_thread = NewThread {
-        author_id: user.id,
-        post_date,
-        last_post: post_date,
-        title: &thread.title,
-        body: &thread.body,
-        reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
-    };
-    let _: Result<Thread, _> = diesel::insert_into(threads::table)
-        .values(&new_thread)
+    let body = &thread.body;
+    let thread: Thread = diesel::insert_into(threads::table)
+        .values(&NewThread {
+            last_post: post_date,
+            title: &thread.title,
+        })
+        .get_result(&conn)
+        .unwrap();
+
+    // Make first reply
+    let _: Result<Reply, _> = diesel::insert_into(replies::table)
+        .values(&NewReply {
+            author_id: user.id,
+            thread_id: thread.id,
+            post_date,
+            body,
+            reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+        })
         .get_result(&conn);
+
     Redirect::to("/")
 }
 
@@ -268,6 +250,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         .get_result(&conn);
 
     let _: Result<Thread, _> = diesel::update(threads::table)
+        .filter(threads::dsl::id.eq(thread_id))
         .set(threads::dsl::last_post.eq(post_date))
         .get_result(&conn);
 

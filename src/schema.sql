@@ -18,12 +18,8 @@ CREATE TABLE login_sessions (
 
 CREATE TABLE threads (
   id SERIAL PRIMARY KEY,
-  author_id INT NOT NULL,
-  post_date TIMESTAMP NOT NULL,
   last_post TIMESTAMP NOT NULL,
   title TEXT NOT NULL,
-  body TEXT NOT NULL,
-  reward INT
 );
 
 CREATE TABLE replies (
@@ -47,7 +43,6 @@ CREATE TABLE items (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   description TEXT NOT NULL,
-  thumbnail TEXT NOT NULL,
   available BOOLEAN NOT NULL,
   rarity rarity_enum NOT NULL,
   item_type JSONB NOT NULL

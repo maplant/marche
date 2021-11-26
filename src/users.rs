@@ -107,31 +107,26 @@ impl User {
             .ok()
             .unwrap_or_else(Vec::new)
             .into_iter()
-            .map(|drop| (drop.id, Item::fetch(conn, drop.item_id)))
+            .map(|drop| { let id = drop.item_id; (drop, Item::fetch(conn, id).rarity)})
             .collect::<Vec<_>>();
 
-        inventory.sort_by(|a, b| a.1.rarity.cmp(&b.1.rarity).reverse());
+        inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
 
         inventory
             .into_iter()
-            .map(|(drop_id, item)| ItemThumbnail {
-                id: drop_id,
-                name: item.name,
-                rarity: item.rarity.to_string(),
-                thumbnail: item.thumbnail,
-            })
+            .map(|(drop, _)| drop.thumbnail(conn))
             .collect()
     }
 
     /// Returns the profile picture of the user
     fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
         self.equip_slot_prof_pic
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_profile_pic(&conn))
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).profile_pic(&conn))
     }
 
     fn get_background_style(&self, conn: &PgConnection) -> String {
         self.equip_slot_background
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_background_style(&conn))
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).background_style(&conn))
             .unwrap_or_else(|| String::from("background: #DBD2E0;"))
     }
 
@@ -243,13 +238,7 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         .map(|drop| {
             // TODO: extract this to function.
             is_equipped.insert(drop.id);
-            let item = Item::fetch(&conn, drop.item_id);
-            ItemThumbnail {
-                id: drop.id,
-                name: item.name,
-                rarity: item.rarity.to_string(),
-                thumbnail: item.thumbnail,
-            }
+            drop.thumbnail(&conn)
         })
         .collect::<Vec<_>>();
 
@@ -260,20 +249,16 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         .unwrap_or_else(Vec::new)
         .into_iter()
         .filter_map(|drop| {
-            (!is_equipped.contains(&drop.id)).then(|| (drop.id, Item::fetch(&conn, drop.item_id)))
+            (!is_equipped.contains(&drop.id))
+                .then(|| { let id = drop.item_id; (drop, Item::fetch(&conn, id).rarity) })
         })
         .collect::<Vec<_>>();
 
-    inventory.sort_by(|a, b| a.1.rarity.cmp(&b.1.rarity).reverse());
+    inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
 
     let inventory = inventory
         .into_iter()
-        .map(|(drop_id, item)| ItemThumbnail {
-            id: drop_id,
-            name: item.name,
-            rarity: item.rarity.to_string(),
-            thumbnail: item.thumbnail,
-        })
+        .map(|(drop, _)| drop.thumbnail(&conn))
         .collect::<Vec<_>>();
 
     Template::render(

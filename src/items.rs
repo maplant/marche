@@ -101,7 +101,7 @@ impl FromSql<Jsonb, Pg> for ItemType {
 }
 
 /// An item that can be dropped
-#[derive(Queryable)]
+#[derive(Queryable, Debug)]
 pub struct Item {
     /// Id of the available item
     pub id: i32,
@@ -109,8 +109,6 @@ pub struct Item {
     pub name: String,
     /// Description of the item
     pub description: String,
-    /// Thumbnail of the item when viewed in inventory
-    pub thumbnail: String,
     /// Availability of the item (can the item be dropped?)
     pub available: bool,
     /// Rarity of the item
@@ -118,26 +116,6 @@ pub struct Item {
     /// Type of the item
     #[diesel(sql_type = "ItemType")]
     pub item_type: ItemType,
-}
-
-// TODO: Take this struct and extract it somewhere
-#[derive(Serialize)]
-pub struct ItemThumbnail {
-    pub id: i32,
-    pub name: String,
-    pub rarity: String,
-    pub thumbnail: String,
-}
-
-impl From<Item> for ItemThumbnail {
-    fn from(item: Item) -> Self {
-        Self {
-            id: item.id,
-            name: item.name.clone(),
-            rarity: item.rarity.to_string(),
-            thumbnail: item.thumbnail.clone(),
-        }
-    }
 }
 
 impl Item {
@@ -154,7 +132,7 @@ impl Item {
 }
 
 /// A dropped item associated with a user
-#[derive(Queryable)]
+#[derive(Queryable, Debug)]
 pub struct ItemDrop {
     /// Id of the dropped item
     pub id: i32,
@@ -201,7 +179,37 @@ impl ItemDrop {
             .unwrap()
     }
 
-    pub fn into_profile_pic(&self, conn: &PgConnection) -> String {
+    pub fn thumbnail_html(&self, conn: &PgConnection) -> String {
+        let item = Item::fetch(&conn, self.item_id);
+        match item.item_type {
+            ItemType::Useless => String::from(
+                r#"<div class="fixed-item-thumbnail">?</div>"#,
+            ),
+            ItemType::ProfilePic { filename } => format!(
+                r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
+                filename
+            ),
+            ItemType::ProfileBackground { .. } => {
+                // This is kind of redundant (we fetch Item twice), whatever
+                format!(
+                    r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
+                    self.background_style(conn)
+                )
+            }
+        }
+    }
+
+    pub fn thumbnail(&self, conn: &PgConnection) -> ItemThumbnail {
+        let item = Item::fetch(&conn, self.item_id);
+        ItemThumbnail {
+            id: self.id,
+            name: item.name.clone(),
+            rarity: item.rarity.to_string(),
+            thumbnail: self.thumbnail_html(conn),
+        }
+    }
+
+    pub fn profile_pic(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
             ItemType::ProfilePic { filename } => filename,
@@ -209,7 +217,7 @@ impl ItemDrop {
         }
     }
 
-    pub fn into_background_style(&self, conn: &PgConnection) -> String {
+    pub fn background_style(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
             ItemType::ProfileBackground { colors } => {
@@ -285,6 +293,22 @@ impl ItemDrop {
     }
 }
 
+// TODO: Take this struct and extract it somewhere
+#[derive(Serialize)]
+pub struct ItemThumbnail {
+    pub id: i32,
+    pub name: String,
+    pub rarity: String,
+    pub thumbnail: String,
+}
+
+/*
+impl From<Item> for ItemThumbnail {
+    fn from(item: Item) -> Self {
+    }
+}
+*/
+
 #[rocket::get("/item/<drop_id>")]
 pub fn item(user: User, drop_id: i32) -> Template {
     #[derive(Serialize)]
@@ -311,7 +335,7 @@ pub fn item(user: User, drop_id: i32) -> Template {
             description: item.description,
             pattern: drop.pattern as u16,
             rarity: item.rarity.to_string(),
-            thumbnail: item.thumbnail,
+            thumbnail: drop.thumbnail_html(&conn),
             can_equip: user.id == drop.owner_id,
         },
     )
@@ -545,16 +569,12 @@ pub fn offers(user: User) -> Template {
                 sender_items: trade
                     .sender_items
                     .into_iter()
-                    .map(|i| {
-                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
-                    })
+                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
                     .collect(),
                 receiver_items: trade
                     .receiver_items
                     .into_iter()
-                    .map(|i| {
-                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
-                    })
+                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
                     .collect(),
             }
         })
@@ -571,16 +591,12 @@ pub fn offers(user: User) -> Template {
                 sender_items: trade
                     .sender_items
                     .into_iter()
-                    .map(|i| {
-                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
-                    })
+                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
                     .collect(),
                 receiver_items: trade
                     .receiver_items
                     .into_iter()
-                    .map(|i| {
-                        ItemThumbnail::from(Item::fetch(&conn, ItemDrop::fetch(&conn, i).item_id))
-                    })
+                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
                     .collect(),
             }
         })
