@@ -1,35 +1,38 @@
 {{> header title=title }}
+    <li style="background: #DBD2E0; text-align: center; margin: 5px; padding: 10px">{{title}}
+    </li>
+    {{#each posts}}
+      <li>
+        <div style="display: table">
+          <div style="display: table-row">
+            {{#with author}}
+              <div class="profile" style="{{background}}">
+                <p><a href="/profile/{{id}}">{{name}}</a></p>
+                {{> profile-pic }}
+              </div>
+            {{/with}}
+            <div class="post">
+              <p><div style="min-height: 80px">
+                {{body}}
+              </div>
+              </p>
+              <div style="float: right; text-align: right;">
+              {{#if reward}}
+                <div class="item-{{reward.rarity}}">
+                  ⭐ <b>{{reward.name}}</b> was given for this post
+                </div>
+              {{/if}}
+              <a href="#" class="action-box">
+                + React!
+              </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </li>
+    {{/each}}
     <form action="/reply/{{id}}" method="post">
     <li>
-    <div class="table">
-      <div class="row">
-        <div class="cell-title"></div>
-        <div class="cell-title" style="width: 50%;"><b>{{title}}</b></div>
-        <div class="cell-title" style="width: 15%;">date</div>
-      </div>
-    {{#each posts}}
-      <div class="row">
-        {{#with author}}
-        <div class="cell-title" style="{{background}} text-align: center">
-          <p><a href="/profile/{{id}}">{{name}}</a></p>
-          {{> profile-pic }}
-        </div>
-        {{/with}}
-        <div class="cell" style="word-wrap: wrap-word; position: relative;">
-            <div>
-              {{body}}
-            </div>
-            {{#if reward}}
-              <div class="item-{{reward.rarity}}" style="position: absolute; bottom: 5px; right: 5px">
-                ⭐ <b>{{reward.name}}</b> was given for this post
-              </div>
-            {{/if}}
-        </div>
-        <div class="cell">
-          {{date}}
-        </div>
-      </div>
-    {{/each}}
     <div class="row">
       <div class="cell-title" style="text-align: right; vertical-align: top;">
         <label for="reply">Reply:</label>
@@ -37,16 +40,12 @@
       <div class="cell">
         <textarea name="reply"></textarea>
       </div>
-      <div class="cell">
-      </div>
     </div>
     <div class="row">
       <div class="cell-title">
       </div>
       <div class="cell">
         <input type="submit" value="Submit">
-      </div>
-      <div class="cell">
       </div>
     </div>
     </li>

@@ -26,8 +26,13 @@ div.nav {
     text-align: center;
     padding: 10px;
     background: #DBD2E0;
-    border-bottom: 1px solid #273B09;
     color: grey;
+}
+
+li {
+    border: 1px solid #273B09;
+    border-radius: 5px;
+    margin: 5px;
 }
 
 div.title {
@@ -55,6 +60,7 @@ div.header {
     padding-right: 20px;
 }
 
+/*
 div.post {
     align: center;
     background: white;
@@ -62,6 +68,7 @@ div.post {
     color: white;
     border-bottom: 1px solid #273B09;
 }
+*/
 
 div.table {
     display: table;
@@ -84,7 +91,7 @@ div.cell-title {
     display: table-cell;
     padding: 10px;
     width: 5%;
-    background: #DBD2E0;
+    background: #DBD2E03;
     border-bottom: 1px solid #273B09;
     color: grey;
 }
@@ -145,6 +152,32 @@ div.reward {
     border-radius: 5px;
 }
 
+.action-box {
+    display: inline-block;
+    vertical-align: middle;
+    margin: 5px;
+    text-align: center;
+    padding: 10px;
+    font-size: 11pt;
+    border: 1px solid black;
+    border-radius: 5px;
+}
+
 a {
     text-decoration: none;
+}
+
+div.profile {
+    border-right: 1px solid black;
+    display: table-cell;
+    text-align: center;
+    min-width: 80px;
+    padding: 5px;
+}
+
+div.post {
+    word-wrap: wrap-word;
+    display: table-cell;
+    width: 100%;
+    padding: 10px;
 }

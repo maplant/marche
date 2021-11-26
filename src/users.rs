@@ -132,7 +132,7 @@ impl User {
     fn get_background_style(&self, conn: &PgConnection) -> String {
         self.equip_slot_background
             .map(|drop_id| ItemDrop::fetch(&conn, drop_id).into_background_style(&conn))
-            .unwrap_or_else(|| String::from(""))
+            .unwrap_or_else(|| String::from("background: #DBD2E0;"))
     }
 
     /// Attempt to update the last drop time. If we fail, return false.
