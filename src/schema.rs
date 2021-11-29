@@ -36,6 +36,7 @@ table! {
         post_date -> Timestamp,
         body -> Text,
         reward -> Nullable<Integer>,
+        reactions -> Array<Integer>,
     }
 }
 
@@ -59,6 +60,7 @@ table! {
         owner_id -> Integer,
         item_id -> Integer,
         pattern -> SmallInt,
+        consumed -> Bool,
     }
 }
 

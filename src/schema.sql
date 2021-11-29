@@ -28,7 +28,8 @@ CREATE TABLE replies (
   thread_id INT NOT NULL,
   post_date TIMESTAMP NOT NULL,
   body TEXT NOT NULL,
-  reward INT
+  reward INT,
+  reactions INTEGER[] NOT NULL
 );
 
 CREATE TYPE rarity_enum AS ENUM (
@@ -52,7 +53,8 @@ CREATE TABLE drops (
   id SERIAL PRIMARY KEY,
   owner_id INT NOT NULL,
   item_id INT NOT NULL,
-  pattern SMALLINT NOT NULL 
+  pattern SMALLINT NOT NULL,
+  consumed BOOLEAN NOT NULL
 );
 
 CREATE TABLE trade_requests (

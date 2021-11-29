@@ -103,11 +103,15 @@ impl User {
 
         let mut inventory = drops::table
             .filter(drops::dsl::owner_id.eq(self.id))
+            .filter(drops::dsl::consumed.eq(false))
             .load::<ItemDrop>(conn)
             .ok()
             .unwrap_or_else(Vec::new)
             .into_iter()
-            .map(|drop| { let id = drop.item_id; (drop, Item::fetch(conn, id).rarity)})
+            .map(|drop| {
+                let id = drop.item_id;
+                (drop, Item::fetch(conn, id).rarity)
+            })
             .collect::<Vec<_>>();
 
         inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
@@ -244,13 +248,16 @@ pub fn profile(curr_user: User, id: i32) -> Template {
 
     let mut inventory = drops::table
         .filter(drops::dsl::owner_id.eq(user.id))
+        .filter(drops::dsl::consumed.eq(false))
         .load::<ItemDrop>(&conn)
         .ok()
         .unwrap_or_else(Vec::new)
         .into_iter()
         .filter_map(|drop| {
-            (!is_equipped.contains(&drop.id))
-                .then(|| { let id = drop.item_id; (drop, Item::fetch(&conn, id).rarity) })
+            (!is_equipped.contains(&drop.id)).then(|| {
+                let id = drop.item_id;
+                (drop, Item::fetch(&conn, id).rarity)
+            })
         })
         .collect::<Vec<_>>();
 

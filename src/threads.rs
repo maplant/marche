@@ -103,8 +103,8 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
     let mut user_cache = UserCache::new(&conn);
     let post_title = &threads
         .filter(id.eq(thread_id))
-        .load::<Thread>(&conn)
-        .unwrap()[0]
+        .first::<Thread>(&conn)
+        .unwrap()
         .title;
 
     let posts = replies::dsl::replies
@@ -206,6 +206,8 @@ pub struct Reply {
     pub body: String,
     /// Any item that was rewarded for this post
     pub reward: Option<i32>,
+    /// Reactions attached to this post
+    pub reactions: Vec<i32>,
 }
 
 #[derive(Insertable)]
@@ -237,16 +239,15 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
     };
 
     let post_date = Utc::now().naive_utc();
-    let new_reply = NewReply {
+
+    let _: Result<Reply, _> = diesel::insert_into(replies::table)
+        .values(&NewReply {
         author_id: user.id,
         thread_id,
         post_date,
         body: &reply.reply,
         reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
-    };
-
-    let _: Result<Reply, _> = diesel::insert_into(replies::table)
-        .values(&new_reply)
+        })
         .get_result(&conn);
 
     let _: Result<Thread, _> = diesel::update(threads::table)

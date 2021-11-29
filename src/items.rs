@@ -1,4 +1,5 @@
 use crate::schema::{drops, trade_requests};
+use crate::threads::Reply;
 use crate::users::{User, UserCache, UserProfile};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -83,6 +84,8 @@ pub enum ItemType {
     ProfilePic { filename: String },
     /// Cosmetic background, displayed behind the profile
     ProfileBackground { colors: Vec<String> },
+    /// Reaction image, consumable as an attachment to posts
+    Reaction { filename: String },
 }
 
 impl ToSql<Jsonb, Pg> for ItemType {
@@ -142,6 +145,8 @@ pub struct ItemDrop {
     pub item_id: i32,
     /// Unique pattern Id for the item
     pub pattern: i16,
+    /// Indicates if the drop has been consumed
+    pub consumed: bool,
 }
 
 use chrono::{Duration, Utc};
@@ -172,10 +177,7 @@ impl ItemDrop {
         use crate::schema::drops::dsl::*;
         drops
             .filter(id.eq(drop_id))
-            .load::<Self>(conn)
-            .unwrap()
-            .into_iter()
-            .next()
+            .first::<Self>(conn)
             .unwrap()
     }
 
@@ -195,7 +197,12 @@ impl ItemDrop {
                     r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
                     self.background_style(conn)
                 )
-            }
+            },
+            ItemType::Reaction { filename } => format!(
+                // TODO(map): Add rotation
+                r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
+                filename
+            ),
         }
     }
 
@@ -225,7 +232,7 @@ impl ItemDrop {
                     r#"background: linear-gradient({}deg"#,
                     // Convert patten to unsigned integer and then convert to a
                     // degree value.
-                    ((self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0) as u16,
+                    (self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0,
                 );
                 for color in colors {
                     style += ", ";
@@ -302,13 +309,6 @@ pub struct ItemThumbnail {
     pub thumbnail: String,
 }
 
-/*
-impl From<Item> for ItemThumbnail {
-    fn from(item: Item) -> Self {
-    }
-}
-*/
-
 #[rocket::get("/item/<drop_id>")]
 pub fn item(user: User, drop_id: i32) -> Template {
     #[derive(Serialize)]
@@ -339,6 +339,58 @@ pub fn item(user: User, drop_id: i32) -> Template {
             can_equip: user.id == drop.owner_id,
         },
     )
+}
+
+#[rocket::post("/react/<reply_id>", data = "<used_reactions>")]
+pub fn react(user: User, reply_id: i32, used_reactions: Form<Vec<i32>>) -> Redirect {
+    let conn = crate::establish_db_connection().unwrap();
+    
+    let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
+        use crate::schema::replies::dsl::*;
+        use diesel::result::Error;
+
+        // Get the reply
+        let reply = replies
+            .filter(id.eq(reply_id))
+            .first::<Reply>(&conn)
+            .map_err(|_|Error::RollbackTransaction)?;
+
+        let mut new_reactions = reply.reactions;
+
+        // Verify that the author does not own this reply: 
+        if reply.author_id == user.id {
+            return Err(Error::RollbackTransaction);
+        }
+
+        // Verify that all of the reactions are owned by the user:
+        for &reaction in &*used_reactions {
+            if ItemDrop::fetch(&conn, reaction).owner_id != user.id {
+                return Err(Error::RollbackTransaction);
+            }
+            new_reactions.push(reaction);
+        }
+
+        // Update the post with the new reactions:
+        diesel::update(replies.find(reply_id))
+            .set(reactions.eq(new_reactions))
+            .get_result::<Reply>(&conn)
+            .map_err(|_| Error::RollbackTransaction)?;
+
+        // Mark every reaction as consumed: 
+        for &reaction in &*used_reactions {
+            use crate::schema::drops::dsl::*;
+
+            diesel::update(drops.find(reaction))
+                .filter(consumed.eq(false))
+                .set(consumed.eq(true))
+                .get_result::<ItemDrop>(&conn)
+                .map_err(|_| Error::RollbackTransaction)?;
+        }
+
+        Ok(())
+    });
+
+    todo!()
 }
 
 /// A trade between two users.
@@ -399,11 +451,8 @@ impl TradeRequest {
             for sender_item in &self.sender_items {
                 if drops
                     .filter(id.eq(sender_item))
-                    .load::<ItemDrop>(conn)
-                    .unwrap_or_else(|_| Vec::new())
-                    .into_iter()
-                    .next()
-                    .ok_or(diesel::result::Error::RollbackTransaction)?
+                    .first::<ItemDrop>(conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
                     .owner_id
                     != self.receiver_id
                 {
@@ -413,11 +462,8 @@ impl TradeRequest {
             for receiver_item in &self.receiver_items {
                 if drops
                     .filter(id.eq(receiver_item))
-                    .load::<ItemDrop>(conn)
-                    .unwrap_or_else(|_| Vec::new())
-                    .into_iter()
-                    .next()
-                    .ok_or(diesel::result::Error::RollbackTransaction)?
+                    .first::<ItemDrop>(conn)
+                    .map_err(|_|diesel::result::Error::RollbackTransaction)?
                     .owner_id
                     != self.sender_id
                 {
