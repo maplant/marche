@@ -19,7 +19,7 @@ CREATE TABLE login_sessions (
 CREATE TABLE threads (
   id SERIAL PRIMARY KEY,
   last_post TIMESTAMP NOT NULL,
-  title TEXT NOT NULL,
+  title TEXT NOT NULL
 );
 
 CREATE TABLE replies (

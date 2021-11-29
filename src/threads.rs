@@ -1,5 +1,5 @@
 //! Display threads
-use crate::items::{Item, ItemDrop};
+use crate::items::{Item, ItemDrop, ItemThumbnail};
 use crate::schema::{replies, threads};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
@@ -87,9 +87,11 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
 
     #[derive(Serialize)]
     struct Post {
+        id: i32,
         author: UserProfile,
         body: String,
         date: String,
+        reactions: Vec<ItemThumbnail>,
         reward: Option<Reward>,
     }
     #[derive(Serialize)]
@@ -109,13 +111,20 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
 
     let posts = replies::dsl::replies
         .filter(replies::dsl::thread_id.eq(thread_id))
+        .order(replies::dsl::post_date.asc())
         .load::<Reply>(&conn)
         .unwrap()
         .into_iter()
         .map(|t| Post {
+            id: t.id,
             author: user_cache.get(t.author_id).clone(),
             body: t.body,
             date: t.post_date.format(DATE_FMT).to_string(),
+            reactions: t
+                .reactions
+                .into_iter()
+                .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
+                .collect(),
             reward: t.reward.map(|r| {
                 let item = Item::fetch(&conn, r);
                 Reward {
@@ -174,15 +183,17 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         .unwrap();
 
     // Make first reply
-    let _: Result<Reply, _> = diesel::insert_into(replies::table)
+    let _: Reply = diesel::insert_into(replies::table)
         .values(&NewReply {
             author_id: user.id,
             thread_id: thread.id,
             post_date,
             body,
             reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            reactions: Vec::new(),
         })
-        .get_result(&conn);
+        .get_result(&conn)
+        .unwrap();
 
     Redirect::to("/")
 }
@@ -210,6 +221,16 @@ pub struct Reply {
     pub reactions: Vec<i32>,
 }
 
+impl Reply {
+    pub fn fetch(conn: &PgConnection, reply_id: i32) -> Self {
+        use crate::schema::replies::dsl::*;
+        replies
+            .filter(id.eq(reply_id))
+            .first::<Reply>(conn)
+            .unwrap()
+    }
+}
+
 #[derive(Insertable)]
 #[table_name = "replies"]
 pub struct NewReply<'b> {
@@ -218,6 +239,7 @@ pub struct NewReply<'b> {
     post_date: NaiveDateTime,
     body: &'b str,
     reward: Option<i32>,
+    reactions: Vec<i32>,
 }
 
 #[derive(FromForm)]
@@ -242,11 +264,12 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
 
     let _: Result<Reply, _> = diesel::insert_into(replies::table)
         .values(&NewReply {
-        author_id: user.id,
-        thread_id,
-        post_date,
-        body: &reply.reply,
-        reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            author_id: user.id,
+            thread_id,
+            post_date,
+            body: &reply.reply,
+            reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            reactions: Vec::new(),
         })
         .get_result(&conn);
 

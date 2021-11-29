@@ -98,7 +98,7 @@ impl User {
         items
     }
 
-    pub fn inventory(&self, conn: &PgConnection) -> Vec<ItemThumbnail> {
+    pub fn inventory(&self, conn: &PgConnection) -> impl Iterator<Item = (Item, ItemDrop)> {
         use crate::schema::drops;
 
         let mut inventory = drops::table
@@ -110,16 +110,13 @@ impl User {
             .into_iter()
             .map(|drop| {
                 let id = drop.item_id;
-                (drop, Item::fetch(conn, id).rarity)
+                (Item::fetch(conn, id), drop)
             })
             .collect::<Vec<_>>();
 
-        inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
+        inventory.sort_by(|a, b| a.0.rarity.cmp(&b.0.rarity).reverse());
 
-        inventory
-            .into_iter()
-            .map(|(drop, _)| drop.thumbnail(conn))
-            .collect()
+        inventory.into_iter()
     }
 
     /// Returns the profile picture of the user
@@ -157,20 +154,16 @@ impl User {
         use crate::schema::users::dsl::*;
         users
             .filter(id.eq(user_id))
-            .load::<Self>(conn)
-            .ok()
-            .and_then(|v| v.into_iter().next())
-            .ok_or(())
+            .first::<Self>(conn)
+            .map_err(|_| ())
     }
 
     pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
         use crate::schema::users::dsl::*;
         users
             .filter(id.eq(session.user_id))
-            .load::<Self>(conn)
-            .ok()
-            .and_then(|v| v.into_iter().next())
-            .ok_or(())
+            .first::<Self>(conn)
+            .map_err(|_| ())
     }
 }
 

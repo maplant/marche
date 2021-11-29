@@ -83,14 +83,13 @@ div.cell {
     display: table-cell;
     padding: 10px;
     background: white;
-    border-right: 1px solid #273B09;
+    // border-right: 1px solid #273B09;
     border-bottom: 1px solid #273B09;
 }
 
 div.cell-title {
     display: table-cell;
     padding: 10px;
-    width: 5%;
     background: #DBD2E03;
     border-bottom: 1px solid #273B09;
     color: grey;
@@ -123,6 +122,33 @@ div.reward {
     padding: 10px;
     font-size: 11pt;
     border: 1px solid #006daa;
+    border-radius: 5px;
+}
+
+.item-uncommon {
+    text-align: center;
+    vertical-align: middle;
+    margin: 5px;
+    color: #9eb25d;
+    background: #eefcce;
+    display: inline-block;
+    padding: 10px;
+    font-size: 11pt;
+    border: 1px solid #9eb25d;
+    border-radius: 5px;
+}
+
+.item-rare {
+    // darker: #7161ef
+    text-align: center;
+    vertical-align: middle;
+    margin: 5px;
+    color: #957fef;
+    background: #dec0f1;
+    display: inline-block;
+    padding: 10px;
+    font-size: 11pt;
+    border: 1px solid #957fef;
     border-radius: 5px;
 }
 

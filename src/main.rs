@@ -21,6 +21,8 @@ fn launch_server() -> _ {
                 items::offers,
                 items::decline,
                 items::accept,
+                items::react,
+                items::react_action,
                 users::equip,
                 users::curr_profile,
                 users::profile,

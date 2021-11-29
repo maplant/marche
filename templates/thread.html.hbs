@@ -16,13 +16,18 @@
                 {{body}}
               </div>
               </p>
+              {{#each reactions}}
+              <a href="/item/{{id}}" class="item-{{rarity}}">
+                {{{thumbnail}}}
+              </a>
+              {{/each}}
               <div style="float: right; text-align: right;">
               {{#if reward}}
                 <div class="item-{{reward.rarity}}">
                   ⭐ <b>{{reward.name}}</b> was given for this post
                 </div>
               {{/if}}
-              <a href="#" class="action-box">
+              <a href="/react/{{id}}" class="action-box">
                 + React!
               </a>
               </div>
@@ -37,7 +42,7 @@
       <div class="cell-title" style="text-align: right; vertical-align: top;">
         <label for="reply">Reply:</label>
       </div>
-      <div class="cell">
+      <div class="cell" style="width: 100%">
         <textarea name="reply"></textarea>
       </div>
     </div>

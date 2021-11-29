@@ -132,6 +132,10 @@ impl Item {
             .next()
             .unwrap()
     }
+
+    pub fn is_reaction(&self) -> bool {
+        matches!(self.item_type, ItemType::Reaction { .. })
+    }
 }
 
 /// A dropped item associated with a user
@@ -175,18 +179,13 @@ impl ItemDrop {
 
     pub fn fetch(conn: &PgConnection, drop_id: i32) -> Self {
         use crate::schema::drops::dsl::*;
-        drops
-            .filter(id.eq(drop_id))
-            .first::<Self>(conn)
-            .unwrap()
+        drops.filter(id.eq(drop_id)).first::<Self>(conn).unwrap()
     }
 
     pub fn thumbnail_html(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
-            ItemType::Useless => String::from(
-                r#"<div class="fixed-item-thumbnail">?</div>"#,
-            ),
+            ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
             ItemType::ProfilePic { filename } => format!(
                 r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
                 filename
@@ -197,15 +196,17 @@ impl ItemDrop {
                     r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
                     self.background_style(conn)
                 )
-            },
+            }
             ItemType::Reaction { filename } => format!(
                 // TODO(map): Add rotation
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
-                filename
+                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg);">"#,
+                filename,
+                self.rotation(),
             ),
         }
     }
 
+    // TODO: Get rid of this in favor of something better.
     pub fn thumbnail(&self, conn: &PgConnection) -> ItemThumbnail {
         let item = Item::fetch(&conn, self.item_id);
         ItemThumbnail {
@@ -243,6 +244,10 @@ impl ItemDrop {
             }
             _ => panic!("Item is not a profile picture"),
         }
+    }
+
+    pub fn rotation(&self) -> f32 {
+        (self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0
     }
 
     /// Possibly selects an item, depending on the last drop.
@@ -341,56 +346,94 @@ pub fn item(user: User, drop_id: i32) -> Template {
     )
 }
 
-#[rocket::post("/react/<reply_id>", data = "<used_reactions>")]
-pub fn react(user: User, reply_id: i32, used_reactions: Form<Vec<i32>>) -> Redirect {
+#[rocket::get("/react/<post_id>")]
+pub fn react(user: User, post_id: i32) -> Template {
+    #[derive(Serialize)]
+    struct Context<'p> {
+        post_id: i32,
+        author: UserProfile,
+        body: &'p str,
+        inventory: Vec<ItemThumbnail>,
+    }
+
     let conn = crate::establish_db_connection().unwrap();
-    
+    let post = Reply::fetch(&conn, post_id);
+    let author = User::fetch(&conn, post.author_id).unwrap().profile(&conn);
+    let inventory: Vec<_> = user
+        .inventory(&conn)
+        .filter_map(|(item, drop)| item.is_reaction().then(|| drop.thumbnail(&conn)))
+        .collect();
+
+    Template::render(
+        "react",
+        Context {
+            post_id,
+            author,
+            body: &post.body,
+            inventory,
+        },
+    )
+}
+
+#[rocket::post("/react/<post_id>", data = "<used_reactions>")]
+pub fn react_action(
+    user: User,
+    post_id: i32,
+    used_reactions: Form<HashMap<i32, bool>>,
+) -> Redirect {
+    let conn = crate::establish_db_connection().unwrap();
+    let thread_id = Reply::fetch(&conn, post_id).thread_id;
+
     let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
         use crate::schema::replies::dsl::*;
         use diesel::result::Error;
 
         // Get the reply
         let reply = replies
-            .filter(id.eq(reply_id))
+            .filter(id.eq(post_id))
             .first::<Reply>(&conn)
-            .map_err(|_|Error::RollbackTransaction)?;
+            .map_err(|_| Error::RollbackTransaction)?;
 
         let mut new_reactions = reply.reactions;
 
-        // Verify that the author does not own this reply: 
+        // Verify that the author does not own this reply:
         if reply.author_id == user.id {
             return Err(Error::RollbackTransaction);
         }
 
         // Verify that all of the reactions are owned by the user:
-        for &reaction in &*used_reactions {
-            if ItemDrop::fetch(&conn, reaction).owner_id != user.id {
+        for (&reaction, selected) in &*used_reactions {
+            let drop = ItemDrop::fetch(&conn, reaction);
+            let item = Item::fetch(&conn, drop.item_id);
+            if !selected || drop.owner_id != user.id || !item.is_reaction() {
                 return Err(Error::RollbackTransaction);
             }
-            new_reactions.push(reaction);
-        }
 
-        // Update the post with the new reactions:
-        diesel::update(replies.find(reply_id))
-            .set(reactions.eq(new_reactions))
-            .get_result::<Reply>(&conn)
-            .map_err(|_| Error::RollbackTransaction)?;
-
-        // Mark every reaction as consumed: 
-        for &reaction in &*used_reactions {
+            // Set the drops to consumed.
             use crate::schema::drops::dsl::*;
-
             diesel::update(drops.find(reaction))
                 .filter(consumed.eq(false))
                 .set(consumed.eq(true))
                 .get_result::<ItemDrop>(&conn)
                 .map_err(|_| Error::RollbackTransaction)?;
+
+            new_reactions.push(reaction);
         }
+
+        // Update the post with the new reactions:
+        diesel::update(replies.find(post_id))
+            .set(reactions.eq(new_reactions))
+            .get_result::<Reply>(&conn)
+            .map_err(|_| Error::RollbackTransaction)?;
 
         Ok(())
     });
 
-    todo!()
+    Redirect::to(format!(
+        "{}#{}",
+        uri!(crate::threads::thread(thread_id)),
+        post_id
+    ))
 }
 
 /// A trade between two users.
@@ -447,10 +490,12 @@ impl TradeRequest {
                         .map_err(|_| diesel::result::Error::RollbackTransaction)?,
                 );
             }
-            // Check if any item no longer belongs to their respective owner
+
+            // Check if any item no longer belongs to their respective owner:
             for sender_item in &self.sender_items {
                 if drops
                     .filter(id.eq(sender_item))
+                    .filter(consumed.eq(false)) // Consumed items may not be traded
                     .first::<ItemDrop>(conn)
                     .map_err(|_| diesel::result::Error::RollbackTransaction)?
                     .owner_id
@@ -462,8 +507,9 @@ impl TradeRequest {
             for receiver_item in &self.receiver_items {
                 if drops
                     .filter(id.eq(receiver_item))
+                    .filter(consumed.eq(false))
                     .first::<ItemDrop>(conn)
-                    .map_err(|_|diesel::result::Error::RollbackTransaction)?
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
                     .owner_id
                     != self.sender_id
                 {
@@ -516,9 +562,16 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
         "offer",
         Context {
             sender: sender.profile(&conn),
-            sender_inventory: sender.inventory(&conn),
+            // Got to put this somewhere, but don't know where
+            sender_inventory: sender
+                .inventory(&conn)
+                .map(|(_, d)| d.thumbnail(&conn))
+                .collect(),
             receiver: receiver.profile(&conn),
-            receiver_inventory: receiver.inventory(&conn),
+            receiver_inventory: receiver
+                .inventory(&conn)
+                .map(|(_, d)| d.thumbnail(&conn))
+                .collect(),
         },
     )
 }
@@ -603,6 +656,7 @@ pub fn offers(user: User) -> Template {
 
     let conn = crate::establish_db_connection().unwrap();
     let mut user_cache = UserCache::new(&conn);
+    // TODO: filter out trade requests that are no longer valid.
     let incoming_offers: Vec<_> = trade_requests
         .filter(receiver_id.eq(user.id))
         .load::<TradeRequest>(&conn)

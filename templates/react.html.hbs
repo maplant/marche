@@ -1,0 +1,40 @@
+{{> header title="React"}}
+<form action="/react/{{post_id}}" method="post">
+  <li>
+    <div style="display: table">
+      <div style="display: table-row">
+        {{#with author}}
+        <div class="profile" style="{{background}}">
+          <p><a href="/profile/{{id}}">{{name}}</a></p>
+          {{> profile-pic }}
+        </div>
+        {{/with}}
+        <div class="post">
+          <p><div style="min-height: 80px">
+              {{body}}
+            </div>
+          </p>
+          {{#each inventory}}
+          <label class="item-{{rarity}}" for="{{id}}">
+            <p>{{{thumbnail}}}</p>
+            <input type="checkbox" name="{{id}}" id="{{id}}" />
+            {{name}}
+          </label>
+          {{/each}}
+        </div>
+      </div>
+    </div>
+  </li>
+  <li>
+    <div class="row">
+      <div class="cell-title">
+      </div>
+      <div class="cell" style="width: 100%">
+        <input type="submit" value="React!">
+      </div>
+    </div>
+  </li>
+</form>
+</ul>
+</body>
+
