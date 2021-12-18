@@ -189,7 +189,7 @@ impl<'r> FromRequest<'r> for User {
             .get_private(USER_SESSION_ID_COOKIE)
             .map(|x| x.value().to_string())
             .or_forward(()));
-        let conn = try_outcome!(crate::establish_db_connection().or_forward(()));
+        let conn = crate::establish_db_connection();
         let session = try_outcome!(LoginSession::fetch(&conn, &session_id).or_forward(()));
         User::from_session(&conn, &session).or_forward(())
     }
@@ -197,7 +197,7 @@ impl<'r> FromRequest<'r> for User {
 
 #[rocket::get("/equip/<drop_id>")]
 pub fn equip(user: User, drop_id: i32) -> Redirect {
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let item_drop = ItemDrop::fetch(&conn, drop_id);
     user.equip(&conn, item_drop);
     Redirect::to(uri!(profile(user.id)))
@@ -224,7 +224,7 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         can_trade: bool,
     }
 
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let user = User::fetch(&conn, id).unwrap();
 
     let mut is_equipped = HashSet::new();
@@ -399,14 +399,7 @@ pub struct LoginReq {
 #[rocket::post("/login", data = "<login>")]
 pub fn login_action(jar: &CookieJar<'_>, login: Form<LoginReq>) -> Redirect {
     jar.remove_private(Cookie::new(USER_SESSION_ID_COOKIE, String::new()));
-    let conn = match crate::establish_db_connection() {
-        Some(conn) => conn,
-        None => {
-            return Redirect::to(uri!(crate::error::error(
-                "Failed to establish database connection"
-            )))
-        }
-    };
+    let conn = crate::establish_db_connection();
     let session = LoginSession::login(&conn, &login.username, &login.password);
     match session {
         Ok(LoginSession { session_id, .. }) => {

@@ -43,7 +43,7 @@ pub fn index(_user: User) -> Template {
         date: String,
     }
 
-    let conn = super::establish_db_connection().unwrap();
+    let conn = super::establish_db_connection();
 
     let posts: Vec<_> = threads
         .order(last_post.desc())
@@ -101,7 +101,7 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
         posts: Vec<Post>,
     }
 
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let mut user_cache = UserCache::new(&conn);
     let post_title = &threads
         .filter(id.eq(thread_id))
@@ -160,18 +160,10 @@ pub struct NewThreadReq {
 pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     use crate::schema::{replies, threads};
 
-    let conn = match crate::establish_db_connection() {
-        Some(conn) => conn,
-        None => {
-            return Redirect::to(uri!(crate::error::error(
-                "Failed to establish database connection"
-            )))
-        }
-    };
-
-    // TODO: Move into transaction so that can't post a thread
+    // TODO: Move into transaction so that you can't post a thread
     // without the first reply.
 
+    let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();
     let body = &thread.body;
     let thread: Thread = diesel::insert_into(threads::table)
@@ -251,15 +243,7 @@ pub struct ReplyReq {
 pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redirect {
     use crate::schema::{replies, threads};
 
-    let conn = match crate::establish_db_connection() {
-        Some(conn) => conn,
-        None => {
-            return Redirect::to(uri!(crate::error::error(
-                "Failed to establish database connection"
-            )))
-        }
-    };
-
+    let conn = crate::establish_db_connection(); 
     let post_date = Utc::now().naive_utc();
 
     let _: Result<Reply, _> = diesel::insert_into(replies::table)

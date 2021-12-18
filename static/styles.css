@@ -6,8 +6,7 @@ ul {
 
 body {
     background: white;
-    // background: #58641D;
-    font-family: verdana;
+    font: 1.0em "Fira Sans", sans-serif;
 }
 
 div.error {
@@ -37,7 +36,6 @@ li {
 
 div.title {
     width: 100%;
-    // display: inline-block;
     border-right: 1px solid  #273B09;
 }
 
@@ -53,7 +51,6 @@ div.header {
     border-bottom: 1px solid #273B09;
     background: #DBD2E0;
     color: gray;
-//    background: #7B904B;
     padding-top: 5px;
     padding-bottom: 5px;
     padding-left: 20px;
@@ -83,7 +80,6 @@ div.cell {
     display: table-cell;
     padding: 10px;
     background: white;
-    // border-right: 1px solid #273B09;
     border-bottom: 1px solid #273B09;
 }
 
@@ -139,7 +135,6 @@ div.reward {
 }
 
 .item-rare {
-    // darker: #7161ef
     text-align: center;
     vertical-align: middle;
     margin: 5px;

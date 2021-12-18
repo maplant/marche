@@ -327,8 +327,7 @@ pub fn item(user: User, drop_id: i32) -> Template {
         can_equip: bool,
     }
 
-    let conn = crate::establish_db_connection().unwrap();
-
+    let conn = crate::establish_db_connection();
     let drop = ItemDrop::fetch(&conn, drop_id);
     let item = Item::fetch(&conn, drop.item_id);
 
@@ -356,7 +355,7 @@ pub fn react(user: User, post_id: i32) -> Template {
         inventory: Vec<ItemThumbnail>,
     }
 
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let post = Reply::fetch(&conn, post_id);
     let author = User::fetch(&conn, post.author_id).unwrap().profile(&conn);
     let inventory: Vec<_> = user
@@ -381,7 +380,7 @@ pub fn react_action(
     post_id: i32,
     used_reactions: Form<HashMap<i32, bool>>,
 ) -> Redirect {
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let thread_id = Reply::fetch(&conn, post_id).thread_id;
 
     let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
@@ -555,7 +554,7 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
         receiver_inventory: Vec<ItemThumbnail>,
     }
 
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let receiver = User::fetch(&conn, receiver_id).unwrap();
 
     Template::render(
@@ -581,7 +580,7 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
     let mut sender_items = Vec::new();
     let mut receiver_items = Vec::new();
 
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
 
     for (&item, &trader) in trade.iter() {
         let drop = ItemDrop::fetch(&conn, item);
@@ -609,7 +608,7 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
 
 #[rocket::get("/decline/<trade_id>")]
 pub fn decline(user: User, trade_id: i32) -> Redirect {
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
     if req.sender_id == user.id || req.receiver_id == user.id {
         req.decline(&conn);
@@ -619,7 +618,7 @@ pub fn decline(user: User, trade_id: i32) -> Redirect {
 
 #[rocket::get("/accept/<trade_id>")]
 pub fn accept(user: User, trade_id: i32) -> Redirect {
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
     if req.sender_id == user.id || req.receiver_id == user.id {
         req.accept(&conn);
@@ -654,7 +653,7 @@ pub fn offers(user: User) -> Template {
         outgoing_offers: Vec<OutOffer>,
     }
 
-    let conn = crate::establish_db_connection().unwrap();
+    let conn = crate::establish_db_connection();
     let mut user_cache = UserCache::new(&conn);
     // TODO: filter out trade requests that are no longer valid.
     let incoming_offers: Vec<_> = trade_requests
