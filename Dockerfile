@@ -6,6 +6,5 @@ COPY . .
 
 RUN cargo build --release
 
-ENTRYPOINT ["./target/release/marche-server"]
-
 EXPOSE 8080
+CMD [ "./target/release/marche-server" ]
