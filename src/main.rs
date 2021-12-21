@@ -1,6 +1,6 @@
 use rocket::fs::FileServer;
 use rocket_dyn_templates::*;
-use server::{error, items, threads, users};
+use marche_server::{error, items, threads, users};
 
 #[rocket::launch]
 fn launch_server() -> _ {

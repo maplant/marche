@@ -1,4 +1,4 @@
-use server::items::Rarity;
+use marche_server::items::Rarity;
 use std::collections::HashMap;
 
 fn main() {
