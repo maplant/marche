@@ -6,4 +6,4 @@ COPY . .
 
 RUN cargo build --release
 
-ENTRYPOINT ["./target/release/marche"]
+ENTRYPOINT ["./target/release/marche-server"]

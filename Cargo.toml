@@ -1,9 +1,9 @@
 [package]
-name = "server"
+name = "marche-server"
 version = "0.1.0"
 authors = ["Matthew Plant <maplant95@gmail.com>"]
 edition = "2021"
-default-run = "server"
+default-run = "marche-server"
 
 [dependencies]
 rand = { version = "0.8" , features = ["getrandom"] }
