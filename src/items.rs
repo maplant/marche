@@ -158,8 +158,8 @@ lazy_static::lazy_static! {
 
 /// Corresponds to a 15% chance to receive a drop.
 // pub const DROP_CHANCE: u32 = u32::MAX - 644245090;
-/// One in two chance for drop.
-pub const DROP_CHANCE: u32 = u32::MAX -  u32::MAX >> 1;
+/// Four in five chance for drop.
+pub const DROP_CHANCE: u32 = u32::MAX / 5;
 
 #[derive(Insertable)]
 #[table_name = "drops"]
@@ -167,6 +167,7 @@ pub struct NewDrop {
     owner_id: i32,
     item_id: i32,
     pattern: i16,
+    consumed: bool,
 }
 
 impl ItemDrop {
@@ -275,6 +276,7 @@ impl ItemDrop {
                                     owner_id: user.id,
                                     item_id: chosen.id,
                                     pattern: rand::random(),
+                                    consumed: false,
                                 })
                                 .get_result(conn)
                                 .ok()
