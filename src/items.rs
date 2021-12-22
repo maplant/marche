@@ -252,13 +252,15 @@ impl ItemDrop {
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
         // Determine if we have a drop
         conn.transaction(|| {
-            let item: Option<Self> = (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc()
-                && rand::random::<u32>() > DROP_CHANCE)
-                .then(|| {
+            let item: Option<Self> =
+                // (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc() && 
+                (rand::random::<u32>() > DROP_CHANCE).then(|| {
                     use crate::schema::items::dsl::*;
 
                     // If we have a drop, select a random rarity.
                     let rolled = Rarity::roll();
+
+                    println!("Drop! rolled: {:?}", rolled);
 
                     // Query available items from the given rarity and randomly choose one.
                     items
@@ -288,6 +290,7 @@ impl ItemDrop {
             if item.is_some() {
                 if User::fetch(conn, user.id).unwrap().last_reward != user.last_reward {
                     // Rollback the transaction
+                    println!("Failed to update last reward");
                     Err(diesel::result::Error::RollbackTransaction)
                 } else {
                     // Otherwise, attempt to set a new last drop.
