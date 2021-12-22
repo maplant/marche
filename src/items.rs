@@ -18,21 +18,16 @@ use std::collections::HashMap;
 /// Rarity of an item.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, DbEnum)]
 pub enum Rarity {
-    /// Corresponds to a ~84% chance of being dropped
+    /// Corresponds to a ~84% chance of being dropped:
     Common,
-
-    /// Corresponds to a ~15% chance of being dropped
+    /// Corresponds to a ~15% chance of being dropped:
     Uncommon,
-
-    /// Corresponds to a ~1% chance of being dropped
+    /// Corresponds to a ~1% chance of being dropped:
     Rare,
-
-    /// Corresponds to a ~0.1% chance of being dropped
+    /// Corresponds to a ~0.1% chance of being dropped:
     UltraRare,
-
-    /// Corresponds to a ~0.01% chance of being dropped
+    /// Corresponds to a ~0.01% chance of being dropped:
     Legendary,
-
     /// Unique items have no chance of being dropped, and must be minted
     Unique,
 }
@@ -81,7 +76,7 @@ pub enum ItemType {
     /// An item with no use
     Useless,
     /// Cosmetic profile picture, displayable in user profile and next to all posts
-    ProfilePic { filename: String },
+    Avatar { filename: String },
     /// Cosmetic background, displayed behind the profile
     ProfileBackground { colors: Vec<String> },
     /// Reaction image, consumable as an attachment to posts
@@ -162,7 +157,9 @@ lazy_static::lazy_static! {
 }
 
 /// Corresponds to a 15% chance to receive a drop.
-pub const DROP_CHANCE: u32 = u32::MAX - 644245090;
+// pub const DROP_CHANCE: u32 = u32::MAX - 644245090;
+/// One in two chance for drop.
+pub const DROP_CHANCE: u32 = u32::MAX -  u32::MAX >> 1;
 
 #[derive(Insertable)]
 #[table_name = "drops"]
@@ -186,7 +183,7 @@ impl ItemDrop {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
             ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
-            ItemType::ProfilePic { filename } => format!(
+            ItemType::Avatar { filename } => format!(
                 r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
                 filename
             ),
@@ -220,7 +217,7 @@ impl ItemDrop {
     pub fn profile_pic(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
-            ItemType::ProfilePic { filename } => filename,
+            ItemType::Avatar { filename } => filename,
             _ => panic!("Item is not a profile picture"),
         }
     }

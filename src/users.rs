@@ -45,7 +45,7 @@ impl User {
 
         let item_desc = Item::fetch(conn, item_drop.item_id);
         match item_desc.item_type {
-            ItemType::ProfilePic { .. } => {
+            ItemType::Avatar { .. } => {
                 diesel::update(users.find(self.id))
                     .set(equip_slot_prof_pic.eq(Some(item_drop.id)))
                     .get_result::<Self>(conn)
@@ -67,7 +67,7 @@ impl User {
 
         let item_desc = Item::fetch(conn, item_drop.item_id);
         match item_desc.item_type {
-            ItemType::ProfilePic { .. } => {
+            ItemType::Avatar { .. } => {
                 let _ = diesel::update(users.find(self.id))
                     .filter(equip_slot_prof_pic.eq(Some(item_drop.id)))
                     .set(equip_slot_prof_pic.eq(Option::<i32>::None))
