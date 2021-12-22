@@ -199,7 +199,7 @@ div.profile {
     border-right: 1px solid black;
     display: table-cell;
     text-align: center;
-    min-width: 80px;
+    min-width: 180px;
     padding: 5px;
 }
 
