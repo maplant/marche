@@ -16,7 +16,7 @@
     {{#each incoming_offers}}
       <div class="row">
         {{#with sender}}
-        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
           <p><a href="/profile/{{id}}">{{name}}</a></p>
           {{> profile-pic }}
         </div>
@@ -30,7 +30,7 @@
           {{/each}}
         </div>
         {{#with ../user}}
-          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
             <p><a href="/profile/{{id}}">{{name}}</a></p>
             {{> profile-pic }}
           </div>
@@ -80,7 +80,7 @@
     {{#each outgoing_offers}}
       <div class="row">
         {{#with ../user}}
-          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
             <p><a href="/profile/{{id}}">{{name}}</a></p>
             {{> profile-pic }}
           </div>
@@ -94,7 +94,7 @@
           {{/each}}
         </div>
         {{#with receiver}}
-        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top">
+        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
           <p><a href="/profile/{{id}}">{{name}}</a></p>
           {{> profile-pic }}
         </div>
