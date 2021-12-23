@@ -1,6 +1,7 @@
 use crate::schema::{drops, trade_requests};
 use crate::threads::Reply;
 use crate::users::{User, UserCache, UserProfile};
+use chrono::Duration;
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::serialize::Output;
@@ -147,8 +148,6 @@ pub struct ItemDrop {
     /// Indicates if the drop has been consumed
     pub consumed: bool,
 }
-
-use chrono::{Duration, Utc};
 
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.

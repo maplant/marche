@@ -243,10 +243,10 @@ pub struct ReplyReq {
 pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redirect {
     use crate::schema::{replies, threads};
 
-    let conn = crate::establish_db_connection(); 
+    let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();
 
-    let _: Result<Reply, _> = diesel::insert_into(replies::table)
+    let reply: Reply = diesel::insert_into(replies::table)
         .values(&NewReply {
             author_id: user.id,
             thread_id,
@@ -255,12 +255,13 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
             reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
             reactions: Vec::new(),
         })
-        .get_result(&conn);
+        .get_result(&conn)
+        .unwrap();
 
     let _: Result<Thread, _> = diesel::update(threads::table)
         .filter(threads::dsl::id.eq(thread_id))
         .set(threads::dsl::last_post.eq(post_date))
         .get_result(&conn);
 
-    Redirect::to(uri!(thread(thread_id)))
+    Redirect::to(format!("{}#{}", uri!(thread(thread_id)), reply.id))
 }
