@@ -64,7 +64,7 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
                 // cookie is the same date as the last post.
                 new_posts: cookies
                     .get(&format!("last_seen_{}", thread.id))
-                    .map(|d| d.value() == date)
+                    .map(|d| d.value() != date)
                     .unwrap_or(true),
                 date,
             }
