@@ -9,6 +9,7 @@ body {
     font: 1.2em "Fira Sans", sans-serif;
 }
 
+/*
 div.error {
     margin-top: 40px;
     margin-left: 50px;
@@ -20,6 +21,7 @@ div.error {
     border-top: 1px solid #F42B03;
     border-left: 1px solid #F42B03; 
 }
+*/
 
 div.nav {
     text-align: center;
@@ -174,15 +176,14 @@ div.reward {
 }
 
 .error {
-    display: inline-block;
-    vertical-align: middle;
     margin: 5px;
-    text-align: center;
-    background: #8a1824;
-    color: #ffffff;
+    display: inline-block;
+    text-align: left;
+    background: #ff674d;
+    color: #8a1824;
     padding: 10px;
     font-size: 11pt;
-    border: 1px solid #ff674d;
+    border: 1px solid #8a1824;
     border-radius: 5px;
 }
 
