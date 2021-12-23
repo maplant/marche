@@ -74,8 +74,8 @@ pub fn unauthorized() -> Redirect {
     Redirect::to(rocket::uri!(crate::users::login_form()))
 }
 
-#[rocket::get("/thread/<thread_id>")]
-pub fn thread(_user: User, thread_id: i32) -> Template {
+#[rocket::get("/thread/<thread_id>?<error>")]
+pub fn thread(_user: User, thread_id: i32, error: Option<&str>) -> Template {
     use crate::schema::replies;
     use crate::schema::threads::dsl::*;
 
@@ -94,11 +94,13 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
         reactions: Vec<ItemThumbnail>,
         reward: Option<Reward>,
     }
+
     #[derive(Serialize)]
-    struct Context<'t> {
+    struct Context<'t, 'e> {
         id: i32,
         title: &'t str,
         posts: Vec<Post>,
+        error: Option<&'e str>, 
     }
 
     let conn = crate::establish_db_connection();
@@ -141,6 +143,7 @@ pub fn thread(_user: User, thread_id: i32) -> Template {
             id: thread_id,
             title: post_title,
             posts,
+            error,
         },
     )
 }
@@ -246,6 +249,10 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
     let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();
 
+    if reply.reply.trim().is_empty() {
+        return Redirect::to(format!("{}#reply", uri!(thread(thread_id, Some("Cannot post an empty reply")))));
+    }
+
     let reply: Reply = diesel::insert_into(replies::table)
         .values(&NewReply {
             author_id: user.id,
@@ -263,5 +270,5 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         .set(threads::dsl::last_post.eq(post_date))
         .get_result(&conn);
 
-    Redirect::to(format!("{}#{}", uri!(thread(thread_id)), reply.id))
+    Redirect::to(format!("{}#{}", uri!(thread(thread_id, Option::<&str>::None)), reply.id))
 }

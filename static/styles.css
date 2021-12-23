@@ -173,6 +173,19 @@ div.reward {
     border-radius: 5px;
 }
 
+.error {
+    display: inline-block;
+    vertical-align: middle;
+    margin: 5px;
+    text-align: center;
+    background: #8a1824;
+    color: #ffffff;
+    padding: 10px;
+    font-size: 11pt;
+    border: 1px solid #ff674d;
+    border-radius: 5px;
+}
+
 .action-box {
     display: inline-block;
     vertical-align: middle;

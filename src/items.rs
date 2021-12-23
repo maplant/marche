@@ -428,7 +428,7 @@ pub fn react_action(
 
     Redirect::to(format!(
         "{}#{}",
-        uri!(crate::threads::thread(thread_id)),
+        uri!(crate::threads::thread(thread_id, Option::<&str>::None)),
         post_id
     ))
 }

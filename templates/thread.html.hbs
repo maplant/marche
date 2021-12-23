@@ -36,7 +36,7 @@
         </div>
       </li>
     {{/each}}
-    <form action="/reply/{{id}}" method="post">
+    <form action="/reply/{{id}}" method="post" id="reply">
     <li>
     <div class="row">
       <div class="cell-title" style="text-align: right; vertical-align: top; min-width: 180px">
@@ -52,6 +52,9 @@
       <div class="cell">
         <input type="submit" value="Submit">
       </div>
+      {{#if error}}
+        <div class="error">{{error}}</div>
+      {{/if}}
     </div>
     </li>
     </form>
