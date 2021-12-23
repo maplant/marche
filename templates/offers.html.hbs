@@ -1,4 +1,11 @@
 {{> header title=title }}
+    {{#if error}}
+      <li>
+        <div class="error">
+          {{error}}
+        </div>
+      </li>
+    {{/if}}
     <li>
     <div class="table" style="width: 100%">
       <div class="row">

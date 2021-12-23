@@ -5,6 +5,17 @@
           New post
         </div>
         <div class="table">
+          {{#if error}}
+            <div class="row">
+              <div class="cell-title">
+              </div>
+              <div class="cell">
+                <div class="error"> 
+                  {{error}}
+                </div>
+              </div>
+            </div>
+          {{/if}}
           <div class="row">
             <div class="cell-title">
               <label for="title">Title: </label>

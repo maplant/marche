@@ -5,11 +5,11 @@ use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use rocket::form::Form;
+use rocket::http::{Cookie, CookieJar};
 use rocket::response::Redirect;
 use rocket::{uri, FromForm};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
-use std::collections::HashMap;
 
 #[derive(Queryable)]
 pub struct Thread {
@@ -32,7 +32,7 @@ const THREADS_PER_PAGE: i64 = 10;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 
 #[rocket::get("/")]
-pub fn index(_user: User) -> Template {
+pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
     use crate::schema::threads::dsl::*;
 
     #[derive(Serialize)]
@@ -41,9 +41,10 @@ pub fn index(_user: User) -> Template {
         id: i32,
         title: String,
         date: String,
+        new_posts: bool,
     }
 
-    let conn = super::establish_db_connection();
+    let conn = crate::establish_db_connection();
 
     let posts: Vec<_> = threads
         .order(last_post.desc())
@@ -53,11 +54,20 @@ pub fn index(_user: User) -> Template {
         .unwrap_or_else(Vec::new)
         .into_iter()
         .enumerate()
-        .map(|(i, thread)| ThreadLink {
-            num: i + 1,
-            id: thread.id,
-            title: thread.title,
-            date: thread.last_post.format(DATE_FMT).to_string(),
+        .map(|(i, thread)| {
+            let date = thread.last_post.format(DATE_FMT).to_string();
+            ThreadLink {
+                num: i + 1,
+                id: thread.id,
+                title: thread.title,
+                // Check if there are any new posts, by checking if the last_seen_{thread_id}
+                // cookie is the same date as the last post.
+                new_posts: cookies
+                    .get(&format!("last_seen_{}", thread.id))
+                    .map(|d| d.value() == date)
+                    .unwrap_or(true),
+                date,
+            }
         })
         .collect();
 
@@ -75,7 +85,12 @@ pub fn unauthorized() -> Redirect {
 }
 
 #[rocket::get("/thread/<thread_id>?<error>")]
-pub fn thread(_user: User, thread_id: i32, error: Option<&str>) -> Template {
+pub fn thread(
+    _user: User,
+    cookies: &CookieJar<'_>,
+    thread_id: i32,
+    error: Option<&str>,
+) -> Template {
     use crate::schema::replies;
     use crate::schema::threads::dsl::*;
 
@@ -100,7 +115,7 @@ pub fn thread(_user: User, thread_id: i32, error: Option<&str>) -> Template {
         id: i32,
         title: &'t str,
         posts: Vec<Post>,
-        error: Option<&'e str>, 
+        error: Option<&'e str>,
     }
 
     let conn = crate::establish_db_connection();
@@ -137,6 +152,14 @@ pub fn thread(_user: User, thread_id: i32, error: Option<&str>) -> Template {
         })
         .collect::<Vec<_>>();
 
+    // Update the last_seen_{thread_id} cookie to the latest date.
+    posts.last().map(|last| {
+        cookies.add(Cookie::new(
+            format!("last_seen_{}", thread_id),
+            last.date.clone(),
+        ))
+    });
+
     Template::render(
         "thread",
         Context {
@@ -148,9 +171,15 @@ pub fn thread(_user: User, thread_id: i32, error: Option<&str>) -> Template {
     )
 }
 
-#[rocket::get("/author")]
-pub fn author_form(_user: User) -> Template {
-    Template::render("author/thread", HashMap::<String, String>::new())
+// TODO: Make error a vec of strs.
+#[rocket::get("/author?<error>")]
+pub fn author_form(_user: User, error: Option<&str>) -> Template {
+    #[derive(Serialize)]
+    struct Context<'e> {
+        error: Option<&'e str>,
+    }
+
+    Template::render("author", Context { error })
 }
 
 #[derive(FromForm)]
@@ -163,8 +192,11 @@ pub struct NewThreadReq {
 pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     use crate::schema::{replies, threads};
 
-    // TODO: Move into transaction so that you can't post a thread
-    // without the first reply.
+    if thread.title.is_empty() || thread.body.is_empty() {
+        return Redirect::to(uri!(author_form(Some(
+            "Thread title or body cannot be empty"
+        ))));
+    }
 
     let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();
@@ -178,6 +210,8 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         .unwrap();
 
     // Make first reply
+    // TODO: Move into transaction so that you can't post a thread
+    // without the first reply.
     let _: Reply = diesel::insert_into(replies::table)
         .values(&NewReply {
             author_id: user.id,
@@ -190,7 +224,7 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         .get_result(&conn)
         .unwrap();
 
-    Redirect::to("/")
+    Redirect::to(uri!(thread(thread.id, Option::<&str>::None)))
 }
 
 #[rocket::get("/author", rank = 2)]
@@ -250,7 +284,10 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
     let post_date = Utc::now().naive_utc();
 
     if reply.reply.trim().is_empty() {
-        return Redirect::to(format!("{}#reply", uri!(thread(thread_id, Some("Cannot post an empty reply")))));
+        return Redirect::to(format!(
+            "{}#reply",
+            uri!(thread(thread_id, Some("Cannot post an empty reply")))
+        ));
     }
 
     let reply: Reply = diesel::insert_into(replies::table)
@@ -270,5 +307,9 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         .set(threads::dsl::last_post.eq(post_date))
         .get_result(&conn);
 
-    Redirect::to(format!("{}#{}", uri!(thread(thread_id, Option::<&str>::None)), reply.id))
+    Redirect::to(format!(
+        "{}#{}",
+        uri!(thread(thread_id, Option::<&str>::None)),
+        reply.id
+    ))
 }

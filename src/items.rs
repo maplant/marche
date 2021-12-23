@@ -460,7 +460,7 @@ impl TradeRequest {
             .unwrap()
     }
 
-    pub fn accept(&self, conn: &PgConnection) {
+    pub fn accept(&self, conn: &PgConnection) -> Result<(), &'static str> {
         use crate::schema::drops::dsl::*;
 
         let res = conn.transaction(|| -> Result<(), diesel::result::Error> {
@@ -521,6 +521,9 @@ impl TradeRequest {
         // Decline the request if we got an error
         if res.is_err() {
             self.decline(&conn);
+            Err("Unable to accept transaction")
+        } else {
+            Ok(())
         }
     }
 
@@ -601,7 +604,7 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
         })
         .get_result(&conn);
 
-    Redirect::to(uri!(offers()))
+    Redirect::to(uri!(offers(Option::<&str>::None)))
 }
 
 #[rocket::get("/decline/<trade_id>")]
@@ -611,21 +614,23 @@ pub fn decline(user: User, trade_id: i32) -> Redirect {
     if req.sender_id == user.id || req.receiver_id == user.id {
         req.decline(&conn);
     }
-    Redirect::to(uri!(offers()))
+    Redirect::to(uri!(offers(Option::<&str>::None)))
 }
 
 #[rocket::get("/accept/<trade_id>")]
 pub fn accept(user: User, trade_id: i32) -> Redirect {
     let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
-    if req.sender_id == user.id || req.receiver_id == user.id {
-        req.accept(&conn);
-    }
-    Redirect::to(uri!(offers()))
+    let err = if req.receiver_id == user.id {
+        req.accept(&conn).err()
+    } else {
+        Some("You cannot accept that trade")
+    };
+    Redirect::to(uri!(offers(err)))
 }
 
-#[rocket::get("/offers")]
-pub fn offers(user: User) -> Template {
+#[rocket::get("/offers?<error>")]
+pub fn offers(user: User, error: Option<&str>) -> Template {
     use crate::schema::trade_requests::dsl::*;
 
     #[derive(Serialize)]
@@ -645,10 +650,11 @@ pub fn offers(user: User) -> Template {
     }
 
     #[derive(Serialize)]
-    struct Context {
+    struct Context<'e> {
         user: UserProfile,
         incoming_offers: Vec<InOffer>,
         outgoing_offers: Vec<OutOffer>,
+        error: Option<&'e str> 
     }
 
     let conn = crate::establish_db_connection();
@@ -705,6 +711,7 @@ pub fn offers(user: User) -> Template {
             user: user.profile(&conn),
             incoming_offers,
             outgoing_offers,
+            error
         },
     )
 }
