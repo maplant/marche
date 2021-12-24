@@ -79,11 +79,6 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
     )
 }
 
-#[rocket::get("/", rank = 2)]
-pub fn unauthorized() -> Redirect {
-    Redirect::to(rocket::uri!(crate::users::login_form()))
-}
-
 #[rocket::get("/thread/<thread_id>?<error>")]
 pub fn thread(
     _user: User,
@@ -225,11 +220,6 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         .unwrap();
 
     Redirect::to(uri!(thread(thread.id, Option::<&str>::None)))
-}
-
-#[rocket::get("/author", rank = 2)]
-pub fn author_unauthorized() -> Redirect {
-    Redirect::to(rocket::uri!(crate::users::login_form()))
 }
 
 #[derive(Queryable)]

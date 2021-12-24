@@ -1,6 +1,13 @@
 use rocket::fs::FileServer;
+use rocket::response::Redirect;
+use rocket::{catch, catchers, uri};
 use rocket_dyn_templates::*;
 use marche_server::{error, items, threads, users};
+
+#[catch(401)]
+fn unauthorized() -> Redirect {
+    Redirect::to(uri!(users::login_form()))
+}
 
 #[rocket::launch]
 fn launch_server() -> _ {
@@ -13,7 +20,6 @@ fn launch_server() -> _ {
                 threads::thread,
                 threads::author_form,
                 threads::author_action,
-                threads::author_unauthorized,
                 threads::reply_action,
                 items::item,
                 items::offer,
@@ -29,8 +35,8 @@ fn launch_server() -> _ {
                 users::login_action,
                 users::login_form,
                 error::error,
-                threads::unauthorized,
             ],
         )
         .mount("/static", FileServer::from("static/"))
+        .register("/", catchers![unauthorized])
 }

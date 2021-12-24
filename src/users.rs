@@ -5,7 +5,7 @@ use libpasta::verify_password;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rocket::form::{Form, FromForm};
-use rocket::http::{Cookie, CookieJar};
+use rocket::http::{Status, Cookie, CookieJar};
 use rocket::outcome::{try_outcome, IntoOutcome};
 use rocket::request::{self, FromRequest};
 use rocket::response::Redirect;
@@ -188,10 +188,10 @@ impl<'r> FromRequest<'r> for User {
             .cookies()
             .get_private(USER_SESSION_ID_COOKIE)
             .map(|x| x.value().to_string())
-            .or_forward(()));
+            .into_outcome((Status::Unauthorized, ())));
         let conn = crate::establish_db_connection();
-        let session = try_outcome!(LoginSession::fetch(&conn, &session_id).or_forward(()));
-        User::from_session(&conn, &session).or_forward(())
+        let session = try_outcome!(LoginSession::fetch(&conn, &session_id).into_outcome(Status::Unauthorized));
+        User::from_session(&conn, &session).into_outcome(Status::Unauthorized)
     }
 }
 
@@ -354,6 +354,7 @@ impl LoginSession {
         user_name: &str,
         password: &str,
     ) -> Result<Self, LoginFailure> {
+        let user_name = user_name.trim();
         let user = {
             use crate::schema::users::dsl::*;
             users
