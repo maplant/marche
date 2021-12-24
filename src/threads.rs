@@ -146,7 +146,7 @@ pub fn thread(
                     rarity: item.rarity.to_string(),
                 }
             }),
-            can_react: t.author_id == user.id,
+            can_react: t.author_id != user.id,
         })
         .collect::<Vec<_>>();
 
