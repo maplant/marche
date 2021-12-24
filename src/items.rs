@@ -1,7 +1,7 @@
 use crate::schema::{drops, trade_requests};
 use crate::threads::Reply;
 use crate::users::{User, UserCache, UserProfile};
-use chrono::Duration;
+use chrono::{Duration, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
 use diesel::serialize::Output;
@@ -151,8 +151,7 @@ pub struct ItemDrop {
 
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.
-    static ref DROP_PERIOD: Duration = Duration::minutes(0);
-    // static ref DROP_PERIOD: Duration = Duration::days(1);
+    static ref DROP_PERIOD: Duration = Duration::minutes(15);
 }
 
 /// Corresponds to a 15% chance to receive a drop.
@@ -251,9 +250,10 @@ impl ItemDrop {
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
         // Determine if we have a drop
         conn.transaction(|| {
-            let item: Option<Self> =
-                // (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc() && 
-                (rand::random::<u32>() > DROP_CHANCE).then(|| {
+            let item: Option<Self> = (dbg!(user.last_reward)
+                < dbg!(Utc::now() - *DROP_PERIOD).naive_utc()
+                && rand::random::<u32>() > DROP_CHANCE)
+                .then(|| {
                     use crate::schema::items::dsl::*;
 
                     // If we have a drop, select a random rarity.
@@ -654,7 +654,7 @@ pub fn offers(user: User, error: Option<&str>) -> Template {
         user: UserProfile,
         incoming_offers: Vec<InOffer>,
         outgoing_offers: Vec<OutOffer>,
-        error: Option<&'e str> 
+        error: Option<&'e str>,
     }
 
     let conn = crate::establish_db_connection();
@@ -711,7 +711,7 @@ pub fn offers(user: User, error: Option<&str>) -> Template {
             user: user.profile(&conn),
             incoming_offers,
             outgoing_offers,
-            error
+            error,
         },
     )
 }
