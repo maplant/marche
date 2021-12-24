@@ -27,9 +27,11 @@
                   ⭐ <b>{{reward.name}}</b> was given for this post
                 </div>
               {{/if}}
-              <a href="/react/{{id}}" class="action-box">
+              {{#if can_react}}
+                <a href="/react/{{id}}" class="action-box">
                 + React!
-              </a>
+                </a>
+              {{/if}}
               </div>
             </div>
           </div>

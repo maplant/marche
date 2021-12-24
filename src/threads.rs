@@ -82,7 +82,7 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
 
 #[rocket::get("/thread/<thread_id>?<error>")]
 pub fn thread(
-    _user: User,
+    user: User,
     cookies: &CookieJar<'_>,
     thread_id: i32,
     error: Option<&str>,
@@ -104,6 +104,7 @@ pub fn thread(
         date: String,
         reactions: Vec<ItemThumbnail>,
         reward: Option<Reward>,
+        can_react: bool,
     }
 
     #[derive(Serialize)]
@@ -145,6 +146,7 @@ pub fn thread(
                     rarity: item.rarity.to_string(),
                 }
             }),
+            can_react: t.author_id == user.id,
         })
         .collect::<Vec<_>>();
 
