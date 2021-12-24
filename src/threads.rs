@@ -4,6 +4,7 @@ use crate::schema::{replies, threads};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
+use pulldown_cmark::{html, Options, Parser};
 use rocket::form::Form;
 use rocket::http::{Cookie, CookieJar};
 use rocket::response::Redirect;
@@ -195,7 +196,12 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
 
     let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();
-    let body = &thread.body;
+
+    // Parse the body as markdown
+    let mut html_output = String::with_capacity(thread.body.len() * 3 / 2);
+    let parser = Parser::new_ext(&thread.body, Options::empty());
+    html::push_html(&mut html_output, parser);
+
     let thread: Thread = diesel::insert_into(threads::table)
         .values(&NewThread {
             last_post: post_date,
@@ -212,7 +218,7 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
             author_id: user.id,
             thread_id: thread.id,
             post_date,
-            body,
+            body: &html_output,
             reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
             reactions: Vec::new(),
         })
@@ -280,12 +286,17 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         ));
     }
 
+    // Parse the body as markdown
+    let mut html_output = String::with_capacity(reply.reply.len() * 3 / 2);
+    let parser = Parser::new_ext(&reply.reply, Options::empty());
+    html::push_html(&mut html_output, parser);
+
     let reply: Reply = diesel::insert_into(replies::table)
         .values(&NewReply {
             author_id: user.id,
             thread_id,
             post_date,
-            body: &reply.reply,
+            body: &html_output,
             reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
             reactions: Vec::new(),
         })
