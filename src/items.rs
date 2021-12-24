@@ -151,13 +151,11 @@ pub struct ItemDrop {
 
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.
-    static ref DROP_PERIOD: Duration = Duration::minutes(15);
+    static ref DROP_PERIOD: Duration = Duration::minutes(30);
 }
 
-/// Corresponds to a 15% chance to receive a drop.
-// pub const DROP_CHANCE: u32 = u32::MAX - 644245090;
-/// Four in five chance for drop.
-pub const DROP_CHANCE: u32 = u32::MAX / 5;
+/// Chance of drop is equal to 1/DROP_CHANCE
+pub const DROP_CHANCE: u32 = 10;
 
 #[derive(Insertable)]
 #[table_name = "drops"]
@@ -250,9 +248,8 @@ impl ItemDrop {
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
         // Determine if we have a drop
         conn.transaction(|| {
-            let item: Option<Self> = (dbg!(user.last_reward)
-                < dbg!(Utc::now() - *DROP_PERIOD).naive_utc()
-                && rand::random::<u32>() > DROP_CHANCE)
+            let item: Option<Self> = (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc()
+                && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
                 .then(|| {
                     use crate::schema::items::dsl::*;
 
