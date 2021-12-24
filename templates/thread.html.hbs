@@ -1,8 +1,8 @@
 {{> header title=title }}
-    <li style="background: #DBD2E0; text-align: center; margin: 5px; padding: 10px">{{title}}
+    <li class="menu-item" style="background: #DBD2E0; text-align: center; margin: 5px; padding: 10px">{{title}}
     </li>
     {{#each posts}}
-      <li>
+      <li class="menu-item">
         <div style="display: table" id={{id}}>
           <div style="display: table-row">
             {{#with author}}
@@ -37,7 +37,7 @@
       </li>
     {{/each}}
     <form action="/reply/{{id}}" method="post" id="reply">
-    <li>
+    <li class="menu-item">
       {{#if error}}
         <div class="row">
           <div class="cell-title">

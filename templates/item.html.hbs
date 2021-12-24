@@ -1,5 +1,5 @@
 {{> header title="Item"}}
-    <li>
+    <li class="menu-item">
       <div class="table">
         <div class="row">
           <div class="cell-title"></div>
@@ -18,6 +18,12 @@
           <div class="cell">{{description}}</div>
         </div>
         <div class="row">
+          <div class="cell-title">Owner:</div>
+          {{#with owner}}
+            <div class="cell"><a href="/profile/{{id}}">{{name}}</a></div>
+          {{/with}}
+        </div>
+        <div class="row">
           <div class="cell-title">Pattern Id:</div>
           <div class="cell">{{pattern}}</div>
         </div>
@@ -30,7 +36,7 @@
           </div>
           <div class="cell-title">
             <form action="/equip/{{id}}">
-            <input type="submit" value="Equip" {{#unless can_equip }} disabled {{/unless}}/>
+            <input type="submit" value="Equip" {{#unless is_equipable }} disabled {{/unless}}/>
             </form>
           </div>
         </div>

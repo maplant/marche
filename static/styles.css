@@ -1,7 +1,13 @@
-ul {
+ul.menu-item {
     list-style-type: none;
     padding: 0;
     margin: 0px;
+}
+
+li.menu-item {
+    border: 1px solid #273B09;
+    border-radius: 5px;
+    margin: 5px;
 }
 
 body {
@@ -9,31 +15,11 @@ body {
     font: 1.2em "Fira Sans", sans-serif;
 }
 
-/*
-div.error {
-    margin-top: 40px;
-    margin-left: 50px;
-    margin-right: 50px;
-    text-align: left;
-    background: #E70E02;
-    color: white;
-    padding: 15px;
-    border-top: 1px solid #F42B03;
-    border-left: 1px solid #F42B03; 
-}
-*/
-
 div.nav {
     text-align: center;
     padding: 10px;
     background: #DBD2E0;
     color: grey;
-}
-
-li {
-    border: 1px solid #273B09;
-    border-radius: 5px;
-    margin: 5px;
 }
 
 div.title {
@@ -58,16 +44,6 @@ div.header {
     padding-left: 20px;
     padding-right: 20px;
 }
-
-/*
-div.post {
-    align: center;
-    background: white;
-    padding: 20px;
-    color: white;
-    border-bottom: 1px solid #273B09;
-}
-*/
 
 div.table {
     display: table;

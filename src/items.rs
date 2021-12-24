@@ -132,6 +132,13 @@ impl Item {
     pub fn is_reaction(&self) -> bool {
         matches!(self.item_type, ItemType::Reaction { .. })
     }
+
+    pub fn is_equipable(&self) -> bool {
+        matches!(
+            self.item_type,
+            ItemType::Avatar { .. } | ItemType::ProfileBackground { .. }
+        )
+    }
 }
 
 /// A dropped item associated with a user
@@ -312,19 +319,28 @@ pub struct ItemThumbnail {
 #[rocket::get("/item/<drop_id>")]
 pub fn item(user: User, drop_id: i32) -> Template {
     #[derive(Serialize)]
-    struct Context {
+    struct Owner<'n> {
+        id: i32,
+        name: &'n str,
+    }
+
+    #[derive(Serialize)]
+    struct Context<'o> {
         id: i32,
         name: String,
         description: String,
         pattern: u16,
         rarity: String,
         thumbnail: String,
-        can_equip: bool,
+        is_equipable: bool,
+        owner: Owner<'o>,
     }
 
     let conn = crate::establish_db_connection();
     let drop = ItemDrop::fetch(&conn, drop_id);
     let item = Item::fetch(&conn, drop.item_id);
+    let owner = User::fetch(&conn, drop.owner_id).unwrap();
+    let is_equipable = user.id == drop.owner_id && item.is_equipable();
 
     Template::render(
         "item",
@@ -335,7 +351,11 @@ pub fn item(user: User, drop_id: i32) -> Template {
             pattern: drop.pattern as u16,
             rarity: item.rarity.to_string(),
             thumbnail: drop.thumbnail_html(&conn),
-            can_equip: user.id == drop.owner_id,
+            is_equipable,
+            owner: Owner {
+                id: owner.id,
+                name: &owner.name,
+            },
         },
     )
 }
