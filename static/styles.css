@@ -191,6 +191,7 @@ div.profile {
     text-align: center;
     min-width: 180px;
     padding: 5px;
+    vertical-align: top;
 }
 
 div.post {
