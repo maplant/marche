@@ -1,5 +1,5 @@
 //! Display threads
-use crate::items::{Item, ItemDrop, ItemThumbnail};
+use crate::items::{self, Item, ItemDrop, ItemThumbnail};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
@@ -40,8 +40,14 @@ const THREADS_PER_PAGE: i64 = 10;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 
 #[rocket::get("/")]
-pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
+pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
     use self::threads::dsl::*;
+
+    #[derive(Serialize)]
+    struct Context {
+        posts: Vec<ThreadLink>,
+        offer_count: i64,
+    }
 
     #[derive(Serialize)]
     struct ThreadLink {
@@ -81,8 +87,9 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
 
     Template::render(
         "index",
-        hashmap! {
-            "posts" => posts,
+        Context {
+            posts: posts,
+            offer_count: items::IncomingOffer::count(&conn, &user),
         },
     )
 }
