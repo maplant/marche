@@ -1,4 +1,3 @@
-use crate::schema::{drops, trade_requests};
 use crate::threads::Reply;
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{Duration, Utc};
@@ -99,6 +98,20 @@ impl FromSql<Jsonb, Pg> for ItemType {
     }
 }
 
+table! {
+    use diesel::sql_types::*;
+    use super::RarityMapping;
+
+    items(id) {
+        id -> Integer,
+        name -> Text,
+        description -> Text,
+        available -> Bool,
+        rarity -> RarityMapping,
+        item_type -> Jsonb,
+    }
+}
+
 /// An item that can be dropped
 #[derive(Queryable, Debug)]
 pub struct Item {
@@ -119,7 +132,8 @@ pub struct Item {
 
 impl Item {
     pub fn fetch(conn: &PgConnection, item_id: i32) -> Self {
-        use crate::schema::items::dsl::*;
+        use self::items::dsl::*;
+
         items
             .filter(id.eq(item_id))
             .load::<Self>(conn)
@@ -138,6 +152,16 @@ impl Item {
             self.item_type,
             ItemType::Avatar { .. } | ItemType::ProfileBackground { .. }
         )
+    }
+}
+
+table! {
+    drops(id) {
+        id -> Integer,
+        owner_id -> Integer,
+        item_id -> Integer,
+        pattern -> SmallInt,
+        consumed -> Bool,
     }
 }
 
@@ -179,7 +203,8 @@ impl ItemDrop {
     }
 
     pub fn fetch(conn: &PgConnection, drop_id: i32) -> Self {
-        use crate::schema::drops::dsl::*;
+        use self::drops::dsl::*;
+
         drops.filter(id.eq(drop_id)).first::<Self>(conn).unwrap()
     }
 
@@ -258,7 +283,7 @@ impl ItemDrop {
             let item: Option<Self> = (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc()
                 && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
                 .then(|| {
-                    use crate::schema::items::dsl::*;
+                    use self::items::dsl::*;
 
                     // If we have a drop, select a random rarity.
                     let rolled = Rarity::roll();
@@ -371,7 +396,7 @@ pub fn react(user: User, post_id: i32) -> Template {
     }
 
     let conn = crate::establish_db_connection();
-    let post = Reply::fetch(&conn, post_id);
+    let post = Reply::fetch(&conn, post_id).unwrap();
     let author = User::fetch(&conn, post.author_id).unwrap().profile(&conn);
     let inventory: Vec<_> = user
         .inventory(&conn)
@@ -396,58 +421,68 @@ pub fn react_action(
     used_reactions: Form<HashMap<i32, bool>>,
 ) -> Redirect {
     let conn = crate::establish_db_connection();
-    let thread_id = Reply::fetch(&conn, post_id).thread_id;
 
-    let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
-        use crate::schema::replies::dsl::*;
-        use diesel::result::Error;
+    let thread_id = conn
+        .transaction(|| -> Result<i32, diesel::result::Error> {
+            use crate::threads::replies::dsl::*;
+            use diesel::result::Error;
 
-        // Get the reply
-        let reply = replies
-            .filter(id.eq(post_id))
-            .first::<Reply>(&conn)
-            .map_err(|_| Error::RollbackTransaction)?;
+            // Get the reply
+            let reply = Reply::fetch(&conn, post_id).map_err(|_| Error::RollbackTransaction)?;
 
-        let mut new_reactions = reply.reactions;
+            let mut new_reactions = reply.reactions;
 
-        // Verify that the author does not own this reply:
-        if reply.author_id == user.id {
-            return Err(Error::RollbackTransaction);
-        }
-
-        // Verify that all of the reactions are owned by the user:
-        for (&reaction, selected) in &*used_reactions {
-            let drop = ItemDrop::fetch(&conn, reaction);
-            let item = Item::fetch(&conn, drop.item_id);
-            if !selected || drop.owner_id != user.id || !item.is_reaction() {
+            // Verify that the author does not own this reply:
+            if reply.author_id == user.id {
                 return Err(Error::RollbackTransaction);
             }
 
-            // Set the drops to consumed.
-            use crate::schema::drops::dsl::*;
-            diesel::update(drops.find(reaction))
-                .filter(consumed.eq(false))
-                .set(consumed.eq(true))
-                .get_result::<ItemDrop>(&conn)
+            // Verify that all of the reactions are owned by the user:
+            for (&reaction, selected) in &*used_reactions {
+                let drop = ItemDrop::fetch(&conn, reaction);
+                let item = Item::fetch(&conn, drop.item_id);
+                if !selected || drop.owner_id != user.id || !item.is_reaction() {
+                    return Err(Error::RollbackTransaction);
+                }
+
+                // Set the drops to consumed.
+                use self::drops::dsl::*;
+
+                diesel::update(drops.find(reaction))
+                    .filter(consumed.eq(false))
+                    .set(consumed.eq(true))
+                    .get_result::<ItemDrop>(&conn)
+                    .map_err(|_| Error::RollbackTransaction)?;
+
+                new_reactions.push(reaction);
+            }
+
+            // Update the post with the new reactions:
+            // TODO: Move into Reply struct
+            diesel::update(replies.find(post_id))
+                .set(reactions.eq(new_reactions))
+                .get_result::<Reply>(&conn)
                 .map_err(|_| Error::RollbackTransaction)?;
 
-            new_reactions.push(reaction);
-        }
-
-        // Update the post with the new reactions:
-        diesel::update(replies.find(post_id))
-            .set(reactions.eq(new_reactions))
-            .get_result::<Reply>(&conn)
-            .map_err(|_| Error::RollbackTransaction)?;
-
-        Ok(())
-    });
+            Ok(reply.thread_id)
+        })
+        .unwrap(); // TODO: Error handling
 
     Redirect::to(format!(
         "{}#{}",
         uri!(crate::threads::thread(thread_id, Option::<&str>::None)),
         post_id
     ))
+}
+
+table! {
+    trade_requests(id) {
+        id -> Integer,
+        sender_id -> Integer,
+        sender_items -> Array<Integer>,
+        receiver_id -> Integer,
+        receiver_items -> Array<Integer>,
+    }
 }
 
 /// A trade between two users.
@@ -467,7 +502,7 @@ pub struct TradeRequest {
 
 impl TradeRequest {
     pub fn fetch(conn: &PgConnection, req_id: i32) -> Self {
-        use crate::schema::trade_requests::dsl::*;
+        use self::trade_requests::dsl::*;
 
         trade_requests
             .filter(id.eq(req_id))
@@ -478,7 +513,7 @@ impl TradeRequest {
     }
 
     pub fn accept(&self, conn: &PgConnection) -> Result<(), &'static str> {
-        use crate::schema::drops::dsl::*;
+        use self::drops::dsl::*;
 
         let res = conn.transaction(|| -> Result<(), diesel::result::Error> {
             let sender = User::fetch(conn, self.sender_id).unwrap();
@@ -545,7 +580,7 @@ impl TradeRequest {
     }
 
     pub fn decline(&self, conn: &PgConnection) {
-        use crate::schema::trade_requests::dsl::*;
+        use self::trade_requests::dsl::*;
 
         diesel::delete(trade_requests.filter(id.eq(self.id)))
             .execute(conn)
@@ -648,7 +683,7 @@ pub fn accept(user: User, trade_id: i32) -> Redirect {
 
 #[rocket::get("/offers?<error>")]
 pub fn offers(user: User, error: Option<&str>) -> Template {
-    use crate::schema::trade_requests::dsl::*;
+    use self::trade_requests::dsl::*;
 
     #[derive(Serialize)]
     struct InOffer {

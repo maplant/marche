@@ -5,7 +5,6 @@ extern crate maplit;
 
 pub mod error;
 pub mod items;
-pub mod schema;
 pub mod threads;
 pub mod users;
 

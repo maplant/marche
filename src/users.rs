@@ -5,7 +5,7 @@ use libpasta::verify_password;
 use rand::rngs::OsRng;
 use rand::RngCore;
 use rocket::form::{Form, FromForm};
-use rocket::http::{Status, Cookie, CookieJar};
+use rocket::http::{Cookie, CookieJar, Status};
 use rocket::outcome::{try_outcome, IntoOutcome};
 use rocket::request::{self, FromRequest};
 use rocket::response::Redirect;
@@ -13,6 +13,19 @@ use rocket::{uri, Request};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+
+table! {
+    users (id) {
+        id -> Integer,
+        name -> Text,
+        password -> Text,
+        bio -> Text,
+        rank_id -> Integer,
+        last_reward -> Timestamp,
+        equip_slot_prof_pic -> Nullable<Integer>,
+        equip_slot_background -> Nullable<Integer>,
+    }
+}
 
 #[derive(Queryable, Debug)]
 pub struct User {
@@ -37,7 +50,7 @@ pub struct User {
 impl User {
     /// Equips an item
     pub fn equip(&self, conn: &PgConnection, item_drop: ItemDrop) {
-        use crate::schema::users::dsl::*;
+        use self::users::dsl::*;
 
         if item_drop.owner_id != self.id {
             return;
@@ -63,7 +76,7 @@ impl User {
 
     /// Un-Equips an item
     pub fn unequip(&self, conn: &PgConnection, item_drop: ItemDrop) {
-        use crate::schema::users::dsl::*;
+        use self::users::dsl::*;
 
         let item_desc = Item::fetch(conn, item_drop.item_id);
         match item_desc.item_type {
@@ -99,7 +112,7 @@ impl User {
     }
 
     pub fn inventory(&self, conn: &PgConnection) -> impl Iterator<Item = (Item, ItemDrop)> {
-        use crate::schema::drops;
+        use crate::items::drops;
 
         let mut inventory = drops::table
             .filter(drops::dsl::owner_id.eq(self.id))
@@ -133,7 +146,7 @@ impl User {
 
     /// Attempt to update the last drop time. If we fail, return false.
     pub fn update_last_reward(&self, conn: &PgConnection) -> Result<Self, ()> {
-        use crate::schema::users::dsl::{last_reward, users};
+        use self::users::dsl::{last_reward, users};
 
         diesel::update(users.find(self.id))
             .set(last_reward.eq(Utc::now().naive_utc()))
@@ -151,7 +164,8 @@ impl User {
     }
 
     pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, ()> {
-        use crate::schema::users::dsl::*;
+        use self::users::dsl::*;
+
         users
             .filter(id.eq(user_id))
             .first::<Self>(conn)
@@ -159,7 +173,8 @@ impl User {
     }
 
     pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
-        use crate::schema::users::dsl::*;
+        use self::users::dsl::*;
+
         users
             .filter(id.eq(session.user_id))
             .first::<Self>(conn)
@@ -190,7 +205,9 @@ impl<'r> FromRequest<'r> for User {
             .map(|x| x.value().to_string())
             .into_outcome((Status::Unauthorized, ())));
         let conn = crate::establish_db_connection();
-        let session = try_outcome!(LoginSession::fetch(&conn, &session_id).into_outcome(Status::Unauthorized));
+        let session = try_outcome!(
+            LoginSession::fetch(&conn, &session_id).into_outcome(Status::Unauthorized)
+        );
         User::from_session(&conn, &session).into_outcome(Status::Unauthorized)
     }
 }
@@ -210,7 +227,7 @@ pub fn curr_profile(user: User) -> Redirect {
 
 #[rocket::get("/profile/<id>")]
 pub fn profile(curr_user: User, id: i32) -> Template {
-    use crate::schema::drops;
+    use crate::items::drops;
 
     #[derive(Serialize)]
     struct Context<'n, 'p, 'b, 'bg> {
@@ -298,6 +315,15 @@ impl<'a> UserCache<'a> {
     }
 }
 
+table! {
+    login_sessions(id) {
+        id -> Integer,
+        session_id -> Varchar,
+        user_id -> Integer,
+        session_start -> Timestamp,
+    }
+}
+
 /// User login sessions
 // TODO(map): Add the IP address used to create the session for added
 // security.
@@ -312,8 +338,6 @@ pub struct LoginSession {
     /// When the session began
     pub session_start: NaiveDateTime,
 }
-
-use crate::schema::login_sessions;
 
 #[derive(Insertable)]
 #[table_name = "login_sessions"]
@@ -332,7 +356,8 @@ pub enum LoginFailure {
 impl LoginSession {
     /// Get session
     pub fn fetch(conn: &PgConnection, sess_id: &str) -> Result<Self, ()> {
-        use crate::schema::login_sessions::dsl::*;
+        use self::login_sessions::dsl::*;
+
         // TODO: If there are more than two sessions with the same id, fail.
         let curr_session = login_sessions
             .filter(session_id.eq(sess_id))
@@ -354,9 +379,12 @@ impl LoginSession {
         user_name: &str,
         password: &str,
     ) -> Result<Self, LoginFailure> {
+        use self::login_sessions::dsl::user_id;
+
         let user_name = user_name.trim();
         let user = {
-            use crate::schema::users::dsl::*;
+            use self::users::dsl::*;
+
             users
                 .filter(name.eq(user_name))
                 .load::<User>(conn)
@@ -369,7 +397,6 @@ impl LoginSession {
             return Err(LoginFailure::UserOrPasswordIncorrect);
         }
 
-        use crate::schema::login_sessions::dsl::user_id;
         diesel::delete(login_sessions::table.filter(user_id.eq(user.id)))
             .execute(conn)
             .map_err(|_| LoginFailure::FailedToCreateSession)?;

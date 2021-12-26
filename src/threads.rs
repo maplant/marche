@@ -1,6 +1,5 @@
 //! Display threads
 use crate::items::{Item, ItemDrop, ItemThumbnail};
-use crate::schema::{replies, threads};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
@@ -11,6 +10,14 @@ use rocket::response::Redirect;
 use rocket::{uri, FromForm};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
+
+table! {
+    threads(id) {
+        id -> Integer,
+        last_post -> Timestamp,
+        title -> Text,
+    }
+}
 
 #[derive(Queryable)]
 pub struct Thread {
@@ -34,7 +41,7 @@ const DATE_FMT: &str = "%m/%d %I:%M %P";
 
 #[rocket::get("/")]
 pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
-    use crate::schema::threads::dsl::*;
+    use self::threads::dsl::*;
 
     #[derive(Serialize)]
     struct ThreadLink {
@@ -87,8 +94,8 @@ pub fn thread(
     thread_id: i32,
     error: Option<&str>,
 ) -> Template {
-    use crate::schema::replies;
-    use crate::schema::threads::dsl::*;
+    use self::replies;
+    use self::threads::dsl::*;
 
     #[derive(Serialize)]
     struct Reward {
@@ -188,7 +195,7 @@ pub struct NewThreadReq {
 
 #[rocket::post("/author", data = "<thread>")]
 pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
-    use crate::schema::{replies, threads};
+    use self::{replies, threads};
 
     if thread.title.is_empty() || thread.body.is_empty() {
         return Redirect::to(uri!(author_form(Some(
@@ -230,6 +237,18 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     Redirect::to(uri!(thread(thread.id, Option::<&str>::None)))
 }
 
+table! {
+    replies(id) {
+        id -> Integer,
+        author_id -> Integer,
+        thread_id -> Integer,
+        post_date -> Timestamp,
+        body -> Text,
+        reward -> Nullable<Integer>,
+        reactions -> Array<Integer>,
+    }
+}
+
 #[derive(Queryable)]
 pub struct Reply {
     /// Id of the reply
@@ -249,12 +268,9 @@ pub struct Reply {
 }
 
 impl Reply {
-    pub fn fetch(conn: &PgConnection, reply_id: i32) -> Self {
-        use crate::schema::replies::dsl::*;
-        replies
-            .filter(id.eq(reply_id))
-            .first::<Reply>(conn)
-            .unwrap()
+    pub fn fetch(conn: &PgConnection, reply_id: i32) -> Result<Self, diesel::result::Error> {
+        use self::replies::dsl::*;
+        replies.filter(id.eq(reply_id)).first::<Reply>(conn)
     }
 }
 
@@ -276,7 +292,7 @@ pub struct ReplyReq {
 
 #[rocket::post("/reply/<thread_id>", data = "<reply>")]
 pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redirect {
-    use crate::schema::{replies, threads};
+    use self::{replies, threads};
 
     let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();

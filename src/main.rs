@@ -1,8 +1,8 @@
+use marche_server::{error, items, threads, users};
 use rocket::fs::FileServer;
 use rocket::response::Redirect;
 use rocket::{catch, catchers, uri};
 use rocket_dyn_templates::*;
-use marche_server::{error, items, threads, users};
 
 #[catch(401)]
 fn unauthorized() -> Redirect {
