@@ -1,14 +1,12 @@
 {{> header title="Global Leaderboards"}}
-{{#each user}}
+{{#each users}}
   <li class="menu-item">
     <div style="display: table">
       <div style="display: table-row">
-        {{#with profile}}
-          <div class="profile" style="{{background}}">
-            <p><a href="/profile/{{id}}">{{name}}</a></p>
-            {{> profile-pic }}
-          </div>
-        {{/with}}
+        <div class="profile" style="{{background}}">
+          <p><a href="/profile/{{id}}">{{name}}</a></p>
+          {{> profile-pic }}
+        </div>
         {{#with level}}
           <div>
             <div>{{level}}</div>
