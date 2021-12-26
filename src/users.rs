@@ -66,7 +66,7 @@ impl User {
     pub fn level(&self) -> u32 {
         let xp = self.experience();
         // Base level is 1 
-        1 + if xp == 0 { 0 } else { xp.log2() }
+        if xp < 4 { 1 } else { xp.log2() }
     }
 
     /// Returns a range of the current completion of the user's next level.
