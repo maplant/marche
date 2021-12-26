@@ -3,12 +3,11 @@
   <li class="menu-item">
     <div style="display: table">
       <div style="display: table-row">
-        <div class="profile" style="{{background}}">
+        <div class="profile" style="{{background}}; width: 180px">
           <p><a href="/profile/{{id}}">{{name}}</a></p>
-          {{> profile-pic }}
         </div>
         {{#with level}}
-          <div>
+          <div style="padding: 15px">
             <div>{{level}}</div>
             <div><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
           </div>
