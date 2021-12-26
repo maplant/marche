@@ -65,8 +65,12 @@ impl User {
     /// experience value.
     pub fn level(&self) -> u32 {
         let xp = self.experience();
-        // Base level is 1 
-        if xp < 4 { 1 } else { xp.log2() }
+        // Base level is 1
+        if xp < 4 {
+            1
+        } else {
+            xp.log2()
+        }
     }
 
     /// Returns a range of the current completion of the user's next level.
@@ -76,10 +80,17 @@ impl User {
         self.experience()..next_level_xp
     }
 
+    pub fn level_info(&self) -> LevelInfo {
+        let completion = self.level_completion();
+        LevelInfo {
+            level: self.level(),
+            curr_xp: completion.start,
+            next_level_xp: completion.end,
+        }
+    }
+
     pub fn add_experience(&self, conn: &PgConnection, xp: i64) {
         use self::users::dsl::*;
-        // use diesel::dsl::min;
-
 
         // I cannot find a way to do this properly in one sql query.
         // I need to file a bug report or something.
@@ -209,6 +220,7 @@ impl User {
             name: self.name.clone(),
             picture: self.get_profile_pic(conn),
             background: self.get_background_style(conn),
+            level: self.level_info(),
         }
     }
 
@@ -245,6 +257,14 @@ pub struct UserProfile {
     pub name: String,
     pub picture: Option<String>,
     pub background: String,
+    pub level: LevelInfo,
+}
+
+#[derive(Copy, Clone, Serialize)]
+pub struct LevelInfo {
+    level: u32,
+    curr_xp: u64,
+    next_level_xp: u64,
 }
 
 /// Name of the cookie we use to store the session Id.
@@ -291,18 +311,11 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         name: &'n str,
         picture: Option<&'p str>,
         bio: &'b str,
-        level: Level,
+        level: LevelInfo,
         equipped: Vec<ItemThumbnail>,
         inventory: Vec<ItemThumbnail>,
         background: &'bg str,
         can_trade: bool,
-    }
-
-    #[derive(Serialize)]
-    struct Level {
-        level: u32,
-        curr_xp: u64,
-        next_level_xp: u64,
     }
 
     let conn = crate::establish_db_connection();
@@ -342,9 +355,6 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         .map(|(drop, _)| drop.thumbnail(&conn))
         .collect::<Vec<_>>();
 
-    let level = user.level();
-    let xp = user.level_completion();
-
     Template::render(
         "profile",
         Context {
@@ -352,15 +362,39 @@ pub fn profile(curr_user: User, id: i32) -> Template {
             name: &user.name,
             picture: user.get_profile_pic(&conn).as_deref(),
             bio: &user.bio,
-            level: Level {
-                level,
-                curr_xp: xp.start,
-                next_level_xp: xp.end,
-            },
+            level: user.level_info(),
             equipped,
             inventory,
             background: &user.get_background_style(&conn),
             can_trade: user.id != curr_user.id,
+        },
+    )
+}
+
+#[rocket::get("/leaderboard")]
+pub fn leaderboard(_user: User) -> Template {
+    use self::users::dsl::*;
+
+    #[derive(Serialize)]
+    struct Context {
+        users: Vec<UserProfile>,
+    }
+
+    let conn = crate::establish_db_connection();
+
+    let user_profiles = users
+        .order(experience.desc())
+        .limit(100)
+        .load::<User>(&conn)
+        .unwrap()
+        .into_iter()
+        .map(|u| u.profile(&conn))
+        .collect();
+
+    Template::render(
+        "leaderboard",
+        Context {
+            users: user_profiles,
         },
     )
 }
@@ -513,11 +547,4 @@ pub fn login_action(jar: &CookieJar<'_>, login: Form<LoginReq>) -> Redirect {
 #[rocket::get("/login")]
 pub fn login_form() -> Template {
     Template::render("login", HashMap::<String, String>::new())
-}
-
-/// User privileges. Access to privileges is determined by rank.
-pub enum Privilege {
-    /// The ability to mint new items. Only the most privileged users users
-    /// should have access to this.
-    Mint,
 }

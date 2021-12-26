@@ -1,0 +1,23 @@
+{{> header title="Global Leaderboards"}}
+{{#each user}}
+  <li class="menu-item">
+    <div style="display: table">
+      <div style="display: table-row">
+        {{#with profile}}
+          <div class="profile" style="{{background}}">
+            <p><a href="/profile/{{id}}">{{name}}</a></p>
+            {{> profile-pic }}
+          </div>
+        {{/with}}
+        {{#with level}}
+          <div>
+            <div>{{level}}</div>
+            <div><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
+          </div>
+        {{/with}}
+      </div>
+    </div>
+  </li>
+{{/each}}
+</ul>
+</body>

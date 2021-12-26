@@ -32,6 +32,7 @@ fn launch_server() -> _ {
                 users::equip,
                 users::curr_profile,
                 users::profile,
+                users::leaderboard,
                 users::login_action,
                 users::login_form,
                 error::error,
