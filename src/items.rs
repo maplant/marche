@@ -80,7 +80,12 @@ pub enum ItemType {
     /// Cosmetic background, displayed behind the profile
     ProfileBackground { colors: Vec<String> },
     /// Reaction image, consumable as an attachment to posts
-    Reaction { filename: String },
+    Reaction {
+        /// Image file for the reaction
+        filename: String,
+        /// Amount of experience granted to the poster. Value can be negative
+        xp_value: i32,
+    },
 }
 
 impl ToSql<Jsonb, Pg> for ItemType {
@@ -223,7 +228,7 @@ impl ItemDrop {
                     self.background_style(conn)
                 )
             }
-            ItemType::Reaction { filename } => format!(
+            ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
                 r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg);">"#,
                 filename,
@@ -437,6 +442,9 @@ pub fn react_action(
                 return Err(Error::RollbackTransaction);
             }
 
+            let author =
+                User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
+
             // Verify that all of the reactions are owned by the user:
             for (&reaction, selected) in &*used_reactions {
                 let drop = ItemDrop::fetch(&conn, reaction);
@@ -455,6 +463,12 @@ pub fn react_action(
                     .map_err(|_| Error::RollbackTransaction)?;
 
                 new_reactions.push(reaction);
+                match item.item_type {
+                    ItemType::Reaction { xp_value, .. } => {
+                        author.add_experience(&conn, xp_value as i64)
+                    }
+                    _ => unreachable!(),
+                }
             }
 
             // Update the post with the new reactions:

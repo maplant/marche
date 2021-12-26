@@ -1,9 +1,16 @@
+CREATE TYPE role_enum as ENUM (
+  'admin',
+  'moderator',
+  'user'
+);
+
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
   password TEXT NOT NULL,
   bio TEXT NOT NULL, 
-  rank_id INTEGER,
+  role role_enum NOT NULL,
+  experience BIGINT NOT NULL, 
   last_reward TIMESTAMP NOT NULL,
   equip_slot_prof_pic INTEGER,
   equip_slot_background INTEGER

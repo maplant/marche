@@ -1,6 +1,7 @@
 use crate::items::{Item, ItemDrop, ItemThumbnail, ItemType};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
+use diesel_derive_enum::DbEnum;
 use libpasta::verify_password;
 use rand::rngs::OsRng;
 use rand::RngCore;
@@ -13,14 +14,19 @@ use rocket::{uri, Request};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 table! {
+    use diesel::sql_types::*;
+    use super::RoleMapping;
+
     users (id) {
         id -> Integer,
         name -> Text,
         password -> Text,
         bio -> Text,
-        rank_id -> Integer,
+        role -> RoleMapping,
+        experience -> BigInt,
         last_reward -> Timestamp,
         equip_slot_prof_pic -> Nullable<Integer>,
         equip_slot_background -> Nullable<Integer>,
@@ -37,8 +43,10 @@ pub struct User {
     pub password: String,
     /// Biography of the user
     pub bio: String,
-    /// Rank
-    pub rank_id: i32,
+    /// Role
+    pub role: Role,
+    /// Exprerience
+    pub experience: i64,
     /// Last reward
     pub last_reward: NaiveDateTime,
     /// ProfilePic equipment slot
@@ -48,6 +56,47 @@ pub struct User {
 }
 
 impl User {
+    /// Returns the raw, total experience of the user
+    pub fn experience(&self) -> u64 {
+        self.experience as u64
+    }
+
+    /// Returns the level of the user. The level is defined as the log_2 of the user's
+    /// experience value.
+    pub fn level(&self) -> u32 {
+        let xp = self.experience();
+        // Base level is 1 
+        1 + if xp == 0 { 0 } else { xp.log2() }
+    }
+
+    /// Returns a range of the current completion of the user's next level.
+    pub fn level_completion(&self) -> Range<u64> {
+        let next_level = self.level() + 1;
+        let next_level_xp = (1 << next_level) as u64;
+        self.experience()..next_level_xp
+    }
+
+    pub fn add_experience(&self, conn: &PgConnection, xp: i64) {
+        use self::users::dsl::*;
+        // use diesel::dsl::min;
+
+
+        // I cannot find a way to do this properly in one sql query.
+        // I need to file a bug report or something.
+
+        let user = diesel::update(users.find(self.id))
+            .set(experience.eq(experience + xp))
+            .get_result::<Self>(conn)
+            .unwrap();
+
+        if user.experience < 0 {
+            diesel::update(users.find(self.id))
+                .set(experience.eq(0))
+                .get_result::<Self>(conn)
+                .unwrap();
+        }
+    }
+
     /// Equips an item
     pub fn equip(&self, conn: &PgConnection, item_drop: ItemDrop) {
         use self::users::dsl::*;
@@ -74,7 +123,7 @@ impl User {
         }
     }
 
-    /// Un-Equips an item
+    /// Unequips an item
     pub fn unequip(&self, conn: &PgConnection, item_drop: ItemDrop) {
         use self::users::dsl::*;
 
@@ -182,6 +231,13 @@ impl User {
     }
 }
 
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum)]
+pub enum Role {
+    Admin,
+    Moderator,
+    User,
+}
+
 /// Displayable user profile
 #[derive(Clone, Serialize)]
 pub struct UserProfile {
@@ -235,10 +291,18 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         name: &'n str,
         picture: Option<&'p str>,
         bio: &'b str,
+        level: Level,
         equipped: Vec<ItemThumbnail>,
         inventory: Vec<ItemThumbnail>,
         background: &'bg str,
         can_trade: bool,
+    }
+
+    #[derive(Serialize)]
+    struct Level {
+        level: u32,
+        curr_xp: u64,
+        next_level_xp: u64,
     }
 
     let conn = crate::establish_db_connection();
@@ -278,6 +342,9 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         .map(|(drop, _)| drop.thumbnail(&conn))
         .collect::<Vec<_>>();
 
+    let level = user.level();
+    let xp = user.level_completion();
+
     Template::render(
         "profile",
         Context {
@@ -285,6 +352,11 @@ pub fn profile(curr_user: User, id: i32) -> Template {
             name: &user.name,
             picture: user.get_profile_pic(&conn).as_deref(),
             bio: &user.bio,
+            level: Level {
+                level,
+                curr_xp: xp.start,
+                next_level_xp: xp.end,
+            },
             equipped,
             inventory,
             background: &user.get_background_style(&conn),

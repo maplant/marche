@@ -15,6 +15,17 @@
         </div>
         <div class="row">
           <div class="cell-title" style="vertical-align: top; text-align: right;">
+            Level:
+          </div>
+          <div class="cell">
+            {{#with level}}
+              <p>{{level}}</p>
+              <p><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></p>
+            {{/with}}
+          </div>
+        </div>
+        <div class="row">
+          <div class="cell-title" style="vertical-align: top; text-align: right;">
             Equipped:
           </div>
           <div class="cell">
