@@ -75,9 +75,11 @@ impl User {
 
     /// Returns a range of the current completion of the user's next level.
     pub fn level_completion(&self) -> Range<u64> {
-        let next_level = self.level() + 1;
+        let level = self.level();
+        let base_xp = if level == 1 { 0 } else { 1 << level };
+        let next_level = level + 1;
         let next_level_xp = (1 << next_level) as u64;
-        self.experience()..next_level_xp
+        (self.experience() - base_xp)..next_level_xp
     }
 
     pub fn level_info(&self) -> LevelInfo {
