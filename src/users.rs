@@ -1,4 +1,4 @@
-use crate::items::{Item, ItemDrop, ItemThumbnail, ItemType};
+use crate::items::{self, Item, ItemDrop, ItemThumbnail, ItemType};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
@@ -318,6 +318,7 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         inventory: Vec<ItemThumbnail>,
         background: &'bg str,
         can_trade: bool,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -369,17 +370,19 @@ pub fn profile(curr_user: User, id: i32) -> Template {
             inventory,
             background: &user.get_background_style(&conn),
             can_trade: user.id != curr_user.id,
+            offer_count: items::IncomingOffer::count(&conn, &curr_user),
         },
     )
 }
 
 #[rocket::get("/leaderboard")]
-pub fn leaderboard(_user: User) -> Template {
+pub fn leaderboard(user: User) -> Template {
     use self::users::dsl::*;
 
     #[derive(Serialize)]
     struct Context {
         users: Vec<UserProfile>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -397,6 +400,7 @@ pub fn leaderboard(_user: User) -> Template {
         "leaderboard",
         Context {
             users: user_profiles,
+            offer_count: items::IncomingOffer::count(&conn, &user),
         },
     )
 }
