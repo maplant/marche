@@ -364,6 +364,7 @@ pub fn item(user: User, drop_id: i32) -> Template {
         thumbnail: String,
         is_equipable: bool,
         owner: Owner<'o>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -386,6 +387,7 @@ pub fn item(user: User, drop_id: i32) -> Template {
                 id: owner.id,
                 name: &owner.name,
             },
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -398,6 +400,7 @@ pub fn react(user: User, post_id: i32) -> Template {
         author: UserProfile,
         body: &'p str,
         inventory: Vec<ItemThumbnail>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -415,6 +418,7 @@ pub fn react(user: User, post_id: i32) -> Template {
             author,
             body: &post.body,
             inventory,
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -619,6 +623,7 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
         sender_inventory: Vec<ItemThumbnail>,
         receiver: UserProfile,
         receiver_inventory: Vec<ItemThumbnail>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -638,6 +643,7 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
                 .inventory(&conn)
                 .map(|(_, d)| d.thumbnail(&conn))
                 .collect(),
+            offer_count: IncomingOffer::count(&conn, &sender),
         },
     )
 }
@@ -702,6 +708,7 @@ pub fn offers(user: User, error: Option<&str>) -> Template {
         user: UserProfile,
         incoming_offers: Vec<IncomingOffer>,
         outgoing_offers: Vec<OutgoingOffer>,
+        offer_count: i64,
         error: Option<&'e str>,
     }
 
@@ -715,6 +722,7 @@ pub fn offers(user: User, error: Option<&str>) -> Template {
         "offers",
         Context {
             user: user.profile(&conn),
+            offer_count: incoming_offers.len() as i64,
             incoming_offers,
             outgoing_offers,
             error,

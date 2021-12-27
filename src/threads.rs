@@ -127,6 +127,7 @@ pub fn thread(
         title: &'t str,
         posts: Vec<Post>,
         error: Option<&'e str>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -178,6 +179,7 @@ pub fn thread(
             id: thread_id,
             title: post_title,
             posts,
+            offer_count: items::IncomingOffer::count(&conn, &user),
             error,
         },
     )
@@ -185,13 +187,21 @@ pub fn thread(
 
 // TODO: Make error a vec of strs.
 #[rocket::get("/author?<error>")]
-pub fn author_form(_user: User, error: Option<&str>) -> Template {
+pub fn author_form(user: User, error: Option<&str>) -> Template {
     #[derive(Serialize)]
     struct Context<'e> {
         error: Option<&'e str>,
+        offer_count: i64,
     }
 
-    Template::render("author", Context { error })
+    let conn = crate::establish_db_connection();
+    Template::render(
+        "author",
+        Context {
+            error,
+            offer_count: items::IncomingOffer::count(&conn, &user),
+        },
+    )
 }
 
 #[derive(FromForm)]
