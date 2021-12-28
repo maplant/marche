@@ -380,8 +380,14 @@ pub fn leaderboard(user: User) -> Template {
     use self::users::dsl::*;
 
     #[derive(Serialize)]
+    struct UserRank {
+        rank: usize,
+        profile: UserProfile,
+    }   
+
+    #[derive(Serialize)]
     struct Context {
-        users: Vec<UserProfile>,
+        users: Vec<UserRank>,
         offer_count: i64,
     }
 
@@ -393,7 +399,11 @@ pub fn leaderboard(user: User) -> Template {
         .load::<User>(&conn)
         .unwrap()
         .into_iter()
-        .map(|u| u.profile(&conn))
+        .enumerate()
+        .map(|(i, u)| UserRank {
+            rank: i + 1, 
+            profile: u.profile(&conn)
+        })
         .collect();
 
     Template::render(

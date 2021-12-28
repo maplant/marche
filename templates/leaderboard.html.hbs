@@ -1,19 +1,21 @@
 {{> header title="Global Leaderboards"}}
-<div>
+<div style="display: flex; flex-wrap: wrap">
 {{#each users}}
-  <div style="display: table">
+  <div style="display: table; border: 1px solid #273B09; border-radius: 5px; margin: 5px">
     <div style="display: table-row">
-      <div style="padding: 15px">
-        {{@index}}
+      <div style="padding: 15px; vertical-align: middle">
+        {{rank}}
       </div>
-      <div class="profile" style="{{background}}; width: 180px">
-        <p><a href="/profile/{{id}}">{{name}}</a></p>
-      </div>
-      {{#with level}}
-        <div style="padding: 15px">
-          <div>{{level}}</div>
-          <div><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
+      {{#with profile}}
+        <div class="profile" style="{{background}}; width: 180px">
+          <p><a href="/profile/{{id}}">{{name}}</a></p>
+        </div>
+        {{#with level}}
+          <div style="padding: 15px">
+            <div>{{level}}</div>
+            <div><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
           </div>
+        {{/with}}
       {{/with}}
     </div>
   </div>
