@@ -6,7 +6,7 @@ CREATE TYPE role_enum as ENUM (
 
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
   bio TEXT NOT NULL, 
   role role_enum NOT NULL,
@@ -26,7 +26,8 @@ CREATE TABLE login_sessions (
 CREATE TABLE threads (
   id SERIAL PRIMARY KEY,
   last_post TIMESTAMP NOT NULL,
-  title TEXT NOT NULL
+  title TEXT NOT NULL,
+  tags INTEGER[] NOT NULL
 );
 
 CREATE TABLE replies (
@@ -38,6 +39,12 @@ CREATE TABLE replies (
   reward INT,
   reactions INTEGER[] NOT NULL
 );
+
+CREATE TABLE tags (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  num_tagged INTEGER NOT NULL DEFAULT 1
+)
 
 CREATE TYPE rarity_enum AS ENUM (
   'common',
@@ -61,7 +68,7 @@ CREATE TABLE drops (
   owner_id INT NOT NULL,
   item_id INT NOT NULL,
   pattern SMALLINT NOT NULL,
-  consumed BOOLEAN NOT NULL
+  consumed BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE trade_requests (

@@ -16,6 +16,7 @@ table! {
         id -> Integer,
         last_post -> Timestamp,
         title -> Text,
+        tags -> Array<Integer>,
     }
 }
 
@@ -27,12 +28,15 @@ pub struct Thread {
     pub last_post: NaiveDateTime,
     /// Title of the thread
     pub title: String,
+    /// Tags given to this thread
+    pub tags: Vec<i32>,
 }
 
 #[derive(Insertable)]
 #[table_name = "threads"]
 pub struct NewThread<'t> {
     title: &'t str,
+    tags: Vec<i32>,
     last_post: NaiveDateTime,
 }
 
@@ -53,8 +57,10 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
     }
 
     let conn = crate::establish_db_connection();
+    let popular_tags: Vec<_> = Tag::popular(&conn).iter().map(Tag::id).collect();
 
     let posts: Vec<_> = threads
+        .filter(tags.overlaps_with(popular_tags))
         .order(last_post.desc())
         .limit(THREADS_PER_PAGE)
         .load::<Thread>(&conn)
@@ -190,6 +196,7 @@ pub fn author_form(_user: User, error: Option<&str>) -> Template {
 #[derive(FromForm)]
 pub struct NewThreadReq {
     title: String,
+    tags: String,
     body: String,
 }
 
@@ -211,10 +218,15 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     let parser = Parser::new_ext(&thread.body, Options::empty());
     html::push_html(&mut html_output, parser);
 
+    let tags = parse_tag_list(&thread.tags)
+        .map(|t| Tag::fetch_and_inc(&conn, t).id)
+        .collect();
+
     let thread: Thread = diesel::insert_into(threads::table)
         .values(&NewThread {
             last_post: post_date,
             title: &thread.title,
+            tags,
         })
         .get_result(&conn)
         .unwrap();
@@ -235,6 +247,70 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         .unwrap();
 
     Redirect::to(uri!(thread(thread.id, Option::<&str>::None)))
+}
+
+table! {
+    tags(id) {
+        id -> Integer,
+        name -> Text,
+        num_tagged -> Integer,
+    }
+}
+
+#[derive(Queryable)]
+pub struct Tag {
+    pub id: i32,
+    pub name: String,
+    /// Number of posts that have been tagged with this tag.
+    pub num_tagged: i32,
+}
+
+#[derive(Insertable)]
+#[table_name = "tags"]
+pub struct NewTag<'n> {
+    name: &'n str,
+}
+
+impl Tag {
+    pub fn id(&self) -> i32 {
+        self.id
+    }
+
+    /// Returns the most popular tags.
+    pub fn popular(conn: &PgConnection) -> Vec<Self> {
+        use self::tags::dsl::*;
+
+        tags.order(num_tagged.desc())
+            .limit(10)
+            .load::<Self>(conn)
+            .unwrap_or_default()
+    }
+
+    /// Fetches a tag, creating it if it doesn't already exist. num_tagged is incremented
+    /// or set to one.
+    pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Self {
+        use self::tags::dsl::*;
+
+        // TODO: make this an insert with an ON CONFLICT
+        diesel::insert_into(tags)
+            .values(&NewTag { name: tag })
+            .on_conflict(name)
+            .do_update()
+            .set(num_tagged.eq(num_tagged + 1))
+            .get_result(conn)
+            .unwrap()
+    }
+
+    /// Fetches a tag only if that tag already exists.
+    pub fn fetch_if_exists(conn: &PgConnection, tag: &str) -> Option<Self> {
+        use self::tags::dsl::*;
+
+        tags.filter(name.eq(tag)).first::<Self>(conn).ok()
+    }
+}
+
+fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
+    list.split(",").map(|i| i.trim())
 }
 
 table! {
@@ -270,6 +346,7 @@ pub struct Reply {
 impl Reply {
     pub fn fetch(conn: &PgConnection, reply_id: i32) -> Result<Self, diesel::result::Error> {
         use self::replies::dsl::*;
+
         replies.filter(id.eq(reply_id)).first::<Reply>(conn)
     }
 }
