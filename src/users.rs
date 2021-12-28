@@ -78,7 +78,7 @@ impl User {
         let level = self.level();
         let base_xp = if level == 1 { 0 } else { 1 << level };
         let next_level = level + 1;
-        let next_level_xp = (1 << next_level) as u64;
+        let next_level_xp = (1 << next_level) as u64 - base_xp;
         (self.experience() - base_xp)..next_level_xp
     }
 
@@ -383,7 +383,7 @@ pub fn leaderboard(user: User) -> Template {
     struct UserRank {
         rank: usize,
         profile: UserProfile,
-    }   
+    }
 
     #[derive(Serialize)]
     struct Context {
@@ -401,8 +401,8 @@ pub fn leaderboard(user: User) -> Template {
         .into_iter()
         .enumerate()
         .map(|(i, u)| UserRank {
-            rank: i + 1, 
-            profile: u.profile(&conn)
+            rank: i + 1,
+            profile: u.profile(&conn),
         })
         .collect();
 
