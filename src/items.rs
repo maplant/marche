@@ -191,7 +191,7 @@ lazy_static::lazy_static! {
 }
 
 /// Chance of drop is equal to 1/DROP_CHANCE
-pub const DROP_CHANCE: u32 = 10;
+pub const DROP_CHANCE: u32 = 2;
 
 #[derive(Insertable)]
 #[table_name = "drops"]
