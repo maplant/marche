@@ -166,6 +166,7 @@ div.item-overlay-row {
     left: 50%;
     transform: translateX(-50%) translateY(-50%);
     border-radius: 5px;
+    width: 12em;
 }
 
 .overlay-on-hover {
