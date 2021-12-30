@@ -30,12 +30,7 @@
           </div>
           <div class="cell">
             {{#each equipped}}
-                <a href="/item/{{id}}" class="item-{{rarity}} hover-triggers-overlay">
-                  <p>{{{thumbnail}}}</p>
-                  <div class="overlay-on-hover item-overlay item-{{rarity}}" >
-                    {{> item-overlay}}
-                  </div>
-                </a>
+              {{> item-thumbnail}}
             {{/each}}
           </div>
         </div>
@@ -45,12 +40,7 @@
           </div>
           <div class="cell">
             {{#each inventory}}
-              <a href="/item/{{id}}" class="item-{{rarity}} hover-triggers-overlay">
-                <p>{{{thumbnail}}}</p>
-                <div class="overlay-on-hover item-overlay item-{{rarity}}">
-                  {{> item-overlay}}
-                </div>
-              </a>
+              {{> item-thumbnail}}
             {{/each}}
           </div>
         </div>

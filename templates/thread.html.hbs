@@ -17,9 +17,7 @@
               </div>
               </p>
               {{#each reactions}}
-              <a href="/item/{{id}}" class="item-{{rarity}}">
-                {{{thumbnail}}}
-              </a>
+                {{> item-thumbnail}}
               {{/each}}
               <div style="float: right; text-align: right;">
               {{#if reward}}
