@@ -245,6 +245,7 @@ impl ItemDrop {
             name: item.name.clone(),
             rarity: item.rarity.to_string(),
             thumbnail: self.thumbnail_html(conn),
+            description: item.description,
         }
     }
 
@@ -344,6 +345,7 @@ pub struct ItemThumbnail {
     pub name: String,
     pub rarity: String,
     pub thumbnail: String,
+    pub description: String,
 }
 
 #[rocket::get("/item/<drop_id>")]
