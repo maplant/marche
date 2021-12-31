@@ -38,6 +38,7 @@ pub struct NewThread<'t> {
 
 const THREADS_PER_PAGE: i64 = 10;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
+const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 #[rocket::get("/")]
 pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
@@ -55,6 +56,7 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
         id: i32,
         title: String,
         date: String,
+        emphasize_date: bool,
         new_posts: bool,
     }
 
@@ -70,6 +72,41 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
         .enumerate()
         .map(|(i, thread)| {
             let date = thread.last_post.format(DATE_FMT).to_string();
+
+            //Consider moving duration->plaintext into common utility
+            let duration_since_last_post = Utc::now().naive_utc() - thread.last_post;
+            let duration_min = duration_since_last_post.num_minutes();
+            let duration_hours = duration_since_last_post.num_hours();
+            let duration_days = duration_since_last_post.num_days();
+            let duration_weeks = duration_since_last_post.num_weeks();
+            let duration_string: String = if duration_weeks > 0 {
+                format!(
+                    "{} week{} ago",
+                    duration_weeks,
+                    if duration_weeks > 1 { "s" } else { "" }
+                )
+            } else if duration_days > 0 {
+                format!(
+                    "{} day{} ago",
+                    duration_days,
+                    if duration_days > 1 { "s" } else { "" }
+                )
+            } else if duration_hours > 0 {
+                format!(
+                    "{} hour{} ago",
+                    duration_hours,
+                    if duration_hours > 1 { "s" } else { "" }
+                )
+            } else if duration_min >= 5 {
+                format!(
+                    "{} minute{} ago",
+                    duration_min,
+                    if duration_min > 1 { "s" } else { "" }
+                )
+            } else {
+                String::from("just now!")
+            };
+
             ThreadLink {
                 num: i + 1,
                 id: thread.id,
@@ -80,7 +117,8 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
                     .get(&format!("last_seen_{}", thread.id))
                     .map(|d| d.value() != date)
                     .unwrap_or(true),
-                date,
+                date: duration_string,
+                emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
             }
         })
         .collect();
