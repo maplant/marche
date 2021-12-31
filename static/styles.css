@@ -195,7 +195,7 @@ div.profile {
 }
 
 div.post {
-    word-wrap: wrap-word;
+    word-wrap: anywhere;
     display: table-cell;
     width: 100%;
     padding: 10px;
