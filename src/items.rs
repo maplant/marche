@@ -203,14 +203,14 @@ pub struct NewDrop {
 }
 
 impl ItemDrop {
-    pub fn item_id(self) -> i32 {
-        self.item_id
-    }
-
     pub fn fetch(conn: &PgConnection, drop_id: i32) -> Self {
         use self::drops::dsl::*;
 
         drops.filter(id.eq(drop_id)).first::<Self>(conn).unwrap()
+    }
+
+    pub fn fetch_item(&self, conn: &PgConnection) -> Item {
+        Item::fetch(conn, self.item_id)
     }
 
     pub fn thumbnail_html(&self, conn: &PgConnection) -> String {

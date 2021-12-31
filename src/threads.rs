@@ -1,5 +1,5 @@
 //! Display threads
-use crate::items::{self, Item, ItemDrop, ItemThumbnail};
+use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
@@ -89,7 +89,7 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
         "index",
         Context {
             posts: posts,
-            offer_count: items::IncomingOffer::count(&conn, &user),
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -155,7 +155,7 @@ pub fn thread(
                 .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
                 .collect(),
             reward: t.reward.map(|r| {
-                let item = Item::fetch(&conn, r);
+                let item = ItemDrop::fetch(&conn, r).fetch_item(&conn);
                 Reward {
                     name: item.name,
                     rarity: item.rarity.to_string(),
@@ -179,7 +179,7 @@ pub fn thread(
             id: thread_id,
             title: post_title,
             posts,
-            offer_count: items::IncomingOffer::count(&conn, &user),
+            offer_count: IncomingOffer::count(&conn, &user),
             error,
         },
     )
@@ -199,7 +199,7 @@ pub fn author_form(user: User, error: Option<&str>) -> Template {
         "author",
         Context {
             error,
-            offer_count: items::IncomingOffer::count(&conn, &user),
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -245,7 +245,7 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
             thread_id: thread.id,
             post_date,
             body: &html_output,
-            reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
             reactions: Vec::new(),
         })
         .get_result(&conn)
@@ -332,7 +332,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
             thread_id,
             post_date,
             body: &html_output,
-            reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
             reactions: Vec::new(),
         })
         .get_result(&conn)
