@@ -195,7 +195,7 @@ div.profile {
 }
 
 div.post {
-    overflow-wrap: break-word;
+    overflow-wrap: anywhere;
     display: table-cell;
     width: 100%;
     padding: 10px;
