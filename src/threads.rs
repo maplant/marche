@@ -142,9 +142,12 @@ pub fn thread(
     use self::replies;
     use self::threads::dsl::*;
 
+    // Consider removing this in favor of just using ItemThumbnail instead
     #[derive(Serialize)]
     struct Reward {
+        thumbnail: String,
         name: String,
+        description: String,
         rarity: String,
     }
 
@@ -193,9 +196,12 @@ pub fn thread(
                 .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
                 .collect(),
             reward: t.reward.map(|r| {
-                let item = ItemDrop::fetch(&conn, r).fetch_item(&conn);
+                let drop = ItemDrop::fetch(&conn, r);
+                let item = drop.fetch_item(&conn);
                 Reward {
                     name: item.name,
+                    description: item.description,
+                    thumbnail: drop.thumbnail_html(&conn),
                     rarity: item.rarity.to_string(),
                 }
             }),

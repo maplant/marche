@@ -151,6 +151,46 @@ div.reward {
     border-radius: 5px;
 }
 
+div.item-overlay-cell {
+    padding: 5px;
+}
+
+div.item-overlay-row {
+    display: table-row;
+}
+
+.item-overlay {
+    position: absolute;
+    display: inline-block;
+    top: 50%;
+    left: 50%;
+    transform: translateX(-50%) translateY(-50%);
+    border-radius: 5px;
+    width: 13em;
+    pointer-events: none;
+}
+
+.overlay-on-hover {
+    position: absolute;
+    visibility: hidden;
+    opacity: 0.0;
+    z-index: 10;
+    transition: all 300ms ease-in-out;
+    -o-transition: all 300ms ease-in-out;
+    -ms-transition: all 300ms ease-in-out;
+    -moz-transition: all 300ms ease-in-out;
+    -webkit-transition: all 300ms ease-in-out;
+}
+
+.hover-triggers-overlay{
+    position: relative;
+}
+ 
+.hover-triggers-overlay:hover .overlay-on-hover {
+    opacity: 1.0;
+    visibility: visible;
+}
+
 .error {
     margin: 5px;
     display: inline-block;
