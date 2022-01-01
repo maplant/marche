@@ -241,3 +241,12 @@ div.post {
     width: 100%;
     padding: 10px;
 }
+
+@keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(359deg);
+    }
+}
