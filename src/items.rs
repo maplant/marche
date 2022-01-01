@@ -7,7 +7,8 @@ use diesel::serialize::Output;
 use diesel::sql_types::Jsonb;
 use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
-use rand::prelude::{thread_rng, IteratorRandom};
+use rand::prelude::{thread_rng, IteratorRandom, StdRng};
+use rand::{Rng, SeedableRng};
 use rocket::form::Form;
 use rocket::response::Redirect;
 use rocket::uri;
@@ -230,9 +231,17 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg);">"#,
+                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg); animation: {}">"#,
                 filename,
-                self.rotation(),
+                rotation(self),
+                if is_spinning(self) {
+                    format!(
+                        "spin {}s infinite linear",
+                        spin_speed(self)
+                    )
+                } else {
+                    String::new()
+                },
             ),
         }
     }
@@ -278,9 +287,14 @@ impl ItemDrop {
         }
     }
 
-    pub fn rotation(&self) -> f32 {
-        (self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0
+    pub fn get_rng(&self, seed: u16) -> StdRng {
+        StdRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
     }
+
+    pub fn chance_to_occur(&self, seed: u16, one_in_n_chance: u32) -> bool {
+        self.get_rng(seed).gen_ratio(1, one_in_n_chance)
+    }
+
 
     /// Possibly selects an item, depending on the last drop.
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
@@ -336,6 +350,18 @@ impl ItemDrop {
         .ok()
         .flatten()
     }
+}
+
+pub fn rotation(drop: &ItemDrop) -> u32 {
+    drop.get_rng(1).gen_range(0..360)
+}
+
+pub fn is_spinning(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(2, 10) //todo magic
+}
+
+pub fn spin_speed(drop: &ItemDrop) -> f64 {
+    drop.get_rng(3).gen_range(0.1..3.0)
 }
 
 // TODO: Take this struct and extract it somewhere
