@@ -1,6 +1,6 @@
 {{> header title=title }}
     {{#if error}}
-      <li class="menu-item">
+      <li>
         <div class="error">
           {{error}}
         </div>
@@ -30,10 +30,7 @@
         {{/with}}
         <div class="cell">
           {{#each sender_items}}
-            <div class="item-{{rarity}}">
-              <p>{{{thumbnail}}}</p>
-              {{name}}
-            </div>
+            {{> item-thumbnail}}
           {{/each}}
         </div>
         {{#with ../user}}
@@ -44,10 +41,7 @@
         {{/with}}
         <div class="cell">
           {{#each receiver_items}}
-            <div class="item-{{rarity}}">
-              <p>{{{thumbnail}}}</p>
-              {{name}}
-            </div>
+            {{> item-thumbnail}}
           {{/each}}
         </div>
       </div>
@@ -94,10 +88,7 @@
         {{/with}}
         <div class="cell">
           {{#each sender_items}}
-            <div class="item-{{rarity}}">
-              <p>{{{thumbnail}}}</p>
-              {{name}}
-            </div>
+            {{> item-thumbnail}}
           {{/each}}
         </div>
         {{#with receiver}}
@@ -108,10 +99,7 @@
         {{/with}}
         <div class="cell">
           {{#each receiver_items}}
-            <div class="item-{{rarity}}">
-              <p>{{{thumbnail}}}</p>
-              {{name}}
-            </div>
+            {{> item-thumbnail}}
           {{/each}}
         </div>
       </div>

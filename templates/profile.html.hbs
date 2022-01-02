@@ -30,10 +30,7 @@
           </div>
           <div class="cell">
             {{#each equipped}}
-              <a href="/item/{{id}}" class="item-{{rarity}}">
-                <p>{{{thumbnail}}}</p>
-                {{name}}
-              </a>
+              {{> item-thumbnail}}
             {{/each}}
           </div>
         </div>
@@ -43,10 +40,7 @@
           </div>
           <div class="cell">
             {{#each inventory}}
-              <a href="/item/{{id}}" class="item-{{rarity}}">
-                <p>{{{thumbnail}}}</p>
-                {{name}}
-              </a>
+              {{> item-thumbnail}}
             {{/each}}
           </div>
         </div>

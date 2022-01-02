@@ -7,7 +7,8 @@ use diesel::serialize::Output;
 use diesel::sql_types::Jsonb;
 use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
-use rand::prelude::{thread_rng, IteratorRandom};
+use rand::prelude::{thread_rng, IteratorRandom, StdRng};
+use rand::{Rng, SeedableRng};
 use rocket::form::Form;
 use rocket::response::Redirect;
 use rocket::uri;
@@ -191,7 +192,7 @@ lazy_static::lazy_static! {
 }
 
 /// Chance of drop is equal to 1/DROP_CHANCE
-pub const DROP_CHANCE: u32 = 10;
+pub const DROP_CHANCE: u32 = 2;
 
 #[derive(Insertable)]
 #[table_name = "drops"]
@@ -203,14 +204,14 @@ pub struct NewDrop {
 }
 
 impl ItemDrop {
-    pub fn item_id(self) -> i32 {
-        self.item_id
-    }
-
     pub fn fetch(conn: &PgConnection, drop_id: i32) -> Self {
         use self::drops::dsl::*;
 
         drops.filter(id.eq(drop_id)).first::<Self>(conn).unwrap()
+    }
+
+    pub fn fetch_item(&self, conn: &PgConnection) -> Item {
+        Item::fetch(conn, self.item_id)
     }
 
     pub fn thumbnail_html(&self, conn: &PgConnection) -> String {
@@ -230,9 +231,17 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg);">"#,
+                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg); animation: {}">"#,
                 filename,
-                self.rotation(),
+                rotation(self),
+                if is_spinning(self) {
+                    format!(
+                        "spin {}s infinite linear",
+                        spin_speed(self)
+                    )
+                } else {
+                    String::new()
+                },
             ),
         }
     }
@@ -245,6 +254,7 @@ impl ItemDrop {
             name: item.name.clone(),
             rarity: item.rarity.to_string(),
             thumbnail: self.thumbnail_html(conn),
+            description: item.description,
         }
     }
 
@@ -277,9 +287,14 @@ impl ItemDrop {
         }
     }
 
-    pub fn rotation(&self) -> f32 {
-        (self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0
+    pub fn get_rng(&self, seed: u16) -> StdRng {
+        StdRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
     }
+
+    pub fn chance_to_occur(&self, seed: u16, one_in_n_chance: u32) -> bool {
+        self.get_rng(seed).gen_ratio(1, one_in_n_chance)
+    }
+
 
     /// Possibly selects an item, depending on the last drop.
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
@@ -337,6 +352,18 @@ impl ItemDrop {
     }
 }
 
+pub fn rotation(drop: &ItemDrop) -> u32 {
+    drop.get_rng(1).gen_range(0..360)
+}
+
+pub fn is_spinning(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(2, 10) //todo magic
+}
+
+pub fn spin_speed(drop: &ItemDrop) -> f64 {
+    drop.get_rng(3).gen_range(0.1..3.0)
+}
+
 // TODO: Take this struct and extract it somewhere
 #[derive(Serialize)]
 pub struct ItemThumbnail {
@@ -344,6 +371,7 @@ pub struct ItemThumbnail {
     pub name: String,
     pub rarity: String,
     pub thumbnail: String,
+    pub description: String,
 }
 
 #[rocket::get("/item/<drop_id>")]
@@ -364,6 +392,7 @@ pub fn item(user: User, drop_id: i32) -> Template {
         thumbnail: String,
         is_equipable: bool,
         owner: Owner<'o>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -386,6 +415,7 @@ pub fn item(user: User, drop_id: i32) -> Template {
                 id: owner.id,
                 name: &owner.name,
             },
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -398,6 +428,7 @@ pub fn react(user: User, post_id: i32) -> Template {
         author: UserProfile,
         body: &'p str,
         inventory: Vec<ItemThumbnail>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -415,6 +446,7 @@ pub fn react(user: User, post_id: i32) -> Template {
             author,
             body: &post.body,
             inventory,
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -619,6 +651,7 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
         sender_inventory: Vec<ItemThumbnail>,
         receiver: UserProfile,
         receiver_inventory: Vec<ItemThumbnail>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -638,6 +671,7 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
                 .inventory(&conn)
                 .map(|(_, d)| d.thumbnail(&conn))
                 .collect(),
+            offer_count: IncomingOffer::count(&conn, &sender),
         },
     )
 }
@@ -697,87 +731,120 @@ pub fn accept(user: User, trade_id: i32) -> Redirect {
 
 #[rocket::get("/offers?<error>")]
 pub fn offers(user: User, error: Option<&str>) -> Template {
-    use self::trade_requests::dsl::*;
-
-    #[derive(Serialize)]
-    struct InOffer {
-        id: i32,
-        sender: UserProfile,
-        sender_items: Vec<ItemThumbnail>,
-        receiver_items: Vec<ItemThumbnail>,
-    }
-
-    #[derive(Serialize)]
-    struct OutOffer {
-        id: i32,
-        sender_items: Vec<ItemThumbnail>,
-        receiver: UserProfile,
-        receiver_items: Vec<ItemThumbnail>,
-    }
-
     #[derive(Serialize)]
     struct Context<'e> {
         user: UserProfile,
-        incoming_offers: Vec<InOffer>,
-        outgoing_offers: Vec<OutOffer>,
+        incoming_offers: Vec<IncomingOffer>,
+        outgoing_offers: Vec<OutgoingOffer>,
+        offer_count: i64,
         error: Option<&'e str>,
     }
 
     let conn = crate::establish_db_connection();
     let mut user_cache = UserCache::new(&conn);
     // TODO: filter out trade requests that are no longer valid.
-    let incoming_offers: Vec<_> = trade_requests
-        .filter(receiver_id.eq(user.id))
-        .load::<TradeRequest>(&conn)
-        .unwrap()
-        .into_iter()
-        .map(|trade| -> InOffer {
-            InOffer {
-                id: trade.id,
-                sender: user_cache.get(trade.sender_id).clone(),
-                sender_items: trade
-                    .sender_items
-                    .into_iter()
-                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
-                    .collect(),
-                receiver_items: trade
-                    .receiver_items
-                    .into_iter()
-                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
-                    .collect(),
-            }
-        })
-        .collect();
-    let outgoing_offers: Vec<_> = trade_requests
-        .filter(sender_id.eq(user.id))
-        .load::<TradeRequest>(&conn)
-        .unwrap()
-        .into_iter()
-        .map(|trade| -> OutOffer {
-            OutOffer {
-                id: trade.id,
-                receiver: user_cache.get(trade.receiver_id).clone(),
-                sender_items: trade
-                    .sender_items
-                    .into_iter()
-                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
-                    .collect(),
-                receiver_items: trade
-                    .receiver_items
-                    .into_iter()
-                    .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
-                    .collect(),
-            }
-        })
-        .collect();
+    let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
+    let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
 
     Template::render(
         "offers",
         Context {
             user: user.profile(&conn),
+            offer_count: incoming_offers.len() as i64,
             incoming_offers,
             outgoing_offers,
             error,
         },
     )
+}
+
+#[derive(Serialize)]
+pub struct IncomingOffer {
+    id: i32,
+    sender: UserProfile,
+    sender_items: Vec<ItemThumbnail>,
+    receiver_items: Vec<ItemThumbnail>,
+}
+
+impl IncomingOffer {
+    fn retrieve(
+        conn: &PgConnection,
+        user_cache: &mut UserCache,
+        user: &User,
+    ) -> Vec<IncomingOffer> {
+        use self::trade_requests::dsl::*;
+
+        return trade_requests
+            .filter(receiver_id.eq(user.id))
+            .load::<TradeRequest>(conn)
+            .unwrap()
+            .into_iter()
+            .map(|trade| -> IncomingOffer {
+                IncomingOffer {
+                    id: trade.id,
+                    sender: user_cache.get(trade.sender_id).clone(),
+                    sender_items: trade
+                        .sender_items
+                        .into_iter()
+                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .collect(),
+                    receiver_items: trade
+                        .receiver_items
+                        .into_iter()
+                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .collect(),
+                }
+            })
+            .collect();
+    }
+
+    pub fn count(conn: &PgConnection, user: &User) -> i64 {
+        use self::trade_requests::dsl::*;
+        return trade_requests
+            .filter(receiver_id.eq(user.id))
+            .count()
+            .get_result(conn)
+            .unwrap_or(0);
+    }
+}
+
+#[derive(Serialize)]
+struct OutgoingOffer {
+    id: i32,
+    sender_items: Vec<ItemThumbnail>,
+    receiver: UserProfile,
+    receiver_items: Vec<ItemThumbnail>,
+}
+
+impl OutgoingOffer {
+    fn retrieve(
+        conn: &PgConnection,
+        user_cache: &mut UserCache,
+        user: &User,
+    ) -> Vec<OutgoingOffer> {
+        use self::trade_requests::dsl::*;
+
+        return trade_requests
+            .filter(sender_id.eq(user.id))
+            .load::<TradeRequest>(conn)
+            .unwrap()
+            .into_iter()
+            .map(|trade| -> OutgoingOffer {
+                OutgoingOffer {
+                    id: trade.id,
+                    receiver: user_cache.get(trade.receiver_id).clone(),
+                    sender_items: trade
+                        .sender_items
+                        .into_iter()
+                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .collect(),
+                    receiver_items: trade
+                        .receiver_items
+                        .into_iter()
+                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .collect(),
+                }
+            })
+            .collect();
+    }
 }

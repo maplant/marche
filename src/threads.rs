@@ -1,5 +1,5 @@
 //! Display threads
-use crate::items::{Item, ItemDrop, ItemThumbnail};
+use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
@@ -42,10 +42,17 @@ pub struct NewThread<'t> {
 
 const THREADS_PER_PAGE: i64 = 10;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
+const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 #[rocket::get("/")]
-pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
+pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
     use self::threads::dsl::*;
+
+    #[derive(Serialize)]
+    struct Context {
+        posts: Vec<ThreadLink>,
+        offer_count: i64,
+    }
 
     #[derive(Serialize)]
     struct ThreadLink {
@@ -53,6 +60,7 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
         id: i32,
         title: String,
         date: String,
+        emphasize_date: bool,
         new_posts: bool,
     }
 
@@ -70,6 +78,41 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
         .enumerate()
         .map(|(i, thread)| {
             let date = thread.last_post.format(DATE_FMT).to_string();
+
+            //Consider moving duration->plaintext into common utility
+            let duration_since_last_post = Utc::now().naive_utc() - thread.last_post;
+            let duration_min = duration_since_last_post.num_minutes();
+            let duration_hours = duration_since_last_post.num_hours();
+            let duration_days = duration_since_last_post.num_days();
+            let duration_weeks = duration_since_last_post.num_weeks();
+            let duration_string: String = if duration_weeks > 0 {
+                format!(
+                    "{} week{} ago",
+                    duration_weeks,
+                    if duration_weeks > 1 { "s" } else { "" }
+                )
+            } else if duration_days > 0 {
+                format!(
+                    "{} day{} ago",
+                    duration_days,
+                    if duration_days > 1 { "s" } else { "" }
+                )
+            } else if duration_hours > 0 {
+                format!(
+                    "{} hour{} ago",
+                    duration_hours,
+                    if duration_hours > 1 { "s" } else { "" }
+                )
+            } else if duration_min >= 5 {
+                format!(
+                    "{} minute{} ago",
+                    duration_min,
+                    if duration_min > 1 { "s" } else { "" }
+                )
+            } else {
+                String::from("just now!")
+            };
+
             ThreadLink {
                 num: i + 1,
                 id: thread.id,
@@ -80,15 +123,17 @@ pub fn index(_user: User, cookies: &CookieJar<'_>) -> Template {
                     .get(&format!("last_seen_{}", thread.id))
                     .map(|d| d.value() != date)
                     .unwrap_or(true),
-                date,
+                date: duration_string,
+                emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
             }
         })
         .collect();
 
     Template::render(
         "index",
-        hashmap! {
-            "posts" => posts,
+        Context {
+            posts: posts,
+            offer_count: IncomingOffer::count(&conn, &user),
         },
     )
 }
@@ -103,9 +148,12 @@ pub fn thread(
     use self::replies;
     use self::threads::dsl::*;
 
+    // Consider removing this in favor of just using ItemThumbnail instead
     #[derive(Serialize)]
     struct Reward {
+        thumbnail: String,
         name: String,
+        description: String,
         rarity: String,
     }
 
@@ -126,6 +174,7 @@ pub fn thread(
         title: &'t str,
         posts: Vec<Post>,
         error: Option<&'e str>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -153,9 +202,12 @@ pub fn thread(
                 .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
                 .collect(),
             reward: t.reward.map(|r| {
-                let item = Item::fetch(&conn, r);
+                let drop = ItemDrop::fetch(&conn, r);
+                let item = drop.fetch_item(&conn);
                 Reward {
                     name: item.name,
+                    description: item.description,
+                    thumbnail: drop.thumbnail_html(&conn),
                     rarity: item.rarity.to_string(),
                 }
             }),
@@ -177,6 +229,7 @@ pub fn thread(
             id: thread_id,
             title: post_title,
             posts,
+            offer_count: IncomingOffer::count(&conn, &user),
             error,
         },
     )
@@ -184,13 +237,21 @@ pub fn thread(
 
 // TODO: Make error a vec of strs.
 #[rocket::get("/author?<error>")]
-pub fn author_form(_user: User, error: Option<&str>) -> Template {
+pub fn author_form(user: User, error: Option<&str>) -> Template {
     #[derive(Serialize)]
     struct Context<'e> {
         error: Option<&'e str>,
+        offer_count: i64,
     }
 
-    Template::render("author", Context { error })
+    let conn = crate::establish_db_connection();
+    Template::render(
+        "author",
+        Context {
+            error,
+            offer_count: IncomingOffer::count(&conn, &user),
+        },
+    )
 }
 
 #[derive(FromForm)]
@@ -240,7 +301,7 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
             thread_id: thread.id,
             post_date,
             body: &html_output,
-            reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
             reactions: Vec::new(),
         })
         .get_result(&conn)
@@ -392,7 +453,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
             thread_id,
             post_date,
             body: &html_output,
-            reward: ItemDrop::drop(&conn, &user).map(ItemDrop::item_id),
+            reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
             reactions: Vec::new(),
         })
         .get_result(&conn)

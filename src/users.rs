@@ -1,4 +1,4 @@
-use crate::items::{Item, ItemDrop, ItemThumbnail, ItemType};
+use crate::items::{self, Item, ItemDrop, ItemThumbnail, ItemType};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
@@ -78,7 +78,7 @@ impl User {
         let level = self.level();
         let base_xp = if level == 1 { 0 } else { 1 << level };
         let next_level = level + 1;
-        let next_level_xp = (1 << next_level) as u64;
+        let next_level_xp = (1 << next_level) as u64 - base_xp;
         (self.experience() - base_xp)..next_level_xp
     }
 
@@ -318,6 +318,7 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         inventory: Vec<ItemThumbnail>,
         background: &'bg str,
         can_trade: bool,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -369,17 +370,25 @@ pub fn profile(curr_user: User, id: i32) -> Template {
             inventory,
             background: &user.get_background_style(&conn),
             can_trade: user.id != curr_user.id,
+            offer_count: items::IncomingOffer::count(&conn, &curr_user),
         },
     )
 }
 
 #[rocket::get("/leaderboard")]
-pub fn leaderboard(_user: User) -> Template {
+pub fn leaderboard(user: User) -> Template {
     use self::users::dsl::*;
 
     #[derive(Serialize)]
+    struct UserRank {
+        rank: usize,
+        profile: UserProfile,
+    }
+
+    #[derive(Serialize)]
     struct Context {
-        users: Vec<UserProfile>,
+        users: Vec<UserRank>,
+        offer_count: i64,
     }
 
     let conn = crate::establish_db_connection();
@@ -390,13 +399,18 @@ pub fn leaderboard(_user: User) -> Template {
         .load::<User>(&conn)
         .unwrap()
         .into_iter()
-        .map(|u| u.profile(&conn))
+        .enumerate()
+        .map(|(i, u)| UserRank {
+            rank: i + 1,
+            profile: u.profile(&conn),
+        })
         .collect();
 
     Template::render(
         "leaderboard",
         Context {
             users: user_profiles,
+            offer_count: items::IncomingOffer::count(&conn, &user),
         },
     )
 }
