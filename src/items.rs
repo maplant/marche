@@ -7,7 +7,7 @@ use diesel::serialize::Output;
 use diesel::sql_types::Jsonb;
 use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
-use rand::prelude::{thread_rng, IteratorRandom, StdRng};
+use rand::prelude::{thread_rng, IteratorRandom};
 use rand::{Rng, SeedableRng};
 use rocket::form::Form;
 use rocket::response::Redirect;
@@ -15,6 +15,7 @@ use rocket::uri;
 use rocket_dyn_templates::Template;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use rand_xorshift::XorShiftRng;
 
 /// Rarity of an item.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, DbEnum)]
@@ -231,11 +232,25 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg); animation: {}">"#,
+                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}{};"></div>"#,
+                if is_rolling(self) {
+                    format!(",roll {}s infinite linear", rolling_speed(self))
+                } else {
+                    String::new()
+                },
                 filename,
-                rotation(self),
+                if is_rotated(self) {
+                    format!("rotate({}deg)", rotation(self))
+                } else {
+                    String::new()
+                },
                 if is_spinning(self) {
-                    format!("spin {}s infinite linear", spin_speed(self))
+                    format!(",spin {}s infinite linear", spin_speed(self))
+                } else {
+                    String::new()
+                },
+                if is_shiny(self) {
+                    format!(",shiny {}s infinite linear", shiny_speed(self))
                 } else {
                     String::new()
                 },
@@ -284,8 +299,8 @@ impl ItemDrop {
         }
     }
 
-    pub fn get_rng(&self, seed: u16) -> StdRng {
-        StdRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
+    pub fn get_rng(&self, seed: u16) -> XorShiftRng {
+        XorShiftRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
     }
 
     pub fn chance_to_occur(&self, seed: u16, one_in_n_chance: u32) -> bool {
@@ -348,6 +363,10 @@ impl ItemDrop {
     }
 }
 
+pub fn is_rotated(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(0, 2) //todo magic
+}
+
 pub fn rotation(drop: &ItemDrop) -> u32 {
     drop.get_rng(1).gen_range(0..360)
 }
@@ -358,6 +377,22 @@ pub fn is_spinning(drop: &ItemDrop) -> bool {
 
 pub fn spin_speed(drop: &ItemDrop) -> f64 {
     drop.get_rng(3).gen_range(0.1..3.0)
+}
+
+pub fn is_rolling(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(4, 10) //todo magic
+}
+
+pub fn rolling_speed(drop: &ItemDrop) -> f64 {
+    drop.get_rng(5).gen_range(0.33..3.0)
+}
+
+pub fn is_shiny(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(6, 10) //todo magic
+}
+
+pub fn shiny_speed(drop: &ItemDrop) -> f64 {
+    drop.get_rng(7).gen_range(0.33..3.0)
 }
 
 // TODO: Take this struct and extract it somewhere

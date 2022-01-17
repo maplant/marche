@@ -17,6 +17,7 @@ maplit = "1.0"
 lazy_static = "1.4"
 diesel-derive-enum = { version = "1", features = ["postgres"] }
 pulldown-cmark = "0.9"
+rand_xorshift = "0.3.0"
 
 [dependencies.rocket_dyn_templates]
 version = "0.1.0-rc.1"

@@ -313,9 +313,31 @@ div.post {
 
 @keyframes spin {
     from {
-      transform: rotate(0deg);
+      transform: rotateZ(0deg);
     }
     to {
-      transform: rotate(359deg);
+      transform: rotateZ(359deg);
+    }
+}
+
+@keyframes shiny {
+    from {
+      filter: hue-rotate(0deg)
+    }
+    to {
+      filter: hue-rotate(359deg)
+    }
+}
+
+@keyframes roll {
+    from {
+      transform: rotateY(0deg);
+      moz-transform: rotateY(0deg);
+      ms-transform: rotateY(0deg);
+    }
+    to {
+      transform: rotateY(359deg);
+      moz-transform: rotateY(359deg);
+      ms-transform: rotateY(359deg);
     }
 }
