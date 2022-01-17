@@ -232,7 +232,7 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}{};"></div>"#,
+                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}{}; filter: {}{}{}{}{}{};"></div>"#,
                 if is_rolling(self) {
                     format!(",roll {}s infinite linear", rolling_speed(self))
                 } else {
@@ -251,6 +251,36 @@ impl ItemDrop {
                 },
                 if is_shiny(self) {
                     format!(",shiny {}s infinite linear", shiny_speed(self))
+                } else {
+                    String::new()
+                },
+                if is_blury(self) {
+                    format!(" blur({}px)", blur(self))
+                } else {
+                    String::new()
+                },
+                if is_transparent(self) {
+                    format!(" opacity({}%)", transparency(self))
+                } else {
+                    String::new()
+                },
+                if is_high_contrast(self) {
+                    format!(" contrast({}%)", contrast(self))
+                } else {
+                    String::new()
+                },
+                if is_sepia(self) {
+                    String::from(" sepia(100%)")
+                } else {
+                    String::new()
+                },
+                if is_inverted(self) {
+                    String::from(" invert(100%)")
+                } else {
+                    String::new()
+                },
+                if is_saturated(self) {
+                    format!(" saturate({}%)", saturation(self))
                 } else {
                     String::new()
                 },
@@ -372,7 +402,7 @@ pub fn rotation(drop: &ItemDrop) -> u32 {
 }
 
 pub fn is_spinning(drop: &ItemDrop) -> bool {
-    drop.chance_to_occur(2, 10) //todo magic
+    drop.chance_to_occur(2, 5) //todo magic
 }
 
 pub fn spin_speed(drop: &ItemDrop) -> f64 {
@@ -380,7 +410,7 @@ pub fn spin_speed(drop: &ItemDrop) -> f64 {
 }
 
 pub fn is_rolling(drop: &ItemDrop) -> bool {
-    drop.chance_to_occur(4, 10) //todo magic
+    drop.chance_to_occur(4, 5) //todo magic
 }
 
 pub fn rolling_speed(drop: &ItemDrop) -> f64 {
@@ -393,6 +423,46 @@ pub fn is_shiny(drop: &ItemDrop) -> bool {
 
 pub fn shiny_speed(drop: &ItemDrop) -> f64 {
     drop.get_rng(7).gen_range(0.33..3.0)
+}
+
+pub fn is_blury(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(8, 20) //todo magic
+}
+
+pub fn blur(drop: &ItemDrop) -> u32 {
+    drop.get_rng(9).gen_range(2..8)
+}
+
+pub fn is_transparent(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(10, 30) //todo magic
+}
+
+pub fn transparency(drop: &ItemDrop) -> u32 {
+    drop.get_rng(11).gen_range(10..60)
+}
+
+pub fn is_high_contrast(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(12, 10) //todo magic
+}
+
+pub fn contrast(drop: &ItemDrop) -> u32 {
+    drop.get_rng(13).gen_range(100..500)
+}
+
+pub fn is_sepia(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(14, 10) //todo magic
+}
+
+pub fn is_inverted(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(15, 20) //todo magic
+}
+
+pub fn is_saturated(drop: &ItemDrop) -> bool {
+    drop.chance_to_occur(16, 20) //todo magic
+}
+
+pub fn saturation(drop: &ItemDrop) -> u32 {
+    drop.get_rng(17).gen_range(100..400)
 }
 
 // TODO: Take this struct and extract it somewhere
