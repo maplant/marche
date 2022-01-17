@@ -189,7 +189,9 @@ pub struct ItemDrop {
 
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.
-    static ref DROP_PERIOD: Duration = Duration::minutes(30);
+    static ref MIN_DROP_PERIOD: Duration = Duration::minutes(30);
+    /// The maximum amount of time since the last drop until the drop is garanteed.
+    static ref MAX_DROP_PERIOD: Duration = Duration::hours(23);
 }
 
 /// Chance of drop is equal to 1/DROP_CHANCE
@@ -341,7 +343,7 @@ impl ItemDrop {
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
         // Determine if we have a drop
         conn.transaction(|| {
-            let item: Option<Self> = (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc()
+            let item: Option<Self> = (user.last_reward < (Utc::now() - *MAX_DROP_PERIOD).naive_utc() || user.last_reward < (Utc::now() - *MIN_DROP_PERIOD).naive_utc()
                 && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
                 .then(|| {
                     use self::items::dsl::*;
