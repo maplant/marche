@@ -326,7 +326,8 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     html::push_html(&mut html_output, parser);
 
     let tags = parse_tag_list(&thread.tags)
-        .map(|t| Tag::fetch_and_inc(&conn, t).id)
+        .filter_map(|t| Tag::fetch_and_inc(&conn, t))
+        .map(|t| t.id())
         .collect();
 
     let thread: Thread = diesel::insert_into(threads::table)
@@ -395,8 +396,13 @@ impl Tag {
 
     /// Fetches a tag, creating it if it doesn't already exist. num_tagged is incremented
     /// or set to one.
-    pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Self {
+    pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Option<Self> {
         use self::tags::dsl::*;
+
+        let tag = clean_tag_name(tag);
+        if tag.is_empty() {
+            return None;
+        }
 
         // TODO: make this an insert with an ON CONFLICT
         diesel::insert_into(tags)
@@ -407,7 +413,7 @@ impl Tag {
             .do_update()
             .set(num_tagged.eq(num_tagged + 1))
             .get_result(conn)
-            .unwrap()
+            .ok()
     }
 
     pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Option<Self> {
