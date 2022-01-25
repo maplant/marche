@@ -2,7 +2,7 @@
     <li class="menu-item">
       <form action="/author" method="post">
         <div class="header">
-          New post
+          New Post:
         </div>
         <div class="table">
           {{#if error}}
@@ -30,6 +30,14 @@
             </div>
             <div class="cell">
               <textarea name="body" rows="8" cols="100"></textarea>
+            </div>
+          </div>
+          <div class="row">
+            <div class="cell-title">
+              <label for="title">Tags: </label>
+            </div>
+            <div class="cell" style="width: 100%">
+              <input type="text" name="tags" id="title" value="en, ">
             </div>
           </div>
           <div class="row">
