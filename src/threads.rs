@@ -54,17 +54,17 @@ pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &s
     let tags = tags
         .iter()
         .filter_map(|(tname, _)| (tname != name).then(|| tname))
-        .fold(String::new(), |prefix, suffix| prefix + suffix + "/");
+        .fold(String::new(), |prefix, suffix| prefix + suffix.trim() + "/");
     Redirect::to(format!("/t/{}", tags))
 }
 
 #[rocket::post("/add-tag", data = "<tags>")]
 pub fn add_tag(_user: User, mut tags: Form<HashMap<String, String>>) -> Redirect {
     let add_tag = tags.remove("add-tag").unwrap_or_else(String::new);
-    let tags = tags
-        .iter()
-        .fold(String::new(), |prefix, suffix| prefix + suffix.0 + "/");
-    Redirect::to(format!("/t/{}/{}", add_tag, tags))
+    let tags = tags.iter().fold(String::new(), |prefix, suffix| {
+        prefix + suffix.0.trim() + "/"
+    });
+    Redirect::to(format!("/t/{}/{}", add_tag.trim(), tags))
 }
 
 #[rocket::get("/t/<viewed_tags..>")]
