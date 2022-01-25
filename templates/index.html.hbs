@@ -3,13 +3,13 @@
     <li style="display: flex; flex-wrap: wrap">
       <label class="tag" for="new-tag">
         <input type="text" name="add-tag" placeholder="add a tag" style="width: 80px">
-        <input type="submit" name="new" value="➕">
+        <input type="submit" name="new" value="+">
       </label>
       {{#each tags}}
         <label class="tag" for="{{id}}">
           <input type="hidden" name="{{name}}" value="{{id}}">
           {{name}}
-          <input type="submit" value="➖" style="color: red" formaction="/remove-tag/{{name}}">
+          <input type="submit" value="−" style="color: red" formaction="/remove-tag/{{name}}">
         </label>
       {{/each}}
     </li>
@@ -35,7 +35,7 @@
         <div class="cell">
           <a href="/thread/{{id}}#reply">{{title}}</a>
           {{#each tags}}
-            <a href="/t/{{this}}">
+            <a href="/t/{{../../curr_path}}{{this}}">
             <div class="tag">{{this}}</div>
             </a>
           {{/each}}

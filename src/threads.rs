@@ -13,7 +13,7 @@ use rocket::response::Redirect;
 use rocket::{uri, FromForm};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashSet, HashMap};
 
 table! {
     threads(id) {
@@ -75,6 +75,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
     struct Context {
         tags: Vec<Tag>,
         posts: Vec<ThreadLink>,
+        curr_path: String,
         offer_count: i64,
     }
 
@@ -96,7 +97,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
     }
 
     let posts: Vec<_> = threads
-        .filter(tags.overlaps_with(viewed_tags.clone().into_id_vec()))
+        .filter(tags.contains(viewed_tags.clone().into_id_vec()))
         .order(last_post.desc())
         .limit(THREADS_PER_PAGE)
         .load::<Thread>(&conn)
@@ -166,6 +167,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
     Template::render(
         "index",
         Context {
+            curr_path: viewed_tags.fmt(),
             tags: viewed_tags.tags,
             posts: posts,
             offer_count: IncomingOffer::count(&conn, &user),
@@ -175,13 +177,8 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
 
 #[rocket::get("/")]
 pub fn index(_user: User) -> Redirect {
-    let conn = crate::establish_db_connection();
-    let popular_tags = Tags::popular(&conn);
-    let tags = popular_tags
-        .tags
-        .into_iter()
-        .fold(String::new(), |prefix, suffix| prefix + &suffix.name + "/");
-    Redirect::to(format!("/t/{}", tags))
+    // TODO: change this to the user's preferred default language.
+    Redirect::to(format!("/t/en"))
 }
 
 #[rocket::get("/thread/<thread_id>?<error>")]
@@ -455,6 +452,12 @@ impl Tags {
         }
     }
 
+    pub fn fmt(&self) -> String {
+        self.tags
+            .iter()
+            .fold(String::new(), |prefix, suffix| prefix + &suffix.name + "/")
+    }
+
     pub fn push(&mut self, tag: Tag) {
         self.tags.push(tag);
     }
@@ -479,10 +482,14 @@ impl<'r> FromSegments<'r> for Tags {
 
     fn from_segments(segments: Segments<'r, Path>) -> Result<Self, Self::Error> {
         let conn = crate::establish_db_connection();
-        let mut tags = segments
-            .filter_map(|s| Tag::fetch_if_exists(&conn, s))
+        let mut seen = HashSet::new();
+        let tags = segments
+            .filter_map(|s| {
+                Tag::fetch_if_exists(&conn, s).map(
+                    |t| seen.insert(t.id).then(||t)
+                ).flatten()
+            })
             .collect::<Vec<_>>();
-        tags.sort_by(|a, b| a.num_tagged.cmp(&b.num_tagged));
         Ok(Tags { tags })
     }
 }
