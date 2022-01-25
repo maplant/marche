@@ -50,7 +50,7 @@ const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 #[rocket::post("/remove-tag/<name>", data = "<tags>")]
 pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &str) -> Redirect {
-    let _add_tag = tags.remove("add-tag");
+    let _ = tags.remove("add-tag");
     let tags = tags
         .iter()
         .filter_map(|(tname, _)| (tname != name).then(|| tname))
@@ -60,11 +60,11 @@ pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &s
 
 #[rocket::post("/add-tag", data = "<tags>")]
 pub fn add_tag(_user: User, mut tags: Form<HashMap<String, String>>) -> Redirect {
-    let add_tag = tags.remove("add-tag").unwrap_or_else(String::new);
+    let add_tag = clean_tag_name(&tags.remove("add-tag").unwrap_or_else(String::new));
     let tags = tags.iter().fold(String::new(), |prefix, suffix| {
         prefix + suffix.0.trim() + "/"
     });
-    Redirect::to(format!("/t/{}/{}", add_tag.trim(), tags))
+    Redirect::to(format!("/t/{}/{}", add_tag, tags))
 }
 
 #[rocket::get("/t/<viewed_tags..>")]
@@ -405,9 +405,7 @@ impl Tag {
 
         // TODO: make this an insert with an ON CONFLICT
         diesel::insert_into(tags)
-            .values(&NewTag {
-                name: clean_tag_name(tag),
-            })
+            .values(&NewTag { name: &tag })
             .on_conflict(name)
             .do_update()
             .set(num_tagged.eq(num_tagged + 1))
@@ -431,8 +429,8 @@ impl Tag {
     }
 }
 
-fn clean_tag_name(name: &str) -> &str {
-    name.trim()
+fn clean_tag_name(name: &str) -> String {
+    name.trim().to_lowercase()
 }
 
 #[derive(Debug, Clone)]
