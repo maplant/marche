@@ -13,7 +13,7 @@ use rocket::response::Redirect;
 use rocket::{uri, FromForm};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashMap, HashSet};
 
 table! {
     threads(id) {
@@ -93,7 +93,9 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
     let conn = crate::establish_db_connection();
 
     if viewed_tags.is_empty() {
-        viewed_tags = Tags::popular(&conn);
+        viewed_tags = Tags {
+            tags: vec![Tag::fetch_if_exists(&conn, "en").unwrap()],
+        };
     }
 
     let posts: Vec<_> = threads
@@ -485,9 +487,9 @@ impl<'r> FromSegments<'r> for Tags {
         let mut seen = HashSet::new();
         let tags = segments
             .filter_map(|s| {
-                Tag::fetch_if_exists(&conn, s).map(
-                    |t| seen.insert(t.id).then(||t)
-                ).flatten()
+                Tag::fetch_if_exists(&conn, s)
+                    .map(|t| seen.insert(t.id).then(|| t))
+                    .flatten()
             })
             .collect::<Vec<_>>();
         Ok(Tags { tags })
