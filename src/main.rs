@@ -17,6 +17,9 @@ fn launch_server() -> _ {
             "/",
             rocket::routes![
                 threads::index,
+                threads::remove_tag,
+                threads::add_tag,
+                threads::view_tags,
                 threads::thread,
                 threads::author_form,
                 threads::author_action,

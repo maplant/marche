@@ -18,3 +18,6 @@ pub fn establish_db_connection() -> PgConnection {
     let database_url = env::var("DATABASE_URL").unwrap();
     PgConnection::establish(&database_url).unwrap()
 }
+
+#[derive(Debug)]
+pub struct DbConnectionFailure;

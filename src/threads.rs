@@ -5,11 +5,15 @@ use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use pulldown_cmark::{html, Options, Parser};
 use rocket::form::Form;
+use rocket::http::uri::fmt::Path;
+use rocket::http::uri::Segments;
 use rocket::http::{Cookie, CookieJar};
+use rocket::request::FromSegments;
 use rocket::response::Redirect;
 use rocket::{uri, FromForm};
 use rocket_dyn_templates::Template;
 use serde::Serialize;
+use std::collections::HashMap;
 
 table! {
     threads(id) {
@@ -44,12 +48,32 @@ const THREADS_PER_PAGE: i64 = 10;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
-#[rocket::get("/")]
-pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
+#[rocket::post("/remove-tag/<name>", data = "<tags>")]
+pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &str) -> Redirect {
+    let _add_tag = tags.remove("add-tag");
+    let tags = tags
+        .iter()
+        .filter_map(|(tname, _)| (tname != name).then(|| tname))
+        .fold(String::new(), |prefix, suffix| prefix + suffix + "/");
+    Redirect::to(format!("/t/{}", tags))
+}
+
+#[rocket::post("/add-tag", data = "<tags>")]
+pub fn add_tag(_user: User, mut tags: Form<HashMap<String, String>>) -> Redirect {
+    let add_tag = tags.remove("add-tag").unwrap_or_else(String::new);
+    let tags = tags
+        .iter()
+        .fold(String::new(), |prefix, suffix| prefix + suffix.0 + "/");
+    Redirect::to(format!("/t/{}/{}", add_tag, tags))
+}
+
+#[rocket::get("/t/<viewed_tags..>")]
+pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> Template {
     use self::threads::dsl::*;
 
     #[derive(Serialize)]
     struct Context {
+        tags: Vec<Tag>,
         posts: Vec<ThreadLink>,
         offer_count: i64,
     }
@@ -62,13 +86,17 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
         date: String,
         emphasize_date: bool,
         new_posts: bool,
+        tags: Vec<String>,
     }
 
     let conn = crate::establish_db_connection();
-    let popular_tags: Vec<_> = Tag::popular(&conn).iter().map(Tag::id).collect();
+
+    if viewed_tags.is_empty() {
+        viewed_tags = Tags::popular(&conn);
+    }
 
     let posts: Vec<_> = threads
-        .filter(tags.overlaps_with(popular_tags))
+        .filter(tags.overlaps_with(viewed_tags.clone().into_id_vec()))
         .order(last_post.desc())
         .limit(THREADS_PER_PAGE)
         .load::<Thread>(&conn)
@@ -79,7 +107,7 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
         .map(|(i, thread)| {
             let date = thread.last_post.format(DATE_FMT).to_string();
 
-            //Consider moving duration->plaintext into common utility
+            // TODO: Consider moving duration->plaintext into common utility
             let duration_since_last_post = Utc::now().naive_utc() - thread.last_post;
             let duration_min = duration_since_last_post.num_minutes();
             let duration_hours = duration_since_last_post.num_hours();
@@ -125,6 +153,12 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
                     .unwrap_or(true),
                 date: duration_string,
                 emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
+                tags: thread
+                    .tags
+                    .into_iter()
+                    .filter_map(|tid| Tag::fetch_from_id(&conn, tid))
+                    .map(|t| t.name)
+                    .collect(),
             }
         })
         .collect();
@@ -132,10 +166,22 @@ pub fn index(user: User, cookies: &CookieJar<'_>) -> Template {
     Template::render(
         "index",
         Context {
+            tags: viewed_tags.tags,
             posts: posts,
             offer_count: IncomingOffer::count(&conn, &user),
         },
     )
+}
+
+#[rocket::get("/")]
+pub fn index(_user: User) -> Redirect {
+    let conn = crate::establish_db_connection();
+    let popular_tags = Tags::popular(&conn);
+    let tags = popular_tags
+        .tags
+        .into_iter()
+        .fold(String::new(), |prefix, suffix| prefix + &suffix.name + "/");
+    Redirect::to(format!("/t/{}", tags))
 }
 
 #[rocket::get("/thread/<thread_id>?<error>")]
@@ -318,7 +364,7 @@ table! {
     }
 }
 
-#[derive(Queryable)]
+#[derive(Debug, Queryable, Serialize, Clone)]
 pub struct Tag {
     pub id: i32,
     pub name: String,
@@ -354,7 +400,9 @@ impl Tag {
 
         // TODO: make this an insert with an ON CONFLICT
         diesel::insert_into(tags)
-            .values(&NewTag { name: tag })
+            .values(&NewTag {
+                name: clean_tag_name(tag),
+            })
             .on_conflict(name)
             .do_update()
             .set(num_tagged.eq(num_tagged + 1))
@@ -362,15 +410,79 @@ impl Tag {
             .unwrap()
     }
 
+    pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Option<Self> {
+        use self::tags::dsl::*;
+
+        tags.filter(id.eq(tag_id)).first::<Self>(conn).ok()
+    }
+
     /// Fetches a tag only if that tag already exists.
     pub fn fetch_if_exists(conn: &PgConnection, tag: &str) -> Option<Self> {
         use self::tags::dsl::*;
 
-        tags.filter(name.eq(tag)).first::<Self>(conn).ok()
+        tags.filter(name.eq(clean_tag_name(tag)))
+            .first::<Self>(conn)
+            .ok()
+    }
+}
+
+fn clean_tag_name(name: &str) -> &str {
+    name.trim()
+}
+
+#[derive(Debug, Clone)]
+pub struct Tags {
+    tags: Vec<Tag>,
+}
+
+impl Tags {
+    /// Returns the most popular tags.
+    pub fn popular(conn: &PgConnection) -> Self {
+        use self::tags::dsl::*;
+
+        Self {
+            tags: tags
+                .order(num_tagged.desc())
+                .limit(10)
+                .load::<Tag>(conn)
+                .unwrap_or_default(),
+        }
+    }
+
+    pub fn push(&mut self, tag: Tag) {
+        self.tags.push(tag);
+    }
+
+    pub fn into_id_vec(self) -> Vec<i32> {
+        self.into()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tags.is_empty()
+    }
+}
+
+impl Into<Vec<i32>> for Tags {
+    fn into(self) -> Vec<i32> {
+        self.tags.into_iter().map(|x| x.id).collect()
+    }
+}
+
+impl<'r> FromSegments<'r> for Tags {
+    type Error = crate::DbConnectionFailure;
+
+    fn from_segments(segments: Segments<'r, Path>) -> Result<Self, Self::Error> {
+        let conn = crate::establish_db_connection();
+        let mut tags = segments
+            .filter_map(|s| Tag::fetch_if_exists(&conn, s))
+            .collect::<Vec<_>>();
+        tags.sort_by(|a, b| a.num_tagged.cmp(&b.num_tagged));
+        Ok(Tags { tags })
     }
 }
 
 fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
+    // TODO: More stuff!
     list.split(",").map(|i| i.trim())
 }
 

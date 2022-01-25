@@ -1,4 +1,19 @@
 {{> header title="Home"}}
+    <form action="/add-tag" method="post">
+    <li style="display: flex; flex-wrap: wrap">
+      <label class="tag" for="new-tag">
+        <input type="text" name="add-tag" placeholder="add a tag" style="width: 80px">
+        <input type="submit" name="new" value="➕">
+      </label>
+      {{#each tags}}
+        <label class="tag" for="{{id}}">
+          <input type="hidden" name="{{name}}" value="{{id}}">
+          {{name}}
+          <input type="submit" value="➖" style="color: red" formaction="/remove-tag/{{name}}">
+        </label>
+      {{/each}}
+    </li>
+    </form>
     <li class="menu-item">
     <div class="table">
       <div class="row">
@@ -18,7 +33,12 @@
           {{/if}}
         </div>
         <div class="cell">
-          <a href="/thread/{{id}}#reply">{{title}}</a>          
+          <a href="/thread/{{id}}#reply">{{title}}</a>
+          {{#each tags}}
+            <a href="/t/{{this}}">
+            <div class="tag">{{this}}</div>
+            </a>
+          {{/each}}
         </div>
         <div class="cell">
           {{#if emphasize_date}}
