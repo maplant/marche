@@ -5,7 +5,7 @@ ul.menu-item {
 }
 
 a {
-    color: #737373;
+    color: #2e2e2e;
 }
 
 li.menu-item {
@@ -16,8 +16,8 @@ li.menu-item {
 
 body {
     background: #ededed;
-    color: #737373;
-    font: 1.2em "Fira Sans", sans-serif;
+    color: #2e2e23;
+    font: 1em "Arvo", serif;
 }
 
 div.nav {
@@ -252,6 +252,8 @@ div.post {
     display: table-cell;
     width: 100%;
     padding: 10px;
+    padding-left: 25px;
+    padding-right: 25px;
 }
 
 @keyframes spin {
