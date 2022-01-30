@@ -18,24 +18,20 @@
       <li class="menu-item" style="display: grid">
         <div class="table">
           <div class="row">
-          <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
-            <a href="/thread/{{id}}#reply">{{title}}{{#unless read}} 📨{{/unless}}</a>
-            <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">{{replies}}</div>
-          </div>
-          <div class="cell" style="width: 25%">
+            <div class="cell" style="width: 70%; padding-left: 25px; vertical-align: middle">
+              <a href="/thread/{{id}}#reply">{{title}}{{#unless read}} 📨{{/unless}}</a>
+                <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">
+                  └{{replies}}
+                  | last activity {{#if emphasize_date}}<b>{{date}}</b>{{else}}{{date}}{{/if}}
+                </div>
+            </div>
+            <div class="cell" style="width: 30%; text-align: right">
               {{#each tags}}
                 <a href="/t/{{../../curr_path}}{{this}}">
                 <div class="tag">{{this}}</div>
                 </a>
               {{/each}}
             </div>
-          <div class="cell" style="width: 15%; padding-right: 25px; vertical-align: middle">
-            {{#if emphasize_date}}
-              <b>{{date}}</b>
-            {{else}}
-              {{date}}
-            {{/if}}
-          </div>
           </div>
         </div>
     {{/each}}
