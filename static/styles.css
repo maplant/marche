@@ -103,31 +103,64 @@ div.reward {
     font-size: 11pt;
     border: 1px solid #006daa;
     border-radius: 5px;
+    min-width: 60px;
+    min-height: 105px;
+}
+
+.rarity-common {
+    display: inline-block;
+    padding: 10px;
+    color: #006daa;
+    background: #b9d6f2;
+    border: 1px solid #006daa;
+    border-radius: 5px;
 }
 
 .item-uncommon {
+    display: inline-block;
     text-align: center;
     vertical-align: middle;
     margin: 5px;
     color: #5d6838;
-    background: #9eb25d;
-    display: inline-block;
+    background: #b1c66d;
     padding: 10px;
     font-size: 11pt;
+    border: 1px solid #5d6838;
+    border-radius: 5px;
+    min-width: 60px;
+    min-height: 105px;
+}
+
+.rarity-uncommon {
+    display: inline-block;
+    padding: 10px;
+    color: #5d6838;
+    background: #b1c66d;
     border: 1px solid #5d6838;
     border-radius: 5px;
 }
 
 .item-rare {
+    display: inline-block;
     text-align: center;
     vertical-align: middle;
     margin: 5px;
-    color: #957fef;
-    background: #dec0f1;
-    display: inline-block;
+    color: #592a7a;
+    background: #cb80ff;
     padding: 10px;
     font-size: 11pt;
-    border: 1px solid #957fef;
+    border: 1px solid #592a7a;
+    border-radius: 5px;
+    min-width: 60px;
+    min-height: 105px;
+}
+
+.rarity-rare {
+    display: inline-block;
+    padding: 10px;
+    color: #592a7a;
+    background: #cb80ff;
+    border: 1px solid #592a7a;
     border-radius: 5px;
 }
 
@@ -136,10 +169,21 @@ div.reward {
     vertical-align: middle;
     margin: 5px;
     text-align: center;
-    background: #ff674d;
+    background: #ff8570;
     color: #8a1824;
     padding: 10px;
     font-size: 11pt;
+    border: 1px solid #8a1824;
+    border-radius: 5px;
+    min-width: 60px;
+    min-height: 105px;
+}
+
+.rarity-ultra-rare {
+    display: inline-block;
+    padding: 10px;
+    background: #ff8570;
+    color: #8a1824;
     border: 1px solid #8a1824;
     border-radius: 5px;
 }
@@ -153,6 +197,17 @@ div.reward {
     color: #776a31;
     padding: 10px;
     font-size: 11pt;
+    border: 1px solid #af9b46;
+    border-radius: 5px;
+    min-width: 60px;
+    min-height: 105px;
+}
+
+.rarity-legendary {
+    display: inline-block;
+    padding: 10px;
+    background: #f7ce5b;
+    color: #776a31;
     border: 1px solid #af9b46;
     border-radius: 5px;
 }

@@ -48,6 +48,7 @@ const THREADS_PER_PAGE: i64 = 25;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
+// TODO: These next two functions absolutely should be done client side. 
 #[rocket::post("/remove-tag/<name>", data = "<tags>")]
 pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &str) -> Redirect {
     let _ = tags.remove("add-tag");
@@ -109,9 +110,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
         .into_iter()
         .enumerate()
         .map(|(i, thread)| {
-            //
             // Format the date:
-            //
             // TODO: Consider moving duration->plaintext into common utility
             let duration_since_last_post = Utc::now().naive_utc() - thread.last_post;
             let duration_min = duration_since_last_post.num_minutes();
@@ -146,9 +145,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
                 String::from("just now!")
             };
 
-            //
             // Count the number of replies:
-            //
             let num_replies = {
                 use self::replies::dsl::*;
 
@@ -161,6 +158,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
 
             let replies = match num_replies {
                 0 | 1 => format!("No replies"),
+                2 => format!("1 reply"),
                 x => format!("{} replies", x - 1),
             };
 

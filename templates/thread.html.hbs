@@ -21,7 +21,7 @@
               {{/each}}
               <div style="float: right; text-align: right;">
               {{#if reward}}
-                <div class="item-{{reward.rarity}} hover-triggers-overlay">
+                <div class="rarity-{{reward.rarity}} hover-triggers-overlay">
                   ⭐ <b>{{reward.name}}</b> was given for this post
                   <div class="overlay-on-hover item-overlay">
                     {{> item-overlay reward}}
