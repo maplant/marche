@@ -9,13 +9,13 @@ a {
 }
 
 li.menu-item {
-    background: #cfcfcf;
+    background: #ededed;
     border-radius: 5px;
     margin: 5px;
 }
 
 body {
-    background: #ededed;
+    background: white;
     color: #2e2e23;
     font: 1em "Arvo", serif;
 }
@@ -58,7 +58,7 @@ div.heavy-cell {
 div.header {
     text-align: left;
     padding: 10px;
-    background: #cfcfcf;
+    background: #ededed;
     border-radius: 5px;
 }
 
@@ -75,7 +75,7 @@ div.reward {
     text-align: center;
     vertical-align: middle;
     margin: 5px;
-    background: #a1a1a1;
+    background: #cfcfcf;
     color: black;
     border-radius: 5px;
     padding: 10px;
@@ -86,7 +86,7 @@ div.reward {
     text-align: center;
     vertical-align: middle;
     margin: 5px;
-    background: #cfcfcf;
+    background: #ededed;
     border-radius: 5px;
     padding: 10px;
     display: inline-block;
