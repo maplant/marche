@@ -18,17 +18,17 @@
       <li class="menu-item" style="display: grid">
         <div class="table">
           <div class="row">
-          <div class="cell" style="width: 55%; padding-left: 25px; vertical-align: middle">
+          <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
             <a href="/thread/{{id}}#reply">{{title}}</a>
           </div>
-          <div class="cell" style="width: 30%">
+          <div class="cell" style="width: 25%">
               {{#each tags}}
                 <a href="/t/{{../../curr_path}}{{this}}">
                 <div class="tag">{{this}}</div>
                 </a>
               {{/each}}
             </div>
-          <div class="cell" style="width: 25%; padding-right: 25px">
+          <div class="cell" style="width: 15%; padding-right: 25px; vertical-align: middle">
             {{#if emphasize_date}}
               <b>{{date}}</b>
             {{else}}
