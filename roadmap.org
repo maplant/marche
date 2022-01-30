@@ -19,7 +19,8 @@
 
 * Threads 
 ** Thread reading
-   Reading threads should be enjoyable and never overwhelming. 
+   Reading threads should be enjoyable and never overwhelming.
+*** TODO Auto link external links in posts   
 *** TODO Add pagination to threads
     I'm not completely sure we actually want pagination, but if we do we would
     want to do the following: 
