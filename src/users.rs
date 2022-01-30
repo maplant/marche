@@ -1,4 +1,5 @@
 use crate::items::{self, Item, ItemDrop, ItemThumbnail, ItemType};
+use crate::threads::Thread;
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
@@ -33,6 +34,17 @@ table! {
     }
 }
 
+table! {
+    reading_history(id) {
+        id -> Integer,
+        // It is important that the UNIQUE ( reader_id, article_id )
+        // constraint is applied.
+        reader_id -> Integer,
+        thread_id -> Integer,
+        last_read -> Timestamp,
+    }
+}
+
 #[derive(Queryable, Debug)]
 pub struct User {
     /// Id of the user
@@ -53,6 +65,22 @@ pub struct User {
     pub equip_slot_prof_pic: Option<i32>,
     /// ProfileBackground equipment slot
     pub equip_slot_background: Option<i32>,
+}
+
+#[derive(Queryable)]
+pub struct ReadingHistory {
+    pub id: i32,
+    pub reader_id: i32,
+    pub thread_id: i32,
+    pub last_read: NaiveDateTime,
+}
+
+#[derive(Insertable)]
+#[table_name = "reading_history"]
+pub struct NewReadingHistory {
+    reader_id: i32,
+    thread_id: i32,
+    last_read: NaiveDateTime,
 }
 
 impl User {
@@ -242,6 +270,31 @@ impl User {
             .filter(id.eq(session.user_id))
             .first::<Self>(conn)
             .map_err(|_| ())
+    }
+
+    pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
+        use self::reading_history::dsl::*;
+
+        reading_history
+            .filter(reader_id.eq(self.id))
+            .filter(thread_id.eq(thread.id))
+            .first::<ReadingHistory>(conn)
+            .ok()
+            .map_or(false, |history| history.last_read == thread.last_post)
+    }
+
+    pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
+        use self::reading_history::dsl::*;
+        let _ = diesel::insert_into(reading_history)
+            .values(NewReadingHistory {
+                reader_id: self.id,
+                thread_id: thread.id,
+                last_read: thread.last_post,
+            })
+            .on_conflict(id)
+            .do_update()
+            .set(last_read.eq(thread.last_post))
+            .execute(conn);
     }
 }
 

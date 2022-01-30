@@ -235,10 +235,7 @@ impl ItemDrop {
                 filename,
                 rotation(self),
                 if is_spinning(self) {
-                    format!(
-                        "spin {}s infinite linear",
-                        spin_speed(self)
-                    )
+                    format!("spin {}s infinite linear", spin_speed(self))
                 } else {
                     String::new()
                 },
@@ -294,7 +291,6 @@ impl ItemDrop {
     pub fn chance_to_occur(&self, seed: u16, one_in_n_chance: u32) -> bool {
         self.get_rng(seed).gen_ratio(1, one_in_n_chance)
     }
-
 
     /// Possibly selects an item, depending on the last drop.
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {

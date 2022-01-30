@@ -16,6 +16,14 @@ CREATE TABLE users (
   equip_slot_background INTEGER
 );
 
+create TABLE reading_history (
+  id SERIAL PRIMARY KEY,
+  reader_id INT NOT NULL,
+  thread_id INT NOT NULL,
+  last_read TIMESTAMP NOT NULL,
+  UNIQUE (reader_id, thread_id)
+);
+
 CREATE TABLE login_sessions (
   id SERIAL PRIMARY KEY,
   session_id VARCHAR NOT NULL,

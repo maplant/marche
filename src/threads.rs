@@ -68,7 +68,7 @@ pub fn add_tag(_user: User, mut tags: Form<HashMap<String, String>>) -> Redirect
 }
 
 #[rocket::get("/t/<viewed_tags..>")]
-pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> Template {
+pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
     use self::threads::dsl::*;
 
     #[derive(Serialize)]
@@ -86,7 +86,8 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
         title: String,
         date: String,
         emphasize_date: bool,
-        new_posts: bool,
+        read: bool,
+        replies: String,
         tags: Vec<String>,
     }
 
@@ -108,8 +109,9 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
         .into_iter()
         .enumerate()
         .map(|(i, thread)| {
-            let date = thread.last_post.format(DATE_FMT).to_string();
-
+            //
+            // Format the date:
+            //
             // TODO: Consider moving duration->plaintext into common utility
             let duration_since_last_post = Utc::now().naive_utc() - thread.last_post;
             let duration_min = duration_since_last_post.num_minutes();
@@ -144,18 +146,32 @@ pub fn view_tags(user: User, mut viewed_tags: Tags, cookies: &CookieJar<'_>) -> 
                 String::from("just now!")
             };
 
+            //
+            // Count the number of replies:
+            //
+            let num_replies = {
+                use self::replies::dsl::*;
+
+                replies
+                    .filter(thread_id.eq(thread.id))
+                    .count()
+                    .get_result(&conn)
+                    .unwrap_or(0)
+            };
+
+            let replies = match num_replies {
+                0 => format!("No replies"),
+                x => format!("{} replies", x),
+            };
+
             ThreadLink {
+                read: user.has_read(&conn, &thread),
                 num: i + 1,
                 id: thread.id,
                 title: thread.title,
-                // Check if there are any new posts, by checking if the last_seen_{thread_id}
-                // cookie is the same date as the last post.
-                new_posts: cookies
-                    .get(&format!("last_seen_{}", thread.id))
-                    .map(|d| d.value() != date)
-                    .unwrap_or(true),
                 date: duration_string,
                 emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
+                replies,
                 tags: thread
                     .tags
                     .into_iter()
@@ -224,11 +240,11 @@ pub fn thread(
 
     let conn = crate::establish_db_connection();
     let mut user_cache = UserCache::new(&conn);
-    let post_title = &threads
+    let thread = &threads
         .filter(id.eq(thread_id))
         .first::<Thread>(&conn)
-        .unwrap()
-        .title;
+        .unwrap();
+    user.read_thread(&conn, &thread);
 
     let posts = replies::dsl::replies
         .filter(replies::dsl::thread_id.eq(thread_id))
@@ -272,7 +288,7 @@ pub fn thread(
         "thread",
         Context {
             id: thread_id,
-            title: post_title,
+            title: &thread.title,
             posts,
             offer_count: IncomingOffer::count(&conn, &user),
             error,
