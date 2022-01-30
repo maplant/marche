@@ -288,7 +288,6 @@ a {
 }
 
 div.profile {
-    border-right: 1px solid black;
     display: table-cell;
     text-align: center;
     text-shadow:
