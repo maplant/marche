@@ -1,5 +1,5 @@
 {{> header title=title }}
-    <li class="menu-item" style="background: #DBD2E0; text-align: center; margin: 5px; padding: 10px">{{title}}
+    <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">{{title}}
     </li>
     {{#each posts}}
       <li class="menu-item">
@@ -7,7 +7,7 @@
           <div style="display: table-row">
             {{#with author}}
               <div class="profile" style="{{background}}">
-                <p><a href="/profile/{{id}}">{{name}}</a></p>
+                <p><a href="/profile/{{id}}" style="color: white">{{name}}</a></p>
                 {{> profile-pic }}
               </div>
             {{/with}}
@@ -43,7 +43,7 @@
     <li class="menu-item">
       {{#if error}}
         <div class="row">
-          <div class="cell-title">
+          <div class="cell">
           </div>
           <div class="cell">
             <div class="error"> 
@@ -53,7 +53,7 @@
         </div>
       {{/if}}
     <div class="row">
-      <div class="cell-title" style="text-align: right; vertical-align: top; min-width: 180px">
+      <div class="cell" style="text-align: right; vertical-align: top; min-width: 180px">
         <label for="reply">Reply:</label>
       </div>
       <div class="cell" style="width: 100%">
@@ -61,7 +61,7 @@
       </div>
     </div>
     <div class="row">
-      <div class="cell-title">
+      <div class="cell">
       </div>
       <div class="cell">
         <input type="submit" value="Submit">

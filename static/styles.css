@@ -4,14 +4,19 @@ ul.menu-item {
     margin: 0px;
 }
 
+a {
+    color: #737373;
+}
+
 li.menu-item {
-    border: 1px solid #273B09;
+    background: #cfcfcf;
     border-radius: 5px;
     margin: 5px;
 }
 
 body {
-    background: white;
+    background: #ededed;
+    color: #737373;
     font: 1.2em "Fira Sans", sans-serif;
 }
 
@@ -24,25 +29,11 @@ div.nav {
 
 div.title {
     width: 100%;
-    border-right: 1px solid  #273B09;
 }
 
 div.right {
     width: 25%;
     padding-left: 10px;
-}
-
-div.header {
-    align: center;
-    display: flex;
-    flex-direction: row;
-    border-bottom: 1px solid #273B09;
-    background: #DBD2E0;
-    color: gray;
-    padding-top: 5px;
-    padding-bottom: 5px;
-    padding-left: 20px;
-    padding-right: 20px;
 }
 
 div.table {
@@ -51,30 +42,24 @@ div.table {
 
 div.row {
     display: table-row;
-    border-bottom: 1px solid #273B09;
 }
 
 div.cell {
     display: table-cell;
     padding: 10px;
-    background: white;
-    border-bottom: 1px solid #273B09;
 }
 
-div.cell-title {
+div.heavy-cell {
     display: table-cell;
     padding: 10px;
-    background: #DBD2E03;
-    border-bottom: 1px solid #273B09;
-    color: grey;
+    border-bottom: 1px solid black;
 }
 
 div.header {
     text-align: left;
     padding: 10px;
-    background: #DBD2E0;
-    border-bottom: 1px solid #273B09;
-    color: grey;
+    background: #cfcfcf;
+    border-radius: 5px;
 }
 
 div.reward {
@@ -90,9 +75,18 @@ div.reward {
     text-align: center;
     vertical-align: middle;
     margin: 5px;
-    background: #DBD2E0;
-    color: grey;
-    border: 1px solid grey;
+    background: #a1a1a1;
+    color: white;
+    border-radius: 5px;
+    padding: 10px;
+    display: inline-block;
+}
+
+.selected-tag {
+    text-align: center;
+    vertical-align: middle;
+    margin: 5px;
+    background: #cfcfcf;
     border-radius: 5px;
     padding: 10px;
     display: inline-block;
@@ -241,9 +235,15 @@ div.profile {
     border-right: 1px solid black;
     display: table-cell;
     text-align: center;
+    text-shadow:
+        1px 0 black,
+        0 1px black,
+        -1px 0 black,
+        0 -1px black;
     min-width: 180px;
     padding: 5px;
     vertical-align: top;
+    border-radius: 5px;
 }
 
 div.post {

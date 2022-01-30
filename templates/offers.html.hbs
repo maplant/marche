@@ -9,21 +9,21 @@
     <li class="menu-item">
     <div class="table" style="width: 100%">
       <div class="row">
-        <div class="cell-title"></div>
-        <div class="cell-title" style="width: 50%"><b>Incoming Trade Offers</b></div>
-        <div class="cell-title"></div>
-        <div class="cell-title" style="width: 50%"></div>
+        <div class="heavy-cell"></div>
+        <div class="heavy-cell" style="width: 50%"><b>Incoming Trade Offers</b></div>
+        <div class="heavy-cell"></div>
+        <div class="heavy-cell" style="width: 50%"></div>
       </div>
       <div class="row">
-        <div class="cell-title">Sender</div>
-        <div class="cell-title">Sender's offer</div>
-        <div class="cell-title"></div>
-        <div class="cell-title">Requested</div>
+        <div class="heavy-cell">Sender</div>
+        <div class="heavy-cell">Sender's offer</div>
+        <div class="heavy-cell"></div>
+        <div class="heavy-cell">Requested</div>
       </div>
     {{#each incoming_offers}}
       <div class="row">
         {{#with sender}}
-        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
+        <div class="heavy-cell" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
           <p><a href="/profile/{{id}}">{{name}}</a></p>
           {{> profile-pic }}
         </div>
@@ -34,21 +34,21 @@
           {{/each}}
         </div>
         {{#with ../user}}
-          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
+          <div class="heavy-cell" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
             <p><a href="/profile/{{id}}">{{name}}</a></p>
             {{> profile-pic }}
           </div>
         {{/with}}
-        <div class="cell">
+        <div class="cell" >
           {{#each receiver_items}}
             {{> item-thumbnail}}
           {{/each}}
         </div>
       </div>
       <div class="row">
-        <div class="cell-title">
+        <div class="heavy-cell">
         </div>
-        <div class="cell-title">
+        <div class="heavy-cell">
           <div style="display: table-row">
             <div style="display: table-cell; padding: 10px">
               <form action="/accept/{{id}}">
@@ -62,59 +62,59 @@
             </div>
           </div>
         </div>
-        <div class="cell-title"></div>
-        <div class="cell-title"></div>
+        <div class="heavy-cell"></div>
+        <div class="heavy-cell"></div>
       </div>
     {{/each}}
     <div class="row">
-      <div class="cell-title"></div>
-      <div class="cell-title"><b>Outgoing Trade Offers</b></div>
-      <div class="cell-title"></div>
-      <div class="cell-title"></div>
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell"><b>Outgoing Trade Offers</b></div>
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell"></div>
     </div>
     <div class="row">
-      <div class="cell-title"></div>
-      <div class="cell-title">Your offer</div>
-      <div class="cell-title"></div>
-      <div class="cell-title">For</div>
+      <div class="cell"></div>
+      <div class="cell">Your offer</div>
+      <div class="cell"></div>
+      <div class="cell">For</div>
     </div>
     {{#each outgoing_offers}}
       <div class="row">
         {{#with ../user}}
-          <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
+          <div class="heavy-cell" style="{{background}} text-align: center; vertical-align: top; min-width: 180px; border-top: 1px solid black">
             <p><a href="/profile/{{id}}">{{name}}</a></p>
             {{> profile-pic }}
           </div>
         {{/with}}
-        <div class="cell">
+        <div class="heavy-cell" style="border-top: 1px solid black">
           {{#each sender_items}}
             {{> item-thumbnail}}
           {{/each}}
         </div>
         {{#with receiver}}
-        <div class="cell-title" style="{{background}} text-align: center; vertical-align: top; min-width: 180px">
+        <div class="heavy-cell" style="{{background}} text-align: center; vertical-align: top; min-width: 180px; border-top: 1px solid black">
           <p><a href="/profile/{{id}}">{{name}}</a></p>
           {{> profile-pic }}
         </div>
         {{/with}}
-        <div class="cell">
+        <div class="heavy-cell" style="border-top: 1px solid black">
           {{#each receiver_items}}
             {{> item-thumbnail}}
           {{/each}}
         </div>
       </div>
       <div class="row">
-        <div class="cell-title">
+        <div class="cell">
         </div>
-        <div class="cell-title">
+        <div class="cell">
           <div style="display: table-cell; padding: 10px">
             <form action="/decline/{{id}}">
             <input type="submit" value="Rescind">
             </form>
           </div>
         </div>
-        <div class="cell-title"></div>
-        <div class="cell-title"></div>
+        <div class="cell"></div>
+        <div class="cell"></div>
       </div>
     {{/each}}
     </li>

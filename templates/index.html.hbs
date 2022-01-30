@@ -1,12 +1,12 @@
 {{> header title="Home"}}
     <form action="/add-tag" method="post">
     <li style="display: flex; flex-wrap: wrap">
-      <label class="tag">
+      <label class="selected-tag">
         <input type="text" name="add-tag" placeholder="add a tag" style="width: 80px; border-radius: 5px; padding: 5px;">
         <input type="submit" value="+">
       </label>
       {{#each tags}}
-        <label class="tag">
+        <label class="selected-tag">
           <input type="hidden" name="{{name}}" value="{{id}}">
           {{name}}
           <input type="submit" value="−" style="color: red" formaction="/remove-tag/{{name}}">
@@ -18,7 +18,7 @@
       <li class="menu-item" style="display: grid">
         <div class="table">
           <div class="row">
-          <div class="cell" style="width: 55%">
+          <div class="cell" style="width: 55%; padding-left: 25px">
             <a href="/thread/{{id}}#reply">{{title}}</a>
           </div>
           <div class="cell" style="width: 30%">

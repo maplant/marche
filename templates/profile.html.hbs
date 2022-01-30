@@ -2,22 +2,22 @@
     <li class="menu-item">
       <div class="table">
         <div class="row">
-          <div class="cell-title"></div>
-          <div class="cell-title" style="width: 100%;"><b>{{name}}</b></div>
+          <div class="heavy-cell"></div>
+          <div class="heavy-cell" style="width: 100%;"><b>{{name}}</b></div>
         </div>
         <div class="row">
-          <div class="cell-title" style="{{background}} text-align: center; min-width: 180px; min-height: 180px">
+          <div class="heavy-cell" style="{{background}} text-align: center; min-width: 180px; min-height: 180px">
             {{> profile-pic }}
           </div>
-          <div class="cell" style="vertical-align: top; padding: 15px">
+          <div class="heavy-cell" style="vertical-align: top; padding: 15px">
             {{bio}}
           </div>
         </div>
         <div class="row">
-          <div class="cell-title" style="vertical-align: top; text-align: right;">
+          <div class="heavy-cell" style="vertical-align: top; text-align: right;">
             Level:
           </div>
-          <div class="cell">
+          <div class="heavy-cell"">
             {{#with level}}
               <div>{{level}}</div>
               <div><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
@@ -25,20 +25,20 @@
           </div>
         </div>
         <div class="row">
-          <div class="cell-title" style="vertical-align: top; text-align: right;">
+          <div class="heavy-cell" style="vertical-align: top; text-align: right;">
             Equipped:
           </div>
-          <div class="cell">
+          <div class="heavy-cell"">
             {{#each equipped}}
               {{> item-thumbnail}}
             {{/each}}
           </div>
         </div>
         <div class="row">
-          <div class="cell-title" style="vertical-align: top; text-align: right;">
+          <div class="cell" style="vertical-align: top; text-align: right;">
             Inventory:
           </div>
-          <div class="cell">
+          <div class="cell"">
             {{#each inventory}}
               {{> item-thumbnail}}
             {{/each}}
@@ -46,8 +46,8 @@
         </div>
         {{#if can_trade}}
           <div class="row">
-          <div class="cell-title"></div>
-          <div class="cell-title">
+          <div class="cell"></div>
+          <div class="cell">
             <form action="/offer/{{id}}">
             <input type="submit" value="Make trade offer" />
             </form>

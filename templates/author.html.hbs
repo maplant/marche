@@ -7,9 +7,9 @@
         <div class="table">
           {{#if error}}
             <div class="row">
-              <div class="cell-title">
+              <div class="cell" style="border-top: 1px solid black">
               </div>
-              <div class="cell">
+              <div class="cell" style="border-top: 1px solid black">
                 <div class="error"> 
                   {{error}}
                 </div>
@@ -17,31 +17,31 @@
             </div>
           {{/if}}
           <div class="row">
-            <div class="cell-title">
+            <div class="heavy-cell" style="border-top: 1px solid black">
               <label for="title">Title: </label>
             </div>
-            <div class="cell" style="width: 100%">
+            <div class="heavy-cell" style="width: 100%; border-top: 1px solid black">
               <input type="text" name="title" id="title" style="border-radius: 5px; padding: 5px">
             </div>
           </div>
           <div class="row">
-            <div class="cell-title" style="vertical-align: top">
+            <div class="heavy-cell" style="vertical-align: top">
               <label for="body">Body: </label>
             </div>
-            <div class="cell">
+            <div class="heavy-cell">
               <textarea name="body" rows="8" cols="100" style="border-radius: 5px; padding: 5px"></textarea>
             </div>
           </div>
           <div class="row">
-            <div class="cell-title">
+            <div class="heavy-cell">
               <label for="title">Tags: </label>
             </div>
-            <div class="cell" style="width: 100%">
+            <div class="heavy-cell" style="width: 100%">
               <input type="text" name="tags" id="title" value="en, " style="border-radius: 5px; padding: 5px">
             </div>
           </div>
           <div class="row">
-            <div class="cell-title">
+            <div class="cell">
               <input type="submit" value="Submit">
             </div>
             <div class="cell">
