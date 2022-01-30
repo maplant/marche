@@ -1,42 +1,42 @@
 {{> header title="Item"}}
-    <li class="menu-item">
+    <li class="item-{{rarity}}" style="display: inherit; text-align: left">
       <div class="table">
         <div class="row">
-          <div class="cell-title"></div>
-          <div class="cell-title" style="width: 100%;">
+          <div class="heavy-cell"></div>
+          <div class="heavy-cell" style="width: 100%;">
             <div class="item-{{rarity}}">
               {{{thumbnail}}}
             </div>
           </div>
         </div>
         <div class="row">
-          <div class="cell-title">Name:</div>
-          <div class="cell">{{name}}</div>
+          <div class="heavy-cell">Name:</div>
+          <div class="heavy-cell">{{name}}</div>
         </div>
         <div class="row">
-          <div class="cell-title">Description:</div>
-          <div class="cell">{{description}}</div>
+          <div class="heavy-cell">Description:</div>
+          <div class="heavy-cell">{{description}}</div>
         </div>
         <div class="row">
-          <div class="cell-title">Owner:</div>
+          <div class="heavy-cell">Owner:</div>
           {{#with owner}}
-            <div class="cell"><a href="/profile/{{id}}">{{name}}</a></div>
+            <div class="heavy-cell"><a href="/profile/{{id}}">{{name}}</a></div>
           {{/with}}
         </div>
         <div class="row">
-          <div class="cell-title">Pattern Id:</div>
-          <div class="cell">{{pattern}}</div>
+          <div class="heavy-cell">Pattern Id:</div>
+          <div class="heavy-cell">{{pattern}}</div>
         </div>
         <div class="row">
-          <div class="cell-title">Rarity:</div>
-          <div class="cell"><div class="item-{{rarity}}">{{rarity}}</div></div>
+          <div class="heavy-cell">Rarity:</div>
+          <div class="heavy-cell"><div class="item-{{rarity}}">{{rarity}}</div></div>
         </div>
         <div class="row">
-          <div class="cell-title">
+          <div class="cell">
           </div>
-          <div class="cell-title">
+          <div class="cell">
             <form action="/equip/{{id}}">
-            <input type="submit" value="Equip" {{#unless is_equipable }} disabled {{/unless}}/>
+            <input type="submit" value="Equip" style="padding: 10px" {{#unless is_equipable }} disabled {{/unless}}/>
             </form>
           </div>
         </div>
