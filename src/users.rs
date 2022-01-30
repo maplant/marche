@@ -291,7 +291,7 @@ impl User {
                 thread_id: thread.id,
                 last_read: thread.last_post,
             })
-            .on_conflict(id)
+            .on_conflict((reader_id, thread_id))
             .do_update()
             .set(last_read.eq(thread.last_post))
             .execute(conn);
