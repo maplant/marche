@@ -44,7 +44,7 @@ pub struct NewThread<'t> {
     last_post: NaiveDateTime,
 }
 
-const THREADS_PER_PAGE: i64 = 10;
+const THREADS_PER_PAGE: i64 = 25;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
