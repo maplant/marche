@@ -1,0 +1,38 @@
+#+title: Marché Roadmap
+#+authors: The Marché Developers
+#+date: 2022-01-30
+
+* Items
+** TODO Reach at least 250 items
+   We want to have as many items as possible
+*** TODO 125 Reaction images
+*** TODO 75 Profile backgrounds
+*** TODO 50 Profile pictures
+** Item attributes
+*** TODO Add more item attributes
+*** TODO Add attributes column to Item table
+    Items should have a programmable chance of having a given attribute, as we
+    want to be able to change these values. 
+*** TODO Add foil attribute type 
+** Item types
+   We should add more item types
+
+* Threads 
+** Thread reading
+   Reading threads should be enjoyable and never overwhelming. 
+*** TODO Add pagination to threads
+    I'm not completely sure we actually want pagination, but if we do we would
+    want to do the following: 
+    - [ ] Add pagination to thread
+    - [ ] Add last viewed page to reading history
+    Questions:
+    - How many threads should there be on a page? 
+*** TODO Add page navigation buttons
+    Buttons that go to the top and bottom of the page
+** Posting
+*** TODO Allow editing of posts
+
+* Administration
+** TODO Admins can edit any post
+** TODO Admins can ban any user for any length
+** TODO Mods can ban users for some length 
