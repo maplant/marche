@@ -160,8 +160,8 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
             };
 
             let replies = match num_replies {
-                0 => format!("No replies"),
-                x => format!("{} replies", x),
+                0 | 1 => format!("No replies"),
+                x => format!("{} replies", x - 1),
             };
 
             ThreadLink {
