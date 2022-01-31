@@ -234,63 +234,180 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}{}; filter: {}{}{}{}{}{};"></div>"#,
-                if item_effects::is_rolling(self) {
-                    format!(
-                        ",roll {}s infinite linear",
-                        item_effects::rolling_speed(self)
-                    )
-                } else {
-                    String::new()
-                },
+                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}; filter: {};"></div>"#,
+                self.thumbnail_div_animations_html(),
                 filename,
-                if item_effects::is_rotated(self) {
-                    format!("rotate({}deg)", item_effects::rotation(self))
-                } else {
-                    String::new()
-                },
-                if item_effects::is_spinning(self) {
-                    format!(",spin {}s infinite linear", item_effects::spin_speed(self))
-                } else {
-                    String::new()
-                },
-                if item_effects::is_shiny(self) {
-                    format!(",shiny {}s infinite linear", item_effects::shiny_speed(self))
-                } else {
-                    String::new()
-                },
-                if item_effects::is_blury(self) {
-                    format!(" blur({}px)", item_effects::blur(self))
-                } else {
-                    String::new()
-                },
-                if item_effects::is_transparent(self) {
-                    format!(" opacity({}%)", item_effects::transparency(self))
-                } else {
-                    String::new()
-                },
-                if item_effects::is_high_contrast(self) {
-                    format!(" contrast({}%)", item_effects::contrast(self))
-                } else {
-                    String::new()
-                },
-                if item_effects::is_sepia(self) {
-                    String::from(" sepia(100%)")
-                } else {
-                    String::new()
-                },
-                if item_effects::is_inverted(self) {
-                    String::from(" invert(100%)")
-                } else {
-                    String::new()
-                },
-                if item_effects::is_saturated(self) {
-                    format!(" saturate({}%)", item_effects::saturation(self))
-                } else {
-                    String::new()
-                },
+                self.thumbnail_transforms_html(),
+                self.thumbnail_animations_html(),
+                self.thumbnail_filtrs_html(),
             ),
         }
+    }
+
+    fn thumbnail_div_animations_html(&self) -> String {
+        vec![self.rolling_html()]
+            .into_iter()
+            .map(|e| match e {
+                Some(x) => x,
+                None => String::new(),
+            })
+            .collect::<String>()
+    }
+
+    fn thumbnail_animations_html(&self) -> String {
+        vec![self.spin_html(), self.shiny_html()]
+            .into_iter()
+            .map(|e| match e {
+                Some(x) => x,
+                None => String::new(),
+            })
+            .collect::<String>()
+    }
+
+    fn thumbnail_transforms_html(&self) -> String {
+        vec![self.rotation_html()]
+            .into_iter()
+            .map(|e| match e {
+                Some(x) => x,
+                None => String::new(),
+            })
+            .collect::<String>()
+    }
+
+    fn thumbnail_filtrs_html(&self) -> String {
+        vec![
+            self.blur_html(),
+            self.transparency_html(),
+            self.contrast_html(),
+            self.sepia_html(),
+            self.inverted_html(),
+            self.saturation_html(),
+        ]
+        .into_iter()
+        .map(|e| match e {
+            Some(x) => x,
+            None => String::new(),
+        })
+        .collect::<String>()
+    }
+
+    pub fn is_rotated(&self) -> bool {
+        self.chance_to_occur(0, 2)
+    }
+
+    pub fn rotation(&self) -> u32 {
+        self.get_rng(1).gen_range(0..360)
+    }
+
+    fn rotation_html(&self) -> Option<String> {
+        self.is_rotated()
+            .then(|| format!("rotate({}deg)", self.rotation()))
+    }
+
+    pub fn is_spinning(&self) -> bool {
+        self.chance_to_occur(2, 5)
+    }
+
+    pub fn spin_speed(&self) -> f64 {
+        self.get_rng(3).gen_range(0.1..3.0)
+    }
+
+    fn spin_html(&self) -> Option<String> {
+        self.is_spinning()
+            .then(|| format!(",spin {}s infinite linear", self.spin_speed()))
+    }
+
+    pub fn is_rolling(&self) -> bool {
+        self.chance_to_occur(4, 5)
+    }
+
+    pub fn rolling_speed(&self) -> f64 {
+        self.get_rng(5).gen_range(0.33..3.0)
+    }
+
+    fn rolling_html(&self) -> Option<String> {
+        self.is_rolling()
+            .then(|| format!(",roll {}s infinite linear", self.rolling_speed()))
+    }
+
+    pub fn is_shiny(&self) -> bool {
+        self.chance_to_occur(6, 10)
+    }
+
+    pub fn shiny_speed(&self) -> f64 {
+        self.get_rng(7).gen_range(0.33..3.0)
+    }
+
+    fn shiny_html(&self) -> Option<String> {
+        self.is_shiny()
+            .then(|| format!(",shiny {}s infinite linear", self.shiny_speed()))
+    }
+
+    pub fn is_blury(&self) -> bool {
+        self.chance_to_occur(8, 20)
+    }
+
+    pub fn blur(&self) -> u32 {
+        self.get_rng(9).gen_range(2..8)
+    }
+
+    fn blur_html(&self) -> Option<String> {
+        self.is_blury().then(|| format!(" blur({}px)", self.blur()))
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        self.chance_to_occur(10, 30)
+    }
+
+    pub fn transparency(&self) -> u32 {
+        self.get_rng(11).gen_range(10..60)
+    }
+
+    fn transparency_html(&self) -> Option<String> {
+        self.is_transparent()
+            .then(|| format!(" opacity({}%)", self.transparency()))
+    }
+
+    pub fn is_high_contrast(&self) -> bool {
+        self.chance_to_occur(12, 10)
+    }
+
+    pub fn contrast(&self) -> u32 {
+        self.get_rng(13).gen_range(100..500)
+    }
+
+    fn contrast_html(&self) -> Option<String> {
+        self.is_high_contrast()
+            .then(|| format!(" contrast({}%)", self.contrast()))
+    }
+
+    pub fn is_sepia(&self) -> bool {
+        self.chance_to_occur(14, 10)
+    }
+
+    fn sepia_html(&self) -> Option<String> {
+        self.is_sepia().then(|| String::from(" sepia(100%)"))
+    }
+
+    pub fn is_inverted(&self) -> bool {
+        self.chance_to_occur(15, 20)
+    }
+
+    fn inverted_html(&self) -> Option<String> {
+        self.is_inverted().then(|| String::from(" invert(100%)"))
+    }
+
+    pub fn is_saturated(&self) -> bool {
+        self.chance_to_occur(16, 20)
+    }
+
+    pub fn saturation(&self) -> u32 {
+        self.get_rng(17).gen_range(100..400)
+    }
+
+    fn saturation_html(&self) -> Option<String> {
+        self.is_saturated()
+            .then(|| format!("  saturate({}%)", self.saturation()))
     }
 
     // TODO: Get rid of this in favor of something better.
@@ -397,82 +514,6 @@ impl ItemDrop {
         })
         .ok()
         .flatten()
-    }
-}
-
-pub mod item_effects {
-    use crate::items::ItemDrop;
-    use rand::Rng;
-    pub fn is_rotated(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(0, 2) //todo magic
-    }
-
-    pub fn rotation(drop: &ItemDrop) -> u32 {
-        drop.get_rng(1).gen_range(0..360)
-    }
-
-    pub fn is_spinning(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(2, 5) //todo magic
-    }
-
-    pub fn spin_speed(drop: &ItemDrop) -> f64 {
-        drop.get_rng(3).gen_range(0.1..3.0)
-    }
-
-    pub fn is_rolling(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(4, 5) //todo magic
-    }
-
-    pub fn rolling_speed(drop: &ItemDrop) -> f64 {
-        drop.get_rng(5).gen_range(0.33..3.0)
-    }
-
-    pub fn is_shiny(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(6, 10) //todo magic
-    }
-
-    pub fn shiny_speed(drop: &ItemDrop) -> f64 {
-        drop.get_rng(7).gen_range(0.33..3.0)
-    }
-
-    pub fn is_blury(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(8, 20) //todo magic
-    }
-
-    pub fn blur(drop: &ItemDrop) -> u32 {
-        drop.get_rng(9).gen_range(2..8)
-    }
-
-    pub fn is_transparent(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(10, 30) //todo magic
-    }
-
-    pub fn transparency(drop: &ItemDrop) -> u32 {
-        drop.get_rng(11).gen_range(10..60)
-    }
-
-    pub fn is_high_contrast(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(12, 10) //todo magic
-    }
-
-    pub fn contrast(drop: &ItemDrop) -> u32 {
-        drop.get_rng(13).gen_range(100..500)
-    }
-
-    pub fn is_sepia(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(14, 10) //todo magic
-    }
-
-    pub fn is_inverted(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(15, 20) //todo magic
-    }
-
-    pub fn is_saturated(drop: &ItemDrop) -> bool {
-        drop.chance_to_occur(16, 20) //todo magic
-    }
-
-    pub fn saturation(drop: &ItemDrop) -> u32 {
-        drop.get_rng(17).gen_range(100..400)
     }
 }
 
