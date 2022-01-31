@@ -7,8 +7,9 @@ use diesel::serialize::Output;
 use diesel::sql_types::Jsonb;
 use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
-use rand::prelude::{thread_rng, IteratorRandom, StdRng};
+use rand::prelude::{thread_rng, IteratorRandom};
 use rand::{Rng, SeedableRng};
+use rand_xorshift::XorShiftRng;
 use rocket::form::Form;
 use rocket::response::Redirect;
 use rocket::uri;
@@ -188,7 +189,9 @@ pub struct ItemDrop {
 
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.
-    static ref DROP_PERIOD: Duration = Duration::minutes(30);
+    static ref MIN_DROP_PERIOD: Duration = Duration::minutes(30);
+    /// The maximum amount of time since the last drop until the drop is garanteed.
+    static ref MAX_DROP_PERIOD: Duration = Duration::hours(23);
 }
 
 /// Chance of drop is equal to 1/DROP_CHANCE
@@ -231,16 +234,107 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto; transform: rotate({}deg); animation: {}">"#,
+                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}; filter: {};"></div>"#,
+                self.thumbnail_div_animations_html(),
                 filename,
-                rotation(self),
-                if is_spinning(self) {
-                    format!("spin {}s infinite linear", spin_speed(self))
-                } else {
-                    String::new()
-                },
+                self.thumbnail_transforms_html(),
+                self.thumbnail_animations_html(),
+                self.thumbnail_filtrs_html(),
             ),
         }
+    }
+
+    fn thumbnail_div_animations_html(&self) -> String {
+        self.rolling().unwrap_or_else(String::new)
+    }
+
+    fn thumbnail_animations_html(&self) -> String {
+        vec![self.spin(), self.shiny()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("")
+    }
+
+    fn thumbnail_transforms_html(&self) -> String {
+        self.rotation().unwrap_or_else(String::new)
+    }
+
+    fn thumbnail_filtrs_html(&self) -> String {
+        vec![
+            self.blur(),
+            self.transparency(),
+            self.contrast(),
+            self.sepia(),
+            self.inverted(),
+            self.saturation(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("")
+    }
+
+    fn rotation(&self) -> Option<String> {
+        self.chance_to_occur(0, 2)
+            .then(|| format!("rotate({}deg)", self.get_rng(1).gen_range(0..360)))
+    }
+
+    fn spin(&self) -> Option<String> {
+        self.chance_to_occur(2, 5).then(|| {
+            format!(
+                ",spin {}s infinite linear",
+                self.get_rng(3).gen_range(0.1..3.0)
+            )
+        })
+    }
+
+    fn rolling(&self) -> Option<String> {
+        self.chance_to_occur(4, 5).then(|| {
+            format!(
+                ",roll {}s infinite linear",
+                self.get_rng(5).gen_range(0.33..3.0)
+            )
+        })
+    }
+
+    fn shiny(&self) -> Option<String> {
+        self.chance_to_occur(6, 10).then(|| {
+            format!(
+                ",shiny {}s infinite linear",
+                self.get_rng(7).gen_range(0.33..3.0)
+            )
+        })
+    }
+
+    fn blur(&self) -> Option<String> {
+        self.chance_to_occur(8, 20)
+            .then(|| format!(" blur({}px)", self.get_rng(9).gen_range(2..8)))
+    }
+
+    fn transparency(&self) -> Option<String> {
+        self.chance_to_occur(10, 30)
+            .then(|| format!(" opacity({}%)", self.get_rng(11).gen_range(10..60)))
+    }
+
+    fn contrast(&self) -> Option<String> {
+        self.chance_to_occur(12, 10)
+            .then(|| format!(" contrast({}%)", self.get_rng(13).gen_range(100..500)))
+    }
+
+    fn sepia(&self) -> Option<String> {
+        self.chance_to_occur(14, 10)
+            .then(|| String::from(" sepia(100%)"))
+    }
+
+    fn inverted(&self) -> Option<String> {
+        self.chance_to_occur(15, 20)
+            .then(|| String::from(" invert(100%)"))
+    }
+
+    fn saturation(&self) -> Option<String> {
+        self.chance_to_occur(16, 20)
+            .then(|| format!("  saturate({}%)", self.get_rng(17).gen_range(100..400)))
     }
 
     // TODO: Get rid of this in favor of something better.
@@ -284,8 +378,8 @@ impl ItemDrop {
         }
     }
 
-    pub fn get_rng(&self, seed: u16) -> StdRng {
-        StdRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
+    pub fn get_rng(&self, seed: u16) -> XorShiftRng {
+        XorShiftRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
     }
 
     pub fn chance_to_occur(&self, seed: u16, one_in_n_chance: u32) -> bool {
@@ -296,8 +390,10 @@ impl ItemDrop {
     pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
         // Determine if we have a drop
         conn.transaction(|| {
-            let item: Option<Self> = (user.last_reward < (Utc::now() - *DROP_PERIOD).naive_utc()
-                && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
+            let item: Option<Self> = (user.last_reward
+                < (Utc::now() - *MAX_DROP_PERIOD).naive_utc()
+                || user.last_reward < (Utc::now() - *MIN_DROP_PERIOD).naive_utc()
+                    && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
                 .then(|| {
                     use self::items::dsl::*;
 
@@ -346,18 +442,6 @@ impl ItemDrop {
         .ok()
         .flatten()
     }
-}
-
-pub fn rotation(drop: &ItemDrop) -> u32 {
-    drop.get_rng(1).gen_range(0..360)
-}
-
-pub fn is_spinning(drop: &ItemDrop) -> bool {
-    drop.chance_to_occur(2, 10) //todo magic
-}
-
-pub fn spin_speed(drop: &ItemDrop) -> f64 {
-    drop.get_rng(3).gen_range(0.1..3.0)
 }
 
 // TODO: Take this struct and extract it somewhere
