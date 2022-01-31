@@ -245,169 +245,96 @@ impl ItemDrop {
     }
 
     fn thumbnail_div_animations_html(&self) -> String {
-        vec![self.rolling_html()]
-            .into_iter()
-            .map(|e| match e {
-                Some(x) => x,
-                None => String::new(),
-            })
-            .collect::<String>()
+        self.rolling().unwrap_or_else(String::new)
     }
 
     fn thumbnail_animations_html(&self) -> String {
-        vec![self.spin_html(), self.shiny_html()]
+        vec![self.spin(), self.shiny()]
             .into_iter()
-            .map(|e| match e {
-                Some(x) => x,
-                None => String::new(),
-            })
-            .collect::<String>()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join("")
     }
 
     fn thumbnail_transforms_html(&self) -> String {
-        vec![self.rotation_html()]
-            .into_iter()
-            .map(|e| match e {
-                Some(x) => x,
-                None => String::new(),
-            })
-            .collect::<String>()
+        self.rotation().unwrap_or_else(String::new)
     }
 
     fn thumbnail_filtrs_html(&self) -> String {
         vec![
-            self.blur_html(),
-            self.transparency_html(),
-            self.contrast_html(),
-            self.sepia_html(),
-            self.inverted_html(),
-            self.saturation_html(),
+            self.blur(),
+            self.transparency(),
+            self.contrast(),
+            self.sepia(),
+            self.inverted(),
+            self.saturation(),
         ]
         .into_iter()
-        .map(|e| match e {
-            Some(x) => x,
-            None => String::new(),
-        })
-        .collect::<String>()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join("")
     }
 
-    pub fn is_rotated(&self) -> bool {
+    fn rotation(&self) -> Option<String> {
         self.chance_to_occur(0, 2)
+            .then(|| format!("rotate({}deg)", self.get_rng(1).gen_range(0..360)))
     }
 
-    pub fn rotation(&self) -> u32 {
-        self.get_rng(1).gen_range(0..360)
+    fn spin(&self) -> Option<String> {
+        self.chance_to_occur(2, 5).then(|| {
+            format!(
+                ",spin {}s infinite linear",
+                self.get_rng(3).gen_range(0.1..3.0)
+            )
+        })
     }
 
-    fn rotation_html(&self) -> Option<String> {
-        self.is_rotated()
-            .then(|| format!("rotate({}deg)", self.rotation()))
+    fn rolling(&self) -> Option<String> {
+        self.chance_to_occur(4, 5).then(|| {
+            format!(
+                ",roll {}s infinite linear",
+                self.get_rng(5).gen_range(0.33..3.0)
+            )
+        })
     }
 
-    pub fn is_spinning(&self) -> bool {
-        self.chance_to_occur(2, 5)
+    fn shiny(&self) -> Option<String> {
+        self.chance_to_occur(6, 10).then(|| {
+            format!(
+                ",shiny {}s infinite linear",
+                self.get_rng(7).gen_range(0.33..3.0)
+            )
+        })
     }
 
-    pub fn spin_speed(&self) -> f64 {
-        self.get_rng(3).gen_range(0.1..3.0)
-    }
-
-    fn spin_html(&self) -> Option<String> {
-        self.is_spinning()
-            .then(|| format!(",spin {}s infinite linear", self.spin_speed()))
-    }
-
-    pub fn is_rolling(&self) -> bool {
-        self.chance_to_occur(4, 5)
-    }
-
-    pub fn rolling_speed(&self) -> f64 {
-        self.get_rng(5).gen_range(0.33..3.0)
-    }
-
-    fn rolling_html(&self) -> Option<String> {
-        self.is_rolling()
-            .then(|| format!(",roll {}s infinite linear", self.rolling_speed()))
-    }
-
-    pub fn is_shiny(&self) -> bool {
-        self.chance_to_occur(6, 10)
-    }
-
-    pub fn shiny_speed(&self) -> f64 {
-        self.get_rng(7).gen_range(0.33..3.0)
-    }
-
-    fn shiny_html(&self) -> Option<String> {
-        self.is_shiny()
-            .then(|| format!(",shiny {}s infinite linear", self.shiny_speed()))
-    }
-
-    pub fn is_blury(&self) -> bool {
+    fn blur(&self) -> Option<String> {
         self.chance_to_occur(8, 20)
+            .then(|| format!(" blur({}px)", self.get_rng(9).gen_range(2..8)))
     }
 
-    pub fn blur(&self) -> u32 {
-        self.get_rng(9).gen_range(2..8)
-    }
-
-    fn blur_html(&self) -> Option<String> {
-        self.is_blury().then(|| format!(" blur({}px)", self.blur()))
-    }
-
-    pub fn is_transparent(&self) -> bool {
+    fn transparency(&self) -> Option<String> {
         self.chance_to_occur(10, 30)
+            .then(|| format!(" opacity({}%)", self.get_rng(11).gen_range(10..60)))
     }
 
-    pub fn transparency(&self) -> u32 {
-        self.get_rng(11).gen_range(10..60)
-    }
-
-    fn transparency_html(&self) -> Option<String> {
-        self.is_transparent()
-            .then(|| format!(" opacity({}%)", self.transparency()))
-    }
-
-    pub fn is_high_contrast(&self) -> bool {
+    fn contrast(&self) -> Option<String> {
         self.chance_to_occur(12, 10)
+            .then(|| format!(" contrast({}%)", self.get_rng(13).gen_range(100..500)))
     }
 
-    pub fn contrast(&self) -> u32 {
-        self.get_rng(13).gen_range(100..500)
-    }
-
-    fn contrast_html(&self) -> Option<String> {
-        self.is_high_contrast()
-            .then(|| format!(" contrast({}%)", self.contrast()))
-    }
-
-    pub fn is_sepia(&self) -> bool {
+    fn sepia(&self) -> Option<String> {
         self.chance_to_occur(14, 10)
+            .then(|| String::from(" sepia(100%)"))
     }
 
-    fn sepia_html(&self) -> Option<String> {
-        self.is_sepia().then(|| String::from(" sepia(100%)"))
-    }
-
-    pub fn is_inverted(&self) -> bool {
+    fn inverted(&self) -> Option<String> {
         self.chance_to_occur(15, 20)
+            .then(|| String::from(" invert(100%)"))
     }
 
-    fn inverted_html(&self) -> Option<String> {
-        self.is_inverted().then(|| String::from(" invert(100%)"))
-    }
-
-    pub fn is_saturated(&self) -> bool {
+    fn saturation(&self) -> Option<String> {
         self.chance_to_occur(16, 20)
-    }
-
-    pub fn saturation(&self) -> u32 {
-        self.get_rng(17).gen_range(100..400)
-    }
-
-    fn saturation_html(&self) -> Option<String> {
-        self.is_saturated()
-            .then(|| format!("  saturate({}%)", self.saturation()))
+            .then(|| format!("  saturate({}%)", self.get_rng(17).gen_range(100..400)))
     }
 
     // TODO: Get rid of this in favor of something better.
