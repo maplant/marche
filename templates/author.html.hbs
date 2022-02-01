@@ -29,7 +29,12 @@
               <label for="body">Body: </label>
             </div>
             <div class="heavy-cell">
-              <textarea name="body" rows="8" cols="100" style="width: 75%; padding: 5px"></textarea>
+              <div style="width: 77%">
+                <textarea name="body" id="body" style="display: none;"></textarea>
+                <script>
+                  var simplemde = new SimpleMDE({ status: false });
+                </script>
+              </div>
             </div>
           </div>
           <div class="row">
