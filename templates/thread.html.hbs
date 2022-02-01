@@ -39,7 +39,7 @@
         </div>
       </li>
     {{/each}}
-    <form action="/reply/{{id}}" method="post" id="reply-form">
+    <form action="/reply/{{id}}" method="post" id="reply">
     <li class="menu-item">
       {{#if error}}
         <div class="row">
@@ -57,14 +57,10 @@
         <label for="reply">Reply:</label>
       </div>
       <div class="cell" style="width: 80%">
-        <input type="hidden" name="reply">
         <div id="editor" style="background: white"></div>
         <script>
           const editor = new toastui.Editor({
               el: document.querySelector('#editor'),
-          });
-          $( "#reply-form" ).submit(function(event) {
-              $('input[name=reply]:hidden').val(editor.getMarkdown());
           });
         </script>
       </div>
