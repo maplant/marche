@@ -3,8 +3,8 @@
 <head>
   <title>{{title}}</title>
   <link href="/static/styles.css" rel="stylesheet">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.css">
-  <script src="https://cdn.jsdelivr.net/npm/easymde/dist/easymde.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/easymde@2.16.1/dist/easymde.min.css">
+  <script src="https://unpkg.com/easymde@2.16.1/dist/easymde.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Arvo&display=swap" rel="stylesheet">
@@ -13,8 +13,7 @@
 <body>
   <ul class="menu-item">
     <li class="menu-item" style="text-align: center; padding: 10px;">
-        <h3><span style="font-size: 180%">⚖️</span><br />C'est le Marché</h3>
-      </div>
+      <h3><span style="font-size: 180%">⚖️</span><br />C'est le Marché</h3>
       <a href="/">Home</a> | <a href="/profile">Profile</a> | <a href="/author">New Post</a> | <a href="/offers">Trade
         Offers{{#if offer_count}} (<b>{{offer_count}}</b>){{/if}}</a> | <a href="/leaderboard">Leaderboard</a>
     </li>
