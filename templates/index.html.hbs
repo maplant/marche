@@ -19,10 +19,10 @@
         <div class="table">
           <div class="row">
             <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
-              <a href="/thread/{{id}}#reply">{{title}}{{#unless read}} 📨{{/unless}}</a>
+              <a href="/thread/{{id}}#reply">{{title}}</a>
                 <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">
                   └{{replies}}
-                  | last activity {{#if emphasize_date}}<b>{{date}}</b>{{else}}{{date}}{{/if}}
+                  | last activity {{#if emphasize_date}}<b>{{date}}</b>{{else}}{{date}}{{/if}}{{#unless read}} 📨{{/unless}}
                 </div>
             </div>
             <div class="cell" style="width: 40%; text-align: right">
