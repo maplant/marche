@@ -1,6 +1,6 @@
 {{> header title="Author Post" }}
     <li class="menu-item">
-      <form action="/author" method="post">
+      <form action="/author" method="post" id="thread-form">
         <div class="header">
           New Post:
         </div>
@@ -30,10 +30,14 @@
             </div>
             <div class="heavy-cell">
               <div style="width: 100%">
+                <input type="hidden" name="body">
                 <div id="editor" style="background: white"></div>
                 <script>
                   const editor = new toastui.Editor({
                       el: document.querySelector('#editor'),
+                  });
+                  $( "#thread-form" ).submit(function(event) {
+                      $('input[name=body]:hidden').val(editor.getMarkdown());
                   });
                 </script>
               </div>
