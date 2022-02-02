@@ -1,19 +1,19 @@
-e{{> header title="Trade offer"}}
+{{> header title="Trade offer"}}
     <li class="menu-item">
       <form action="/offer/{{receiver.id}}" method="post">
       <div class="table">
         <div class="row">
-          <div class="heavy-cell"></div>
-          <div class="heavy-cell" style="width: 100%;"><b>{{sender.name}} offers:</b></div>
+          <div class="cell"></div>
+          <div class="cell" style="width: 100%;"><b>{{sender.name}} offers:</b></div>
         </div>
         <div class="row">
           {{#with sender}}
-          <div class="heavy-cell" style="{{background}} text-align:center; vertical-align:top; min-width: 180px">
-            <p><a href="/profile/{{id}}">{{name}}</a></p>
+          <div class="profile" style="{{background}}">
+            <p><a href="/profile/{{id}}" style="color: white">{{name}}</a></p>
             {{> profile-pic }}
           </div>
           {{/with}}
-          <div class="heavy-cell">
+          <div class="cell">
             {{#each sender_inventory}}
               <label class="item-{{rarity}}" for="{{id}}">
                 <div class="hover-triggers-overlay">
@@ -29,8 +29,8 @@ e{{> header title="Trade offer"}}
           </div>
         </div>
         <div class="row">
-          <div class="heavy-cell"></div>
-          <div class="heavy-cell">
+          <div class="cell"></div>
+          <div class="cell">
             <b>
               in exchange for {{receiver.name}}'s:
             </b>
@@ -38,12 +38,12 @@ e{{> header title="Trade offer"}}
         </div>
         <div class="row">
           {{#with receiver}}
-          <div class="heavy-cell" style="{{background}} text-align:center; vertical-align:top; min-width: 180px">
-            <p><a href="/profile/{{id}}">{{name}}</a></p>
+          <div class="profile" style="{{background}}">
+            <p><a href="/profile/{{id}}" style="color: white">{{name}}</a></p>
             {{> profile-pic }}
           </div>
           {{/with}}
-          <div class="heavy-cell">
+          <div class="cell">
             {{#each receiver_inventory}}
               <label class="item-{{rarity}}" for="{{id}}">
                 <div class="hover-triggers-overlay">
@@ -62,7 +62,7 @@ e{{> header title="Trade offer"}}
           <div class="cell">
           </div>
           <div class="cell">
-            <input type="submit" value="Submit trade offer" />
+            <button type="submit">Submit trade offer</button>
           </div>
         </div>
       </div>

@@ -36,7 +36,7 @@
           </div>
           <div class="cell">
             <form action="/equip/{{id}}">
-            <input type="submit" value="Equip" style="padding: 10px" {{#unless is_equipable }} disabled {{/unless}}/>
+            <button type="submit" {{#unless is_equipable }} disabled {{/unless}}>Equip</button>
             </form>
           </div>
         </div>

@@ -82,6 +82,10 @@ div.reward {
     display: inline-block;
 }
 
+button {
+    padding: 10px;
+}
+
 .selected-tag {
     text-align: center;
     vertical-align: middle;
@@ -341,3 +345,4 @@ div.post {
       ms-transform: rotateY(359deg);
     }
 }
+

@@ -59,7 +59,7 @@
       <div class="cell" style="width: 80%">
         <textarea name="reply" id="reply" style="display: none;"></textarea>
         <script>
-          var simplemde = new EasyMDE({ status: false });
+          var simplemde = new EasyMDE({ status: false, lineWrapping: true, });
         </script>
       </div>
     </div>
@@ -67,7 +67,7 @@
       <div class="cell">
       </div>
       <div class="cell">
-        <input type="submit" value="Submit">
+        <button type="submit">Reply</button>
       </div>
     </div>
     </li>
