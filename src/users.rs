@@ -31,6 +31,7 @@ table! {
         last_reward -> Timestamp,
         equip_slot_prof_pic -> Nullable<Integer>,
         equip_slot_background -> Nullable<Integer>,
+        equip_slot_badges -> Array<Integer>,
     }
 }
 
@@ -65,6 +66,8 @@ pub struct User {
     pub equip_slot_prof_pic: Option<i32>,
     /// ProfileBackground equipment slot
     pub equip_slot_background: Option<i32>,
+    /// Badge equipment slots
+    pub equip_slot_badges: Vec<i32>,
 }
 
 #[derive(Queryable)]
@@ -538,9 +541,8 @@ impl LoginSession {
         // TODO: If there are more than two sessions with the same id, fail.
         let curr_session = login_sessions
             .filter(session_id.eq(sess_id))
-            .load::<Self>(conn)
+            .first::<Self>(conn)
             .ok()
-            .and_then(|v| v.into_iter().next())
             .ok_or(())?;
         // The session is automatically invalid if the session is longer than a month old.
         if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
@@ -564,11 +566,11 @@ impl LoginSession {
 
             users
                 .filter(name.eq(user_name))
-                .load::<User>(conn)
+                .first::<User>(conn)
                 .ok()
-                .and_then(|v| v.into_iter().next())
                 .ok_or(LoginFailure::UserOrPasswordIncorrect)?
         };
+        println!("Got here, {:?}", user);
 
         if !verify_password(&user.password, password) {
             return Err(LoginFailure::UserOrPasswordIncorrect);
@@ -605,6 +607,8 @@ pub struct LoginReq {
 pub fn login_action(jar: &CookieJar<'_>, login: Form<LoginReq>) -> Redirect {
     jar.remove_private(Cookie::new(USER_SESSION_ID_COOKIE, String::new()));
     let conn = crate::establish_db_connection();
+    dbg!(&login.username);
+    dbg!(&login.password);
     let session = LoginSession::login(&conn, &login.username, &login.password);
     match session {
         Ok(LoginSession { session_id, .. }) => {

@@ -88,6 +88,10 @@ pub enum ItemType {
         /// Amount of experience granted to the poster. Value can be negative
         xp_value: i32,
     },
+    /// Badge
+    Badge {
+        value: String,
+    }
 }
 
 impl ToSql<Jsonb, Pg> for ItemType {
@@ -241,6 +245,7 @@ impl ItemDrop {
                 self.thumbnail_animations_html(),
                 self.thumbnail_filtrs_html(),
             ),
+            ItemType::Badge { value } => value, 
         }
     }
 
