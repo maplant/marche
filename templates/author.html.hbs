@@ -1,56 +1,37 @@
 {{> header title="Author Post" }}
-    <li class="menu-item">
+    <li class="menu-item" style="padding-left: 25px; padding-right: 25px">
       <form action="/author" method="post">
-        <div class="header">
-          New Post:
-        </div>
-        <div class="table">
-          {{#if error}}
-            <div class="row">
-              <div class="cell" style="border-top: 1px solid black">
-              </div>
-              <div class="cell" style="border-top: 1px solid black">
-                <div class="error"> 
-                  {{error}}
-                </div>
-              </div>
-            </div>
-          {{/if}}
-          <div class="row">
-            <div class="heavy-cell" style="border-top: 1px solid black">
-              <label for="title">Title: </label>
-            </div>
-            <div class="heavy-cell" style="width: 100%; border-top: 1px solid black">
-              <input type="text" name="title" id="title" style="width: 75%; padding: 5px;">
-            </div>
+      <h3 style="padding-top: 15px">
+          New Post
+      </h3>
+        {{#if error}}
+          <div class="error"> 
+            {{error}}
           </div>
-          <div class="row">
-            <div class="heavy-cell" style="vertical-align: top">
-              <label for="body">Body: </label>
-            </div>
-            <div class="heavy-cell">
-              <div style="width: 77%">
-                <textarea name="body" id="body" style="display: none;"></textarea>
-                <script>
-                  var simplemde = new EasyMDE({ status: false });
-                </script>
-              </div>
-            </div>
+        {{/if}}
+          <div style="padding-bottom: 15px">
+            <b><label for="title">Title</label></b>
           </div>
-          <div class="row">
-            <div class="heavy-cell">
-              <label for="title">Tags: </label>
-            </div>
-            <div class="heavy-cell" style="width: 100%">
-              <input type="text" name="tags" id="title" value="en, " style="width: 75%; padding: 5px">
-            </div>
+          <div>
+            <input type="text" name="title" id="title" style="width: 95%; padding: 5px">
           </div>
-          <div class="row">
-            <div class="cell">
-            </div>
-            <div class="cell">
-              <button type="submit">Post</button>
-            </div>
+          <div style="padding-top: 15px; padding-bottom: 15px">
+            <b><label for="body">Body</label></b>
+          </div>
+          <div>
+            <textarea name="body" id="body"></textarea>
+            <script>
+              var simplemde = new EasyMDE({ status: false });
+            </script>
+          </div>
+          <div style="padding-top: 15px; padding-bottom: 15px">
+            <b><label for="title">Tags</label></b>
+          </div>
+          <div>
+            <input type="text" name="tags" id="title" value="en, " style="width: 95%; padding: 5px">
+          </div>
+          <div style="padding-top: 15px; padding-bottom: 15px">
+            <button type="submit">Post</button>
           </div>
         </div>
       </form>

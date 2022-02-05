@@ -40,7 +40,7 @@
       </li>
     {{/each}}
     <form action="/reply/{{id}}" method="post" id="reply">
-    <li class="menu-item">
+    <li class="menu-item" style="padding-left: 25px; padding-right: 25px">
       {{#if error}}
         <div class="row">
           <div class="cell">
@@ -52,24 +52,18 @@
           </div>
         </div>
       {{/if}}
-    <div class="row">
-      <div class="cell" style="text-align: right; vertical-align: top; min-width: 180px">
-        <label for="reply">Reply:</label>
+      <div style="padding-top: 15px; padding-bottom: 15px">
+        <b><label for="reply">New reply</label></b>
       </div>
-      <div class="cell" style="width: 80%">
-        <textarea name="reply" id="reply" style="display: none;"></textarea>
+      <div>
+        <textarea name="reply" id="reply" style="width: 100%"></textarea>
         <script>
           var simplemde = new EasyMDE({ status: false, lineWrapping: true, });
         </script>
       </div>
-    </div>
-    <div class="row">
-      <div class="cell">
-      </div>
-      <div class="cell">
+      <div style="padding-top: 15px; padding-bottom: 15px">
         <button type="submit">Reply</button>
       </div>
-    </div>
     </li>
     </form>
   </ul>
