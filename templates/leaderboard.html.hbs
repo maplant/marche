@@ -1,25 +1,27 @@
 {{> header title="Global Leaderboards"}}
-<div style="display: flex; flex-wrap: wrap; justify-content: center">
 {{#each users}}
-  <div style="display: table; border: 1px solid #273B09; border-radius: 5px; margin: 5px">
-    <div style="display: table-row">
-      <div style="padding: 15px; vertical-align: middle; display: table-cell">
-        {{rank}}
-      </div>
-      {{#with profile}}
-        <div class="profile" style="{{background}}; width: 180px">
-          <p><a href="/profile/{{id}}" style="color: white">{{name}}</a></p>
-        </div>
-        {{#with level}}
-          <div style="padding: 15px">
-            <div>{{level}}</div>
-            <div><progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
+  <li class="menu-item">
+    <div style="display: table" id={{id}}>
+      <div style="display: table-row">
+        {{#with profile}}
+          <div class="profile" style="{{background}}">
+            <p><a href="/profile/{{id}}" style="color: white">{{name}}</a></p>
+            {{> profile-pic }}
+            {{#with level}}
+              <div style="text-align: left; color: white; padding-top: 10px; padding-left: 10px; padding-right: 10px">level {{level}}
+              <progress max="{{next_level_xp}}" value="{{curr_xp}}"></progress></div>
+            {{/with}}
           </div>
         {{/with}}
-      {{/with}}
+        <div class="post">
+          <h3>Rank {{rank}}.</h3>
+          <p style="min-height: 80px">
+            {{{bio}}}
+          </p>
+        </div>
+      </div>
     </div>
-  </div>
+  </li>
 {{/each}}
-</div>
 </ul>
 </body>

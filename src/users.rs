@@ -435,6 +435,7 @@ pub fn leaderboard(user: User) -> Template {
     #[derive(Serialize)]
     struct UserRank {
         rank: usize,
+        bio: String, 
         profile: UserProfile,
     }
 
@@ -455,6 +456,7 @@ pub fn leaderboard(user: User) -> Template {
         .enumerate()
         .map(|(i, u)| UserRank {
             rank: i + 1,
+            bio: u.bio.clone(),
             profile: u.profile(&conn),
         })
         .collect();
