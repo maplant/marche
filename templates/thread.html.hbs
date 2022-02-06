@@ -27,7 +27,7 @@
               {{/each}}
               <div style="float: right; text-align: right;">
               {{#if reward}}
-                <div class="rarity-{{reward.rarity}} hover-triggers-overlay">
+                <div class="rarity-{{reward.rarity}} hover-triggers-overlay" style="margin:5px;">
                   ⭐ <b>{{reward.name}}</b> was given for this post
                   <div class="overlay-on-hover item-overlay">
                     {{> item-overlay reward}}
@@ -40,7 +40,7 @@
                 </a>
               {{/if}}
                 <div class = "reply-to-button action-box" class="action-box" replyid={{id}}>
-                  + Reply!
+                  + Respond!
                 </div>
               </div>
             </div>
@@ -61,12 +61,9 @@
           </div>
         </div>
       {{/if}}
-      <div style="padding-top: 15px; padding-bottom: 15px">
-        <b><label for="reply">New reply</label></b>
-      </div>
       <div>
         <textarea name="reply" id="reply-textarea" rows="8" cols="100" style="width: 75%; border-radius: 5px; padding: 5px"></textarea>
-        <button type="submit">Reply</button>
+        <button type="submit" class="action-box" style="margin-bottom: 15px; margin-top: 15px; margin-left: 0px;">+ Reply!</button>
       </div>
     </li>
     </form>
