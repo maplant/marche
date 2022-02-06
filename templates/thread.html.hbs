@@ -1,4 +1,5 @@
 {{> header title=title }}
+    <script src="/scripts/thread.js" async></script>
     <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">{{title}}
     </li>
     {{#each posts}}
@@ -38,6 +39,9 @@
                 + React!
                 </a>
               {{/if}}
+                <div class = "reply-to-button action-box" class="action-box" replyid={{id}}>
+                  + Reply!
+                </div>
               </div>
             </div>
           </div>
@@ -61,12 +65,7 @@
         <b><label for="reply">New reply</label></b>
       </div>
       <div>
-        <textarea name="reply" id="reply" style="width: 100%"></textarea>
-        <script>
-          var simplemde = new EasyMDE({ status: false, lineWrapping: true, });
-        </script>
-      </div>
-      <div style="padding-top: 15px; padding-bottom: 15px">
+        <textarea name="reply" id="reply-textarea" rows="8" cols="100" style="width: 75%; border-radius: 5px; padding: 5px"></textarea>
         <button type="submit">Reply</button>
       </div>
     </li>
