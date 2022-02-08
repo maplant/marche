@@ -70,6 +70,8 @@ pub struct User {
     pub equip_slot_badges: Vec<i32>,
 }
 
+pub const MAX_NUM_BADGES: usize = 10;
+
 #[derive(Queryable)]
 pub struct ReadingHistory {
     pub id: i32,
@@ -163,6 +165,16 @@ impl User {
                     .get_result::<Self>(conn)
                     .unwrap();
             }
+            ItemType::Badge { .. } => {
+                let mut badges = self.equip_slot_badges.clone();
+                if !badges.contains(&item_drop.id) && badges.len() < MAX_NUM_BADGES {
+                    badges.push(item_drop.id);
+                }
+                diesel::update(users.find(self.id))
+                    .set(equip_slot_badges.eq(badges))
+                    .get_result::<Self>(conn)
+                    .unwrap();
+            }
             _ => (),
         }
     }
@@ -185,6 +197,17 @@ impl User {
                     .set(equip_slot_background.eq(Option::<i32>::None))
                     .get_result::<Self>(conn);
             }
+            ItemType::Badge { .. } => {
+                let badges = self
+                    .equip_slot_badges
+                    .iter()
+                    .cloned()
+                    .filter(|drop_id| *drop_id != item_drop.id)
+                    .collect::<Vec<_>>();
+                let _ = diesel::update(users.find(self.id))
+                    .set(equip_slot_badges.eq(badges))
+                    .get_result::<Self>(conn);
+            }
             _ => (),
         }
     }
@@ -199,6 +222,10 @@ impl User {
 
         if let Some(background) = self.equip_slot_background {
             items.push(ItemDrop::fetch(conn, background));
+        }
+
+        for badge in self.equip_slot_badges.iter() {
+            items.push(ItemDrop::fetch(conn, *badge));
         }
 
         items
@@ -237,6 +264,13 @@ impl User {
             .unwrap_or_else(|| String::from("background: #DBD2E0;"))
     }
 
+    fn get_badges(&self, conn: &PgConnection) -> Vec<String> {
+        self.equip_slot_badges
+            .iter()
+            .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).badge(conn))
+            .collect()
+    }
+
     /// Attempt to update the last drop time. If we fail, return false.
     pub fn update_last_reward(&self, conn: &PgConnection) -> Result<Self, ()> {
         use self::users::dsl::{last_reward, users};
@@ -253,6 +287,7 @@ impl User {
             name: self.name.clone(),
             picture: self.get_profile_pic(conn),
             background: self.get_background_style(conn),
+            badges: self.get_badges(conn),
             level: self.level_info(),
         }
     }
@@ -315,6 +350,7 @@ pub struct UserProfile {
     pub name: String,
     pub picture: Option<String>,
     pub background: String,
+    pub badges: Vec<String>,
     pub level: LevelInfo,
 }
 
@@ -372,6 +408,7 @@ pub fn profile(curr_user: User, id: i32) -> Template {
         level: LevelInfo,
         equipped: Vec<ItemThumbnail>,
         inventory: Vec<ItemThumbnail>,
+        badges: Vec<String>,
         background: &'bg str,
         can_trade: bool,
         offer_count: i64,
@@ -424,6 +461,7 @@ pub fn profile(curr_user: User, id: i32) -> Template {
             level: user.level_info(),
             equipped,
             inventory,
+            badges: user.get_badges(&conn),
             background: &user.get_background_style(&conn),
             can_trade: user.id != curr_user.id,
             offer_count: items::IncomingOffer::count(&conn, &curr_user),
@@ -438,7 +476,7 @@ pub fn leaderboard(user: User) -> Template {
     #[derive(Serialize)]
     struct UserRank {
         rank: usize,
-        bio: String, 
+        bio: String,
         profile: UserProfile,
     }
 
@@ -570,7 +608,6 @@ impl LoginSession {
                 .ok()
                 .ok_or(LoginFailure::UserOrPasswordIncorrect)?
         };
-        println!("Got here, {:?}", user);
 
         if !verify_password(&user.password, password) {
             return Err(LoginFailure::UserOrPasswordIncorrect);
@@ -607,8 +644,6 @@ pub struct LoginReq {
 pub fn login_action(jar: &CookieJar<'_>, login: Form<LoginReq>) -> Redirect {
     jar.remove_private(Cookie::new(USER_SESSION_ID_COOKIE, String::new()));
     let conn = crate::establish_db_connection();
-    dbg!(&login.username);
-    dbg!(&login.password);
     let session = LoginSession::login(&conn, &login.username, &login.password);
     match session {
         Ok(LoginSession { session_id, .. }) => {
