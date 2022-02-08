@@ -88,6 +88,10 @@ pub enum ItemType {
         /// Amount of experience granted to the poster. Value can be negative
         xp_value: i32,
     },
+    /// Badge
+    Badge {
+        value: String,
+    }
 }
 
 impl ToSql<Jsonb, Pg> for ItemType {
@@ -157,7 +161,7 @@ impl Item {
     pub fn is_equipable(&self) -> bool {
         matches!(
             self.item_type,
-            ItemType::Avatar { .. } | ItemType::ProfileBackground { .. }
+            ItemType::Avatar { .. } | ItemType::ProfileBackground { .. } | ItemType::Badge { .. }
         )
     }
 }
@@ -239,8 +243,9 @@ impl ItemDrop {
                 filename,
                 self.thumbnail_transforms_html(),
                 self.thumbnail_animations_html(),
-                self.thumbnail_filtrs_html(),
+                self.thumbnail_filters_html(),
             ),
+            ItemType::Badge { value } => format!(r#"<div style="font-size: 200%">{}</div>"#,  value), 
         }
     }
 
@@ -260,7 +265,7 @@ impl ItemDrop {
         self.rotation().unwrap_or_else(String::new)
     }
 
-    fn thumbnail_filtrs_html(&self) -> String {
+    fn thumbnail_filters_html(&self) -> String {
         vec![
             self.blur(),
             self.transparency(),
@@ -375,6 +380,14 @@ impl ItemDrop {
                 style
             }
             _ => panic!("Item is not a profile picture"),
+        }
+    }
+
+    pub fn badge(&self, conn: &PgConnection) -> String {
+        let item = Item::fetch(&conn, self.item_id);
+        match item.item_type {
+            ItemType::Badge { value } => format!("<div>{}</div>", value),
+            _ => panic!("Item is not a badge"),
         }
     }
 

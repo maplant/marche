@@ -315,6 +315,14 @@ div.post {
     padding-right: 25px;
 }
 
+.badge-grid {
+    display: inline-grid;
+    grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+    grid-gap: 10px;
+    padding-top: 10px;
+    padding-bottom: 10px;
+}
+
 @keyframes spin {
     from {
       transform: rotateZ(0deg);

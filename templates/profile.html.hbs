@@ -6,8 +6,13 @@
           <div class="heavy-cell" style="width: 100%;"><b>{{name}}</b></div>
         </div>
         <div class="row">
-          <div class="heavy-cell" style="{{background}} text-align: center; min-width: 180px; min-height: 180px">
+          <div class="heavy-cell" style="{{background}} text-align: center; min-width: 180px; min-height: 180px; text-shadow: 1px 0 black, 0 1px black, -1px 0 black, 0 -1px black">
             {{> profile-pic }}
+            <div class="badge-grid">
+              {{#each badges}}
+                {{{this}}}
+              {{/each}}
+            </div>
           </div>
           <div class="heavy-cell" style="vertical-align: top; padding: 15px">
             {{bio}}

@@ -13,7 +13,8 @@ CREATE TABLE users (
   experience BIGINT NOT NULL, 
   last_reward TIMESTAMP NOT NULL,
   equip_slot_prof_pic INTEGER,
-  equip_slot_background INTEGER
+  equip_slot_background INTEGER,
+  equip_slot_badges INTEGER[] NOT NULL
 );
 
 create TABLE reading_history (

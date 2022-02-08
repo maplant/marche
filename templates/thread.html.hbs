@@ -9,6 +9,11 @@
               <div class="profile" style="{{background}}">
                 <p><a href="/profile/{{id}}" style="color: white">{{name}}</a></p>
                 {{> profile-pic }}
+                <div class="badge-grid">
+                  {{#each badges}}
+                    {{{this}}}
+                  {{/each}}
+                </div>
               </div>
             {{/with}}
             <div class="post">
