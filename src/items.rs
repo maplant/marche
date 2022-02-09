@@ -7,6 +7,8 @@ use diesel::serialize::Output;
 use diesel::sql_types::Jsonb;
 use diesel::types::{FromSql, ToSql};
 use diesel_derive_enum::DbEnum;
+use lazy_static::lazy_static;
+use maplit::hashmap;
 use rand::prelude::{thread_rng, IteratorRandom};
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
@@ -89,9 +91,7 @@ pub enum ItemType {
         xp_value: i32,
     },
     /// Badge
-    Badge {
-        value: String,
-    }
+    Badge { value: String },
 }
 
 impl ToSql<Jsonb, Pg> for ItemType {
@@ -109,6 +109,35 @@ impl FromSql<Jsonb, Pg> for ItemType {
     }
 }
 
+#[derive(Clone, Debug, FromSqlRow, AsExpression)]
+#[sql_type = "Jsonb"]
+pub struct AttributeMap {
+    map: HashMap<String, AttrInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AttrInfo {
+    rarity: u32,
+    seed: usize,
+}
+
+impl ToSql<Jsonb, Pg> for AttributeMap {
+    fn to_sql<W: std::io::Write>(&self, out: &mut Output<'_, W, Pg>) -> diesel::serialize::Result {
+        out.write_all(&[1])?;
+        serde_json::to_writer(out, &self.map)
+            .map(|_| diesel::serialize::IsNull::No)
+            .map_err(Into::into)
+    }
+}
+
+impl FromSql<Jsonb, Pg> for AttributeMap {
+    fn from_sql(bytes: Option<&[u8]>) -> diesel::deserialize::Result<Self> {
+        serde_json::from_slice(&bytes.unwrap_or(&[])[1..])
+            .map(|map| Self { map })
+            .map_err(|_| "Invalid Json".into())
+    }
+}
+
 table! {
     use diesel::sql_types::*;
     use super::RarityMapping;
@@ -120,6 +149,7 @@ table! {
         available -> Bool,
         rarity -> RarityMapping,
         item_type -> Jsonb,
+        attributes -> Jsonb,
     }
 }
 
@@ -139,6 +169,9 @@ pub struct Item {
     /// Type of the item
     #[diesel(sql_type = "ItemType")]
     pub item_type: ItemType,
+    /// Attribute rarity
+    #[diesel(sql_type = "AttributeMap")]
+    pub attributes: AttributeMap,
 }
 
 impl Item {
@@ -223,6 +256,7 @@ impl ItemDrop {
 
     pub fn thumbnail_html(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
+        let attrs = Attributes::fetch(&item, self);
         match item.item_type {
             ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
             ItemType::Avatar { filename } => format!(
@@ -238,108 +272,23 @@ impl ItemDrop {
             }
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
-                r#"<div style="animation: start{};"><img src="/static/{}.png" style="width: 50px; height: auto; transform: {}; animation: start{}; filter: {};"></div>"#,
-                self.thumbnail_div_animations_html(),
-                filename,
-                self.thumbnail_transforms_html(),
-                self.thumbnail_animations_html(),
-                self.thumbnail_filters_html(),
+                r#"
+<div style="animation: start, {div_animation};">
+    <img src="/static/{filename}.png" 
+         style="width: 50px; 
+                height: auto; 
+                transform: {transform}; 
+                animation: start, {animation}; 
+                filter: {filter};">
+</div>"#,
+                filename = filename,
+                div_animation = attrs.div_animation,
+                transform = attrs.transform,
+                animation = attrs.animation,
+                filter = attrs.filter,
             ),
-            ItemType::Badge { value } => format!(r#"<div style="font-size: 200%">{}</div>"#,  value), 
+            ItemType::Badge { value } => format!(r#"<div style="font-size: 200%">{}</div>"#, value),
         }
-    }
-
-    fn thumbnail_div_animations_html(&self) -> String {
-        self.rolling().unwrap_or_else(String::new)
-    }
-
-    fn thumbnail_animations_html(&self) -> String {
-        vec![self.spin(), self.shiny()]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join("")
-    }
-
-    fn thumbnail_transforms_html(&self) -> String {
-        self.rotation().unwrap_or_else(String::new)
-    }
-
-    fn thumbnail_filters_html(&self) -> String {
-        vec![
-            self.blur(),
-            self.transparency(),
-            self.contrast(),
-            self.sepia(),
-            self.inverted(),
-            self.saturation(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("")
-    }
-
-    fn rotation(&self) -> Option<String> {
-        self.chance_to_occur(0, 2)
-            .then(|| format!("rotate({}deg)", self.get_rng(1).gen_range(0..360)))
-    }
-
-    fn spin(&self) -> Option<String> {
-        self.chance_to_occur(2, 5).then(|| {
-            format!(
-                ",spin {}s infinite linear",
-                self.get_rng(3).gen_range(0.1..3.0)
-            )
-        })
-    }
-
-    fn rolling(&self) -> Option<String> {
-        self.chance_to_occur(4, 5).then(|| {
-            format!(
-                ",roll {}s infinite linear",
-                self.get_rng(5).gen_range(0.33..3.0)
-            )
-        })
-    }
-
-    fn shiny(&self) -> Option<String> {
-        self.chance_to_occur(6, 10).then(|| {
-            format!(
-                ",shiny {}s infinite linear",
-                self.get_rng(7).gen_range(0.33..3.0)
-            )
-        })
-    }
-
-    fn blur(&self) -> Option<String> {
-        self.chance_to_occur(8, 20)
-            .then(|| format!(" blur({}px)", self.get_rng(9).gen_range(2..8)))
-    }
-
-    fn transparency(&self) -> Option<String> {
-        self.chance_to_occur(10, 30)
-            .then(|| format!(" opacity({}%)", self.get_rng(11).gen_range(10..60)))
-    }
-
-    fn contrast(&self) -> Option<String> {
-        self.chance_to_occur(12, 10)
-            .then(|| format!(" contrast({}%)", self.get_rng(13).gen_range(100..500)))
-    }
-
-    fn sepia(&self) -> Option<String> {
-        self.chance_to_occur(14, 10)
-            .then(|| String::from(" sepia(100%)"))
-    }
-
-    fn inverted(&self) -> Option<String> {
-        self.chance_to_occur(15, 20)
-            .then(|| String::from(" invert(100%)"))
-    }
-
-    fn saturation(&self) -> Option<String> {
-        self.chance_to_occur(16, 20)
-            .then(|| format!("  saturate({}%)", self.get_rng(17).gen_range(100..400)))
     }
 
     // TODO: Get rid of this in favor of something better.
@@ -389,14 +338,6 @@ impl ItemDrop {
             ItemType::Badge { value } => format!("<div>{}</div>", value),
             _ => panic!("Item is not a badge"),
         }
-    }
-
-    pub fn get_rng(&self, seed: u16) -> XorShiftRng {
-        XorShiftRng::seed_from_u64(((self.pattern as u64) << 16) | (seed as u64))
-    }
-
-    pub fn chance_to_occur(&self, seed: u16, one_in_n_chance: u32) -> bool {
-        self.get_rng(seed).gen_ratio(1, one_in_n_chance)
     }
 
     /// Possibly selects an item, depending on the last drop.
@@ -465,6 +406,128 @@ pub struct ItemThumbnail {
     pub rarity: String,
     pub thumbnail: String,
     pub description: String,
+}
+
+#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AttributeType {
+    Filter,
+    DivAnimation,
+    Animation,
+    Transform,
+}
+
+pub struct Attribute {
+    pub ty: AttributeType,
+    pub fmt_fn: fn(&mut XorShiftRng) -> String,
+}
+
+impl Attribute {
+    fn fmt(&self, rng: &mut XorShiftRng) -> String {
+        (self.fmt_fn)(rng)
+    }
+
+    fn filter(fmt_fn: fn(&mut XorShiftRng) -> String) -> Self {
+        Self {
+            ty: AttributeType::Filter,
+            fmt_fn,
+        }
+    }
+
+    fn div_animation(fmt_fn: fn(&mut XorShiftRng) -> String) -> Self {
+        Self {
+            ty: AttributeType::DivAnimation,
+            fmt_fn,
+        }
+    }
+
+    fn animation(fmt_fn: fn(&mut XorShiftRng) -> String) -> Self {
+        Self {
+            ty: AttributeType::Animation,
+            fmt_fn,
+        }
+    }
+
+    fn transform(fmt_fn: fn(&mut XorShiftRng) -> String) -> Self {
+        Self {
+            ty: AttributeType::Transform,
+            fmt_fn,
+        }
+    }
+}
+
+lazy_static! {
+    pub static ref ATTRIBUTES: HashMap<&'static str, Attribute> = {
+        hashmap! {
+            // Animations:
+            "spin" => Attribute::animation(|rng| format!("spin {}s infinite linear", rng.gen_range::<f32, _>(0.1..3.0))),
+            "shiny" => Attribute::animation(|rng| format!("shiny {}s infinite linear", rng.gen_range::<f32, _>(0.33..3.0))),
+
+            // Div Animations:
+            "rolling" => Attribute::div_animation(|rng| format!("roll {}s infinite linear", rng.gen_range::<f32, _>(0.33..3.0))),
+
+            // Transforms:
+            "rotation" => Attribute::transform(|rng| format!("rotate({}deg)", rng.gen_range::<f32, _>(0.0..360.0))),
+
+            // Filters:
+            "blur" => Attribute::filter(|rng| format!("blur({}px)", rng.gen_range::<u16, _>(2..8))),
+            "transparency" => Attribute::filter(|rng| format!("opacity({}%)", rng.gen_range::<f32,_>(10.0..60.0))),
+            "contrast" => Attribute::filter(|rng| format!("contrast({}%)", rng.gen_range::<f32,_>(100.0..500.0))),
+            "sepia" => Attribute::filter(|_| format!("sepia(100%)")),
+            "inverted" => Attribute::filter(|_| format!("invert(100%)")),
+            "saturation" => Attribute::filter(|rng| format!("saturate({}%)", rng.gen_range::<f32, _>(100.0..400.0))),
+        }
+    };
+}
+
+#[derive(Debug)]
+pub struct Attributes {
+    pub filter: String,
+    pub div_animation: String,
+    pub animation: String,
+    pub transform: String,
+}
+
+impl Attributes {
+    fn fetch(item: &Item, item_drop: &ItemDrop) -> Self {
+        let attributes = item.attributes.clone().map;
+        let mut attr_res = HashMap::new();
+
+        for (attr_name, AttrInfo { rarity, seed }) in attributes.into_iter() {
+            let mut rng =
+                XorShiftRng::seed_from_u64((item_drop.pattern as u64) << 32 | seed as u64); // TODO: make pattern a u64?
+
+            if rng.gen_ratio(1, rarity) {
+                let attr = ATTRIBUTES.get(&*attr_name).unwrap();
+                attr_res
+                    .entry(attr.ty)
+                    .or_insert_with(Vec::new)
+                    .push(attr.fmt(&mut rng));
+            }
+        }
+
+        Self {
+            filter: attr_res
+                .remove(&AttributeType::Filter)
+                .as_deref()
+                .unwrap_or(&[])
+                .join(" "),
+            div_animation: attr_res
+                .remove(&AttributeType::DivAnimation)
+                .as_deref()
+                .unwrap_or(&[])
+                .join(", "),
+            animation: attr_res
+                .remove(&AttributeType::Animation)
+                .as_deref()
+                .unwrap_or(&[])
+                .join(", "),
+            transform: attr_res
+                .remove(&AttributeType::Transform)
+                .as_deref()
+                .unwrap_or(&[])
+                .join(" "),
+        }
+    }
 }
 
 #[rocket::get("/item/<drop_id>")]
