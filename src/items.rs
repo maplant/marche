@@ -112,7 +112,13 @@ impl FromSql<Jsonb, Pg> for ItemType {
 #[derive(Clone, Debug, FromSqlRow, AsExpression)]
 #[sql_type = "Jsonb"]
 pub struct AttributeMap {
-    map: HashMap<String, u32>,
+    map: HashMap<String, AttrInfo>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct AttrInfo {
+    rarity: u32,
+    seed: usize,
 }
 
 impl ToSql<Jsonb, Pg> for AttributeMap {
@@ -485,10 +491,12 @@ impl Attributes {
     fn fetch(item: &Item, item_drop: &ItemDrop) -> Self {
         let attributes = item.attributes.clone().map;
         let mut attr_res = HashMap::new();
-        let mut rng = XorShiftRng::seed_from_u64(item_drop.pattern as u64); // TODO: make pattern a u64?
 
-        for (attr_name, chance_denom) in attributes.into_iter() {
-            if rng.gen_ratio(1, chance_denom as u32) {
+        for (attr_name, AttrInfo { rarity, seed }) in attributes.into_iter() {
+            let mut rng =
+                XorShiftRng::seed_from_u64((item_drop.pattern as u64) << 32 | seed as u64); // TODO: make pattern a u64?
+
+            if rng.gen_ratio(1, rarity) {
                 let attr = ATTRIBUTES.get(&*attr_name).unwrap();
                 attr_res
                     .entry(attr.ty)
