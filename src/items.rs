@@ -267,12 +267,12 @@ impl ItemDrop {
             ItemType::Reaction { filename, .. } => format!(
                 // TODO(map): Add rotation
                 r#"
-<div style="animation: start {div_animation};">
+<div style="animation: start, {div_animation};">
     <img src="/static/{filename}.png" 
          style="width: 50px; 
                 height: auto; 
                 transform: {transform}; 
-                animation: start {animation}; 
+                animation: start, {animation}; 
                 filter: {filter};">
 </div>"#,
                 filename = filename,
@@ -466,13 +466,14 @@ lazy_static! {
             "blur" => Attribute::filter(|rng| format!("blur({}px)", rng.gen_range::<u16, _>(2..8))),
             "transparency" => Attribute::filter(|rng| format!("opacity({}%)", rng.gen_range::<f32,_>(10.0..60.0))),
             "contrast" => Attribute::filter(|rng| format!("contrast({}%)", rng.gen_range::<f32,_>(100.0..500.0))),
-            "sepia" => Attribute::filter(|_| format!("sepia(100%")),
+            "sepia" => Attribute::filter(|_| format!("sepia(100%)")),
             "inverted" => Attribute::filter(|_| format!("invert(100%)")),
             "saturation" => Attribute::filter(|rng| format!("saturate({}%)", rng.gen_range::<f32, _>(100.0..400.0))),
         }
     };
 }
 
+#[derive(Debug)]
 pub struct Attributes {
     pub filter: String,
     pub div_animation: String,
@@ -497,18 +498,25 @@ impl Attributes {
         }
 
         Self {
-            filter: attr_res.remove(&AttributeType::Filter).unwrap().join(" "),
+            filter: attr_res
+                .remove(&AttributeType::Filter)
+                .as_deref()
+                .unwrap_or(&[])
+                .join(" "),
             div_animation: attr_res
                 .remove(&AttributeType::DivAnimation)
-                .unwrap()
+                .as_deref()
+                .unwrap_or(&[])
                 .join(", "),
             animation: attr_res
                 .remove(&AttributeType::Animation)
-                .unwrap()
+                .as_deref()
+                .unwrap_or(&[])
                 .join(", "),
             transform: attr_res
                 .remove(&AttributeType::Transform)
-                .unwrap()
+                .as_deref()
+                .unwrap_or(&[])
                 .join(" "),
         }
     }
