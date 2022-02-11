@@ -18,18 +18,22 @@ use std::collections::{HashMap, HashSet};
 table! {
     threads(id) {
         id -> Integer,
-        last_post -> Timestamp,
+        last_post -> Integer,
         title -> Text,
         tags -> Array<Integer>,
     }
 }
 
+use diesel::sql_types::Integer;
+
+sql_function!(fn nextval(x: Integer) -> Integer);
+
 #[derive(Queryable)]
 pub struct Thread {
     /// Id of the thread
     pub id: i32,
-    /// Date of the latest post
-    pub last_post: NaiveDateTime,
+    /// Id of the last post
+    pub last_post: i32,
     /// Title of the thread
     pub title: String,
     /// Tags given to this thread
@@ -39,9 +43,10 @@ pub struct Thread {
 #[derive(Insertable)]
 #[table_name = "threads"]
 pub struct NewThread<'t> {
+    id: i32,
     title: &'t str,
     tags: Vec<i32>,
-    last_post: NaiveDateTime,
+    last_post: i32,
 }
 
 const THREADS_PER_PAGE: i64 = 25;
@@ -88,6 +93,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
         date: String,
         emphasize_date: bool,
         read: bool,
+        jump_to: i32,
         replies: String,
         tags: Vec<String>,
     }
@@ -112,7 +118,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
         .map(|(i, thread)| {
             // Format the date:
             // TODO: Consider moving duration->plaintext into common utility
-            let duration_since_last_post = Utc::now().naive_utc() - thread.last_post;
+            let duration_since_last_post = Utc::now().naive_utc() - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
             let duration_min = duration_since_last_post.num_minutes();
             let duration_hours = duration_since_last_post.num_hours();
             let duration_days = duration_since_last_post.num_days();
@@ -162,13 +168,19 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
                 x => format!("{} replies", x - 1),
             };
 
+            let (read, jump_to) = match user.next_unread(&conn, &thread) {
+                Ok(jump_to) => (true, jump_to),
+                Err(jump_to) => (false, jump_to),
+            };
+
             ThreadLink {
-                read: user.has_read(&conn, &thread),
                 num: i + 1,
                 id: thread.id,
                 title: thread.title,
                 date: duration_string,
                 emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
+                read,
+                jump_to,
                 replies,
                 tags: thread
                     .tags
@@ -343,31 +355,38 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
         .map(|t| t.id())
         .collect();
 
-    let thread: Thread = diesel::insert_into(threads::table)
-        .values(&NewThread {
-            last_post: post_date,
-            title: &thread.title,
-            tags,
-        })
-        .get_result(&conn)
-        .unwrap();
+    conn.transaction(|| -> Result<Thread, diesel::result::Error> {
+        use diesel::result::Error::RollbackTransaction;
 
-    // Make first reply
-    // TODO: Move into transaction so that you can't post a thread
-    // without the first reply.
-    let _: Reply = diesel::insert_into(replies::table)
-        .values(&NewReply {
-            author_id: user.id,
-            thread_id: thread.id,
-            post_date,
-            body: &html_output,
-            reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-            reactions: Vec::new(),
-        })
-        .get_result(&conn)
-        .unwrap();
+        let next_thread = threads::table.select(nextval(threads::dsl::id))
+            .first(&conn)
+            .map_err(|_| RollbackTransaction)?;
 
-    Redirect::to(uri!(thread(thread.id, Option::<&str>::None)))
+        let first_post: Reply = diesel::insert_into(replies::table)
+            .values(&NewReply {
+                author_id: user.id,
+                thread_id: next_thread,
+                post_date,
+                body: &html_output,
+                reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
+                reactions: Vec::new(),
+            })
+            .get_result(&conn)
+            .map_err(|_| RollbackTransaction)?;
+
+        diesel::insert_into(threads::table)
+            .values(&NewThread {
+                id: next_thread,
+                last_post: first_post.id,
+                title: &thread.title,
+                tags,
+            })
+            .get_result(&conn)
+            .map_err(|_| RollbackTransaction)
+    }).map_or_else(
+        |err| Redirect::to(uri!(crate::error::error(format!("{}", err)))),
+        |thread| Redirect::to(uri!(thread(thread.id, Option::<&str>::None))),
+    )
 }
 
 table! {
@@ -600,7 +619,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
 
     let _: Result<Thread, _> = diesel::update(threads::table)
         .filter(threads::dsl::id.eq(thread_id))
-        .set(threads::dsl::last_post.eq(post_date))
+        .set(threads::dsl::last_post.eq(reply.id))
         .get_result(&conn);
 
     Redirect::to(format!(

@@ -21,7 +21,7 @@ create TABLE reading_history (
   id SERIAL PRIMARY KEY,
   reader_id INT NOT NULL,
   thread_id INT NOT NULL,
-  last_read TIMESTAMP NOT NULL,
+  last_read INT NOT NULL,
   UNIQUE (reader_id, thread_id)
 );
 
@@ -34,7 +34,7 @@ CREATE TABLE login_sessions (
 
 CREATE TABLE threads (
   id SERIAL PRIMARY KEY,
-  last_post TIMESTAMP NOT NULL,
+  last_post INTEGER NOT NULL,
   title TEXT NOT NULL,
   tags INTEGER[] NOT NULL
 );
