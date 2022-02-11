@@ -53,7 +53,7 @@ const THREADS_PER_PAGE: i64 = 25;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
-// TODO: These next two functions absolutely should be done client side. 
+// TODO: These next two functions absolutely should be done client side.
 #[rocket::post("/remove-tag/<name>", data = "<tags>")]
 pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &str) -> Redirect {
     let _ = tags.remove("add-tag");
@@ -118,7 +118,8 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
         .map(|(i, thread)| {
             // Format the date:
             // TODO: Consider moving duration->plaintext into common utility
-            let duration_since_last_post = Utc::now().naive_utc() - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
+            let duration_since_last_post =
+                Utc::now().naive_utc() - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
             let duration_min = duration_since_last_post.num_minutes();
             let duration_hours = duration_since_last_post.num_hours();
             let duration_days = duration_since_last_post.num_days();
@@ -358,7 +359,8 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     conn.transaction(|| -> Result<Thread, diesel::result::Error> {
         use diesel::result::Error::RollbackTransaction;
 
-        let next_thread = threads::table.select(nextval(threads::dsl::id))
+        let next_thread = threads::table
+            .select(nextval(threads::dsl::id))
             .first(&conn)
             .map_err(|_| RollbackTransaction)?;
 
@@ -383,7 +385,8 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
             })
             .get_result(&conn)
             .map_err(|_| RollbackTransaction)
-    }).map_or_else(
+    })
+    .map_or_else(
         |err| Redirect::to(uri!(crate::error::error(format!("{}", err)))),
         |thread| Redirect::to(uri!(thread(thread.id, Option::<&str>::None))),
     )
