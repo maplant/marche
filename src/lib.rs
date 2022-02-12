@@ -1,5 +1,3 @@
-#![feature(int_log)]
-
 #[macro_use]
 extern crate diesel;
 #[macro_use]

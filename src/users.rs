@@ -102,7 +102,7 @@ impl User {
         if xp < 4 {
             1
         } else {
-            xp.log2()
+            63 - xp.leading_zeros()
         }
     }
 
