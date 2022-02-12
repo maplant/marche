@@ -172,7 +172,7 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
 
             let (read, jump_to) = match user.next_unread(&conn, &thread) {
                 Ok(jump_to) => ((jump_to == thread.last_post), jump_to),
-                Err(jump_to) => (true, jump_to),
+                Err(jump_to) => (false, jump_to),
             };
 
             ThreadLink {
