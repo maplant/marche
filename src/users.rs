@@ -42,7 +42,7 @@ table! {
         // constraint is applied.
         reader_id -> Integer,
         thread_id -> Integer,
-        last_read -> Timestamp,
+        last_read -> Integer,
     }
 }
 
@@ -77,7 +77,7 @@ pub struct ReadingHistory {
     pub id: i32,
     pub reader_id: i32,
     pub thread_id: i32,
-    pub last_read: NaiveDateTime,
+    pub last_read: i32,
 }
 
 #[derive(Insertable)]
@@ -85,7 +85,7 @@ pub struct ReadingHistory {
 pub struct NewReadingHistory {
     reader_id: i32,
     thread_id: i32,
-    last_read: NaiveDateTime,
+    last_read: i32,
 }
 
 impl User {
@@ -310,15 +310,41 @@ impl User {
             .map_err(|_| ())
     }
 
-    pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
-        use self::reading_history::dsl::*;
+    pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> Result<i32, i32> {
+        let last_read = {
+            use self::reading_history::dsl::*;
 
-        reading_history
-            .filter(reader_id.eq(self.id))
-            .filter(thread_id.eq(thread.id))
-            .first::<ReadingHistory>(conn)
-            .ok()
-            .map_or(false, |history| history.last_read == thread.last_post)
+            reading_history
+                .filter(reader_id.eq(self.id))
+                .filter(thread_id.eq(thread.id))
+                .first::<ReadingHistory>(conn)
+                .ok()
+                .map(|history| history.last_read)
+        };
+
+        match last_read {
+            None => {
+                // Find the first reply
+                use crate::threads::{replies::dsl::*, Reply};
+
+                Err(replies
+                    .filter(thread_id.eq(thread.id))
+                    .order(post_date.asc())
+                    .first::<Reply>(conn)
+                    .unwrap()
+                    .id)
+            }
+            Some(last_read) => {
+                use crate::threads::{replies::dsl::*, Reply};
+
+                replies
+                    .filter(thread_id.eq(thread.id))
+                    .filter(id.gt(last_read))
+                    .first::<Reply>(conn)
+                    .map_err(|_| last_read)
+                    .map(|reply| reply.id)
+            }
+        }
     }
 
     pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
