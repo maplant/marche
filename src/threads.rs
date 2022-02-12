@@ -24,7 +24,7 @@ table! {
     }
 }
 
-use diesel::sql_types::{Text, BigInt};
+use diesel::sql_types::{BigInt, Text};
 
 sql_function!(fn nextval(x: Text) -> BigInt);
 sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
@@ -170,10 +170,8 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
                 x => format!("{} replies", x - 1),
             };
 
-            let (read, jump_to) = match user.next_unread(&conn, &thread) {
-                Ok(jump_to) => ((jump_to == thread.last_post), jump_to),
-                Err(jump_to) => (false, jump_to),
-            };
+            let read = user.has_read(&conn, &thread);
+            let jump_to = user.next_unread(&conn, &thread);
 
             ThreadLink {
                 num: i + 1,
@@ -360,10 +358,9 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     conn.transaction(|| -> Result<Thread, diesel::result::Error> {
         use diesel::result::Error::RollbackTransaction;
 
-        let next_thread =
-            diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
-                .first::<i64>(&conn)
-                .map_err(|_| RollbackTransaction)? as i32;
+        let next_thread = diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
+            .first::<i64>(&conn)
+            .map_err(|_| RollbackTransaction)? as i32;
 
         let next_thread = next_thread as i32;
 

@@ -310,7 +310,7 @@ impl User {
             .map_err(|_| ())
     }
 
-    pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> Result<i32, i32> {
+    pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> i32 {
         let last_read = {
             use self::reading_history::dsl::*;
 
@@ -327,12 +327,12 @@ impl User {
                 // Find the first reply
                 use crate::threads::{replies::dsl::*, Reply};
 
-                Err(replies
+                replies
                     .filter(thread_id.eq(thread.id))
                     .order(post_date.asc())
                     .first::<Reply>(conn)
                     .unwrap()
-                    .id)
+                    .id
             }
             Some(last_read) => {
                 use crate::threads::{replies::dsl::*, Reply};
@@ -341,10 +341,20 @@ impl User {
                     .filter(thread_id.eq(thread.id))
                     .filter(id.gt(last_read))
                     .first::<Reply>(conn)
-                    .map_err(|_| last_read)
-                    .map(|reply| reply.id)
+                    .map_or_else(|_| last_read, |reply| reply.id)
             }
         }
+    }
+
+    pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
+        use self::reading_history::dsl::*;
+
+        reading_history
+            .filter(reader_id.eq(self.id))
+            .filter(thread_id.eq(thread.id))
+            .first::<ReadingHistory>(conn)
+            .ok()
+            .map_or(false, |history| history.last_read == thread.last_post)
     }
 
     pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
