@@ -24,11 +24,12 @@ table! {
     }
 }
 
-use diesel::sql_types::Integer;
+use diesel::sql_types::{Text, BigInt};
 
-sql_function!(fn nextval(x: Integer) -> Integer);
+sql_function!(fn nextval(x: Text) -> BigInt);
+sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
 
-#[derive(Queryable)]
+#[derive(Queryable, Debug)]
 pub struct Thread {
     /// Id of the thread
     pub id: i32,
@@ -170,8 +171,8 @@ pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
             };
 
             let (read, jump_to) = match user.next_unread(&conn, &thread) {
-                Ok(jump_to) => (true, jump_to),
-                Err(jump_to) => (false, jump_to),
+                Ok(jump_to) => ((jump_to == thread.last_post), jump_to),
+                Err(jump_to) => (true, jump_to),
             };
 
             ThreadLink {
@@ -359,10 +360,12 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     conn.transaction(|| -> Result<Thread, diesel::result::Error> {
         use diesel::result::Error::RollbackTransaction;
 
-        let next_thread = threads::table
-            .select(nextval(threads::dsl::id))
-            .first(&conn)
-            .map_err(|_| RollbackTransaction)?;
+        let next_thread =
+            diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
+                .first::<i64>(&conn)
+                .map_err(|_| RollbackTransaction)? as i32;
+
+        let next_thread = next_thread as i32;
 
         let first_post: Reply = diesel::insert_into(replies::table)
             .values(&NewReply {
@@ -547,7 +550,7 @@ table! {
     }
 }
 
-#[derive(Queryable)]
+#[derive(Queryable, Debug)]
 pub struct Reply {
     /// Id of the reply
     pub id: i32,
@@ -573,7 +576,7 @@ impl Reply {
     }
 }
 
-#[derive(Insertable)]
+#[derive(Insertable, Debug)]
 #[table_name = "replies"]
 pub struct NewReply<'b> {
     author_id: i32,
