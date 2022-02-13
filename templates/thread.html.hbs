@@ -4,7 +4,7 @@
     </li>
     {{#each posts}}
       <li class="menu-item">
-        <div style="display: table" id={{id}}>
+        <div style="display: table" class="reply" id={{id}} author={{author.name}}>
           <div style="display: table-row">
             {{#with author}}
               <div class="profile" style="{{background}}">
@@ -46,6 +46,7 @@
             </div>
           </div>
         </div>
+        <div class="response-container" id="response-container-{{id}}"></div>
       </li>
     {{/each}}
     <form action="/reply/{{id}}" method="post" id="reply">

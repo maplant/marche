@@ -235,6 +235,24 @@ div.item-overlay-row {
     pointer-events: none;
 }
 
+.response-overlay,
+.reply-overlay {
+    width: auto;
+    position: absolute;
+    border-radius: 5px;
+    pointer-events: none;
+    border: 1px solid black;
+    background-color: #ededed;
+}
+
+.reply-overlay {
+    transform: translateX(-13px) translateY(13px);
+}
+
+.response-overlay {
+    transform: translateX(-13px) translateY(53px);
+}
+
 .overlay-on-hover {
     position: absolute;
     visibility: hidden;
@@ -251,11 +269,12 @@ div.item-overlay-row {
     position: relative;
 }
  
-.hover-triggers-overlay:hover .overlay-on-hover {
+.hover-triggers-overlay:hover .overlay-on-hover, 
+.hover-triggers-overlay:hover+.overlay-on-hover {
     opacity: 1.0;
     visibility: visible;
 }
-
+ 
 .error {
     margin: 5px;
     display: inline-block;
@@ -331,6 +350,27 @@ div.post {
     grid-gap: 10px;
     padding-top: 10px;
     padding-bottom: 10px;
+}
+
+.respond-to-preview {
+    cursor: pointer;
+}
+
+div.respond-to-preview {
+    /* Display to re-enable "responding-to" header previews*/
+    display: none;
+}
+
+span.respond-to-preview {
+    font-size: 90%;
+}
+
+.response-from-preview {
+    float:left;
+}
+
+.response-container {
+    display: flex;
 }
 
 @keyframes spin {
