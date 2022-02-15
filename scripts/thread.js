@@ -4,7 +4,7 @@ $(document).ready(function () {
 
     $(".reply-to-button").click(function () {
         $("#reply")[0].scrollIntoView({ behavior: "smooth" });
-        insertAtCurrentLine(easymde, ` @respond:${$(this).attr('replyid')}`);
+        insertAtCurrentLine(easymde, ` @${$(this).attr('replyid')}`);
     });
 
     $(".respond-to-preview").click(function () {
