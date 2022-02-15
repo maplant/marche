@@ -250,7 +250,7 @@ div.item-overlay-row {
 }
 
 .response-overlay {
-    transform: translateX(-13px) translateY(53px);
+    transform: translateX(-15px);
 }
 
 .overlay-on-hover {
@@ -366,11 +366,11 @@ span.respond-to-preview {
 }
 
 .response-from-preview {
-    float:left;
+    /* float:left; */
 }
 
 .response-container {
-    display: flex;
+    /* display: flex; */
 }
 
 @keyframes spin {

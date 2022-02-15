@@ -27,7 +27,7 @@ $(document).ready(function () {
         var response_div = $(this).parents(".reply")
         var response_div_clone = response_div.clone().removeAttr("id");
         var responder_name = response_div.attr("author");
-        var response_preview_div = $($.parseHTML(`<div class="response-from-preview action-box" reply_id="{reply_id}"><b>^${responder_name}</b></div>`));
+        var response_preview_div = $($.parseHTML(`<div class="response-from-preview action-box" reply_id="{reply_id}"><b>🗣️ ${responder_name}</b></div>`));
         var response_overlay_div = $($.parseHTML(`<div class="response-from-preview response-overlay overlay-on-hover" style="display: inline-block;"></div>`));
         response_preview_div.hover(function () {
             response_overlay_div[0].replaceChildren((response_div_clone[0]));
@@ -40,7 +40,9 @@ $(document).ready(function () {
             response_div[0].scrollIntoView({ behavior: "smooth", block: "center" });
         })
         response_overlay_div[0].appendChild(response_div_clone[0]);
-        getResponseContainerDiv($(this)).append(response_preview_div).append(response_overlay_div);
+        getResponseContainerDiv($(this)).parent().append(response_overlay_div);
+        getResponseContainerDiv($(this)).append(response_preview_div);
+
     });
 });
 

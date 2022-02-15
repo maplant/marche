@@ -18,35 +18,42 @@
               </div>
             {{/with}}
             <div class="post">
-              <p><div style="min-height: 80px">
-                {{{body}}}
-              </div>
-              </p>
-              {{#each reactions}}
-                {{> item-thumbnail}}
-              {{/each}}
-              <div style="float: right; text-align: right;">
-              {{#if reward}}
-                <div class="rarity-{{reward.rarity}} hover-triggers-overlay" style="margin:5px;">
-                  ⭐ <b>{{reward.name}}</b> was given for this post
-                  <div class="overlay-on-hover item-overlay">
-                    {{> item-overlay reward}}
+              <div style="display: grid">
+                <p>
+                  <div style="min-height: 80px">
+                    {{{body}}}
                   </div>
+                </p>
+                <div style="display: inline">
+                  <div class="response-container" id="response-container-{{id}}"></div>
                 </div>
-              {{/if}}
-              {{#if can_react}}
-                <a href="/react/{{id}}" class="action-box">
-                + React!
-                </a>
-              {{/if}}
-                <div class = "reply-to-button action-box" class="action-box" replyid={{id}}>
-                  + Respond!
+                <div style="display: inline">
+                  {{#each reactions}}
+                    {{> item-thumbnail}}
+                  {{/each}}
+                </div>
+                <div style="float: right; text-align: right;">
+                  {{#if reward}}
+                    <div class="rarity-{{reward.rarity}} hover-triggers-overlay" style="margin:5px;">
+                      ⭐ <b>{{reward.name}}</b> was given for this post
+                      <div class="overlay-on-hover item-overlay">
+                        {{> item-overlay reward}}
+                      </div>
+                    </div>
+                  {{/if}}
+                  {{#if can_react}}
+                    <a href="/react/{{id}}" class="action-box">
+                    + React!
+                    </a>
+                  {{/if}}
+                  <div class = "reply-to-button action-box" replyid={{id}}>
+                    + Respond!
+                  </div>
                 </div>
               </div>
             </div>
           </div>
         </div>
-        <div class="response-container" id="response-container-{{id}}"></div>
       </li>
     {{/each}}
     <form action="/reply/{{id}}" method="post" id="reply">
