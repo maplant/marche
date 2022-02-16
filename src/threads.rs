@@ -639,7 +639,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         .into_iter()
         .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
             format!(
-                r#"<div class="respond-to-preview action-box" reply_id={reply_id}>Responding to <b>{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
+                r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
                 reply_id = reply.id.to_string(),
                 author_name = user_cache.get(reply.author_id).clone().name,
             )
@@ -654,11 +654,15 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
     // Swap out "respond" command sequences for @ mentions
     html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
         let reply_id = &captured_group["reply_id"];
-        format!(
-            r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
-            reply_id = reply_id,
-            author_name = id_to_author[reply_id],
-        )
+        if id_to_author.contains_key(reply_id) {
+            format!(
+                r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
+                reply_id = reply_id,
+                author_name = id_to_author[reply_id],
+            )
+        } else {
+            captured_group[0].to_string()
+        }
     }).to_string();
 
     let reply: Reply = diesel::insert_into(replies::table)

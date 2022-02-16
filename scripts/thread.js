@@ -15,7 +15,12 @@ $(document).ready(function () {
         var overlay_div = getOverlayDiv($(this));
 
         var reply_div_clone = getReplyDiv($(this)).clone();
+
+        // Differences between response to preview and actual reply element
         reply_div_clone.removeAttr("id");
+        reply_div_clone.find(".reply-to-button").remove();
+        reply_div_clone.find(".react-button").remove();
+        
         overlay_div[0].replaceChildren(reply_div_clone[0]);
         overlay_div.css("visibility", "visible").css("opacity", "1.0");
     }, function () {
@@ -25,10 +30,18 @@ $(document).ready(function () {
     // Populate response elements
     $("div.respond-to-preview").each(function () {
         var response_div = $(this).parents(".reply")
-        var response_div_clone = response_div.clone().removeAttr("id");
+        var response_div_clone = response_div.clone();
         var responder_name = response_div.attr("author");
         var response_preview_div = $($.parseHTML(`<div class="response-from-preview action-box" reply_id="{reply_id}"><b>🗣️ ${responder_name}</b></div>`));
         var response_overlay_div = $($.parseHTML(`<div class="response-from-preview response-overlay overlay-on-hover" style="display: inline-block;"></div>`));
+        var response_container_div = getResponseContainerDiv($(this));
+
+        // Differences between response from preview and actual reply element
+        response_div_clone.find(".response-container").removeAttr("id");
+        response_div_clone.find(".reply-to-button").remove();
+        response_div_clone.find(".react-button").remove();
+        response_div_clone.removeAttr("id");
+
         response_preview_div.hover(function () {
             response_overlay_div[0].replaceChildren((response_div_clone[0]));
             response_overlay_div.css("visibility", "visible").css("opacity", "1.0");
@@ -40,8 +53,8 @@ $(document).ready(function () {
             response_div[0].scrollIntoView({ behavior: "smooth", block: "center" });
         })
         response_overlay_div[0].appendChild(response_div_clone[0]);
-        getResponseContainerDiv($(this)).parent().append(response_overlay_div);
-        getResponseContainerDiv($(this)).append(response_preview_div);
+        response_container_div.parent().append(response_overlay_div);
+        response_container_div.append(response_preview_div);
 
     });
 });
