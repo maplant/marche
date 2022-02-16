@@ -1,9 +1,10 @@
 {{> header title=title }}
+    <script src="/scripts/thread.js" async></script>
     <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">{{title}}
     </li>
     {{#each posts}}
       <li class="menu-item">
-        <div style="display: table" id={{id}}>
+        <div style="display: table" class="reply" id={{id}} author={{author.name}}>
           <div style="display: table-row">
             {{#with author}}
               <div class="profile" style="{{background}}">
@@ -17,27 +18,38 @@
               </div>
             {{/with}}
             <div class="post">
-              <p><div style="min-height: 80px">
-                {{{body}}}
-              </div>
-              </p>
-              {{#each reactions}}
-                {{> item-thumbnail}}
-              {{/each}}
-              <div style="float: right; text-align: right;">
-              {{#if reward}}
-                <div class="rarity-{{reward.rarity}} hover-triggers-overlay">
-                  ⭐ <b>{{reward.name}}</b> was given for this post
-                  <div class="overlay-on-hover item-overlay">
-                    {{> item-overlay reward}}
+              <div style="display: grid">
+                <p>
+                  <div style="min-height: 80px">
+                    {{{body}}}
+                  </div>
+                </p>
+                <div style="display: inline">
+                  <div class="response-container" id="response-container-{{id}}"></div>
+                </div>
+                <div style="display: inline">
+                  {{#each reactions}}
+                    {{> item-thumbnail}}
+                  {{/each}}
+                </div>
+                <div style="float: right; text-align: right;">
+                  {{#if reward}}
+                    <div class="rarity-{{reward.rarity}} hover-triggers-overlay" style="margin:5px;">
+                      ⭐ <b>{{reward.name}}</b> was given for this post
+                      <div class="overlay-on-hover item-overlay">
+                        {{> item-overlay reward}}
+                      </div>
+                    </div>
+                  {{/if}}
+                  {{#if can_react}}
+                    <a href="/react/{{id}}" class="react-button action-box">
+                    + React!
+                    </a>
+                  {{/if}}
+                  <div class = "reply-to-button action-box" replyid={{id}}>
+                    + Respond!
                   </div>
                 </div>
-              {{/if}}
-              {{#if can_react}}
-                <a href="/react/{{id}}" class="action-box">
-                + React!
-                </a>
-              {{/if}}
               </div>
             </div>
           </div>
@@ -57,17 +69,9 @@
           </div>
         </div>
       {{/if}}
-      <div style="padding-top: 15px; padding-bottom: 15px">
-        <b><label for="reply">New reply</label></b>
-      </div>
       <div>
-        <textarea name="reply" id="reply" style="width: 100%"></textarea>
-        <script>
-          var simplemde = new EasyMDE({ status: false, lineWrapping: true, });
-        </script>
-      </div>
-      <div style="padding-top: 15px; padding-bottom: 15px">
-        <button type="submit">Reply</button>
+        <textarea name="reply" id="reply-textarea" rows="8" cols="100" style="width: 75%; border-radius: 5px; padding: 5px"></textarea>
+        <button type="submit" class="action-box" style="margin-bottom: 15px; margin-top: 15px; margin-left: 0px;">+ Reply!</button>
       </div>
     </li>
     </form>

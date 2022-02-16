@@ -42,5 +42,6 @@ fn launch_server() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static/"))
+        .mount("/scripts", FileServer::from("scripts/"))
         .register("/", catchers![unauthorized])
 }

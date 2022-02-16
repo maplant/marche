@@ -3,7 +3,9 @@ use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
 use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
+use lazy_static::lazy_static;
 use pulldown_cmark::{html, Options, Parser};
+use regex::{Captures, Regex};
 use rocket::form::Form;
 use rocket::http::uri::fmt::Path;
 use rocket::http::uri::Segments;
@@ -595,6 +597,7 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
 
     let conn = crate::establish_db_connection();
     let post_date = Utc::now().naive_utc();
+    let mut user_cache = UserCache::new(&conn);
 
     if reply.reply.trim().is_empty() {
         return Redirect::to(format!(
@@ -603,10 +606,64 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         ));
     }
 
+    // Regex out commands in reply body of the form @command:argument
+    lazy_static! {
+        static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
+    };
+
+    let referenced_reply_ids = REPLY_RE
+        .captures_iter(&reply.reply)
+        .map(|captured_group| captured_group["reply_id"].to_string())
+        .collect::<Vec<String>>();
+
+    let id_to_author = replies::dsl::replies
+        .filter(replies::dsl::thread_id.eq(thread_id))
+        .order(replies::dsl::post_date.asc())
+        .load::<Reply>(&conn)
+        .unwrap()
+        .into_iter()
+        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
+        .map(|reply| {
+            (
+                reply.id.to_string(),
+                user_cache.get(reply.author_id).clone().name,
+            )
+        })
+        .collect::<HashMap<String, String>>();
+
+    let response_divs = replies::dsl::replies
+        .filter(replies::dsl::thread_id.eq(thread_id))
+        .order(replies::dsl::post_date.asc())
+        .load::<Reply>(&conn)
+        .unwrap()
+        .into_iter()
+        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
+            format!(
+                r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
+                reply_id = reply.id.to_string(),
+                author_name = user_cache.get(reply.author_id).clone().name,
+            )
+        })
+        .collect::<String>();
+
     // Parse the body as markdown
-    let mut html_output = String::with_capacity(reply.reply.len() * 3 / 2);
+    let mut html_output = response_divs;
     let parser = Parser::new_ext(&reply.reply, Options::empty());
     html::push_html(&mut html_output, parser);
+
+    // Swap out "respond" command sequences for @ mentions
+    html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
+        let reply_id = &captured_group["reply_id"];
+        if id_to_author.contains_key(reply_id) {
+            format!(
+                r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
+                reply_id = reply_id,
+                author_name = id_to_author[reply_id],
+            )
+        } else {
+            captured_group[0].to_string()
+        }
+    }).to_string();
 
     let reply: Reply = diesel::insert_into(replies::table)
         .values(&NewReply {
