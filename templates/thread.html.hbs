@@ -58,20 +58,14 @@
     {{/each}}
     <form action="/reply/{{id}}" method="post" id="reply">
     <li class="menu-item" style="padding-left: 25px; padding-right: 25px">
-      {{#if error}}
-        <div class="row">
-          <div class="cell">
-          </div>
-          <div class="cell">
-            <div class="error"> 
-              {{error}}
-            </div>
-          </div>
-        </div>
-      {{/if}}
       <div>
         <textarea name="reply" id="reply-textarea" rows="8" cols="100" style="width: 75%; border-radius: 5px; padding: 5px"></textarea>
         <button type="submit" class="action-box" style="margin-bottom: 15px; margin-top: 15px; margin-left: 0px;">+ Reply!</button>
+        {{#if error}}
+          <div class="error"> 
+            {{error}}
+          </div>
+        {{/if}}      
       </div>
     </li>
     </form>

@@ -4,7 +4,6 @@ use crate::users::{User, UserCache, UserProfile};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use lazy_static::lazy_static;
-use pulldown_cmark::{html, Options, Parser};
 use regex::{Captures, Regex};
 use rocket::form::Form;
 use rocket::http::uri::fmt::Path;
@@ -348,9 +347,7 @@ pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
     let post_date = Utc::now().naive_utc();
 
     // Parse the body as markdown
-    let mut html_output = String::with_capacity(thread.body.len() * 3 / 2);
-    let parser = Parser::new_ext(&thread.body, Options::empty());
-    html::push_html(&mut html_output, parser);
+    let html_output = parse_markdown(&thread.body);
 
     let tags = parse_tag_list(&thread.tags)
         .filter_map(|t| Tag::fetch_and_inc(&conn, t))
@@ -647,12 +644,10 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         .collect::<String>();
 
     // Parse the body as markdown
-    let mut html_output = response_divs;
-    let parser = Parser::new_ext(&reply.reply, Options::empty());
-    html::push_html(&mut html_output, parser);
+    let html_output = response_divs + &parse_markdown(&reply.reply);
 
     // Swap out "respond" command sequences for @ mentions
-    html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
+    let html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
         let reply_id = &captured_group["reply_id"];
         if id_to_author.contains_key(reply_id) {
             format!(
@@ -687,4 +682,24 @@ pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redire
         uri!(thread(thread_id, Option::<&str>::None)),
         reply.id
     ))
+}
+
+use comrak::{markdown_to_html, ComrakOptions};
+
+fn parse_markdown(text: &str) -> String {
+    lazy_static! {
+        static ref MARKDOWN_OPTIONS: ComrakOptions = {
+            let mut options = ComrakOptions::default();
+            options.extension.strikethrough = true;
+            options.extension.table = true;
+            options.extension.autolink = true;
+            options.extension.tasklist = true;
+            options.render.hardbreaks = true;
+            options.render.escape = true;
+            options.parse.smart = true;
+            options
+        };
+    }
+
+    markdown_to_html(text, &MARKDOWN_OPTIONS)
 }
