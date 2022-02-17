@@ -4,7 +4,7 @@ WORKDIR /app
 
 COPY . .
 
-RUST apt-get update && apt-get install libpq-dev
+RUN apt-get update && apt-get install libpq-dev
 RUN cargo build --release
 
 EXPOSE 8080
