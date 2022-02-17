@@ -4,11 +4,6 @@
       <h3 style="padding-top: 15px">
           New Post
       </h3>
-        {{#if error}}
-          <div class="error"> 
-            {{error}}
-          </div>
-        {{/if}}
           <div style="padding-bottom: 15px">
             <b><label for="title">Title</label></b>
           </div>
@@ -32,6 +27,11 @@
           </div>
           <div style="padding-top: 15px; padding-bottom: 15px">
             <button type="submit">Post</button>
+            {{#if error}}
+              <div class="error"> 
+                {{error}}
+              </div>
+            {{/if}}
           </div>
         </div>
       </form>
