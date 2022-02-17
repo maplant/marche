@@ -1,4 +1,4 @@
-FROM rust:1.58-slim-buster
+FROM rust:1.58-alpine
 
 WORKDIR /app
 
