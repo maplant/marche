@@ -1,18 +1,15 @@
-use axum::error_handling::HandleErrorLayer;
-use axum::response::Redirect;
 use axum::{
     http::StatusCode,
     routing::{get, get_service, post},
-    BoxError, Router,
+    Router,
 };
 use std::net::SocketAddr;
-use tower::ServiceBuilder;
-use tower_cookies::{CookieManagerLayer, Key};
+use tower_cookies::CookieManagerLayer;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
-use marche_server::items::{self, ItemPage, ReactPage, OfferPage};
-use marche_server::threads::{AuthorPage, Index, ThreadPage};
-use marche_server::users::{LoginPage, ProfilePage};
+use marche_server::items::{self, ItemPage, OfferPage, OffersPage, ReactPage};
+use marche_server::threads::{self, AuthorPage, Index, ThreadPage};
+use marche_server::users::{LeaderboardPage, LoginPage, ProfilePage};
 
 #[tokio::main]
 async fn main() {
@@ -23,16 +20,30 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(Index::show))
-        .route("/thread/:thread_id", get(ThreadPage::show).post(ThreadPage::reply))
-        .route("/react/:thread_id", get(ReactPage::show).post(ReactPage::apply))
+        .route("/t/*tags", get(Index::show_with_tags))
+        .route(
+            "/thread/:thread_id",
+            get(ThreadPage::show).post(ThreadPage::reply),
+        )
+        .route(
+            "/react/:thread_id",
+            get(ReactPage::show).post(ReactPage::apply),
+        )
+        .route("/remove-tag/:name", post(threads::remove_tag))
+        .route("/add-tag", post(threads::add_tag))
         .route("/login", get(LoginPage::show).post(LoginPage::attempt))
         .route("/author", get(AuthorPage::show).post(AuthorPage::publish))
         .route("/profile/:user_id", get(ProfilePage::show))
         .route("/profile", get(ProfilePage::show_current))
+        .route("/leaderboard", get(LeaderboardPage::show))
         .route("/item/:item_id", get(ItemPage::show))
         .route("/equip/:item_id", get(items::equip))
         .route("/unequip/:item_id", get(items::unequip))
+        .route("/offer/:receiver_id", post(items::make_offer))
+        .route("/accept/:trade_id", get(items::accept_offer))
+        .route("/decline/:trade_id", get(items::decline_offer))
         .route("/offer/:receiver_id", get(OfferPage::show))
+        .route("/offers", get(OffersPage::show))
         .nest(
             "/static",
             get_service(ServeDir::new("static")).handle_error(|error: std::io::Error| async move {

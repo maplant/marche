@@ -1,20 +1,15 @@
-use crate::items::{self, Item, ItemDrop, ItemThumbnail, ItemType};
+use crate::items::{self, Item, ItemDrop, ItemThumbnail};
 use crate::threads::Thread;
+use askama::Template;
+use axum::async_trait;
+use axum::extract::{Form, FromRequest, Path, RequestParts};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
 use libpasta::verify_password;
 use rand::rngs::OsRng;
 use rand::RngCore;
-// use rocket::http::{Cookie, CookieJar, Status};
-// use rocket::outcome::{try_outcome, IntoOutcome};
-// use rocket::request::{self, FromRequest};
-// use rocket::response::Redirect;
-// use rocket::{uri, Request};
-use askama::Template;
-use axum::async_trait;
-use axum::extract::{Form, FromRequest, Path, RequestParts};
-use axum::response::{IntoResponse, Redirect, Response};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
@@ -439,49 +434,45 @@ impl IntoResponse for Unauthorized {
     }
 }
 
-/*
-#[rocket::get("/leaderboard")]
-pub fn leaderboard(user: User) -> Template {
-    use self::users::dsl::*;
-
-    #[derive(Serialize)]
-    struct UserRank {
-        rank: usize,
-        bio: String,
-        profile: UserProfile,
-    }
-
-    #[derive(Serialize)]
-    struct Context {
-        users: Vec<UserRank>,
-        offer_count: i64,
-    }
-
-    let conn = crate::establish_db_connection();
-
-    let user_profiles = users
-        .order(experience.desc())
-        .limit(100)
-        .load::<User>(&conn)
-        .unwrap()
-        .into_iter()
-        .enumerate()
-        .map(|(i, u)| UserRank {
-            rank: i + 1,
-            bio: u.bio.clone(),
-            profile: u.profile(&conn),
-        })
-        .collect();
-
-    Template::render(
-        "leaderboard",
-        Context {
-            users: user_profiles,
-            offer_count: items::IncomingOffer::count(&conn, &user),
-        },
-    )
+#[derive(Template)]
+#[template(path = "leaderboard.html")]
+pub struct LeaderboardPage {
+    offers: i64,
+    users: Vec<UserRank>,
 }
-*/
+
+struct UserRank {
+    rank: usize,
+    bio: String,
+    profile: ProfileStub,
+}
+
+impl LeaderboardPage {
+    pub async fn show(user: User) -> Self {
+        use self::users::dsl::*;
+
+        let conn = crate::establish_db_connection();
+
+        let user_profiles = users
+            .order(experience.desc())
+            .limit(100)
+            .load::<User>(&conn)
+            .unwrap()
+            .into_iter()
+            .enumerate()
+            .map(|(i, u)| UserRank {
+                rank: i + 1,
+                bio: u.bio.clone(),
+                profile: u.profile_stub(&conn),
+            })
+            .collect();
+
+        Self {
+            users: user_profiles,
+            offers: items::IncomingOffer::count(&conn, &user),
+        }
+    }
+}
 
 pub struct UserCache<'a> {
     conn: &'a PgConnection,
@@ -637,7 +628,7 @@ impl LoginPage {
                 private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
                 Redirect::to("/".parse().unwrap())
             })
-            .map_err(|e| Self {
+            .map_err(|_e| Self {
                 error: Some("Incorrect username or password"),
                 offers: 0,
             })

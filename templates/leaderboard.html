@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Global Leaderboards{% endblock %}
+
+{% block content %}
+{% for user in users %}
+<li class="menu-item">
+  <div style="display: table" id={{user.profile.id}}>
+    <div style="display: table-row">
+      <div class="profile" style="{{user.profile.background}}">
+        <p><a href="/profile/{{user.profile.id}}" style="color: white">{{user.profile.name}}</a></p>
+        {% let picture = user.profile.picture.as_ref() %}
+        {% include "profile-pic.html" %}
+        <div style="text-align: left; color: white; padding-top: 10px; padding-left: 10px; padding-right: 10px">level {{user.profile.level.level}}
+          <progress max="{{user.profile.level.next_level_xp}}" value="{{user.profile.level.curr_xp}}"></progress>
+        </div>
+      </div>
+      <div class="post">
+        <h3>Rank {{user.rank}}.</h3>
+        <p style="min-height: 80px">
+          {{user.bio|e("none")}}
+        </p>
+      </div>
+    </div>
+  </div>
+</li>
+{% endfor %}
+{% endblock %}
+

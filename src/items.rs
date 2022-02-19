@@ -1,5 +1,6 @@
 use crate::threads::Reply;
 use crate::users::{ProfileStub, User, UserCache};
+use crate::ErrorMessage;
 use askama::Template;
 use axum::extract::{Form, Path};
 use axum::response::Redirect;
@@ -264,7 +265,7 @@ impl ItemDrop {
     pub fn equip(&self, conn: &PgConnection) {
         use crate::users::users::dsl::*;
 
-        conn.transaction(|| -> Result<(), diesel::result::Error> {
+        let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
             use diesel::result::Error::RollbackTransaction;
 
             let user = User::fetch(conn, self.owner_id).map_err(|_| RollbackTransaction)?;
@@ -837,9 +838,6 @@ impl TradeRequest {
         use self::drops::dsl::*;
 
         let res = conn.transaction(|| -> Result<(), diesel::result::Error> {
-            let sender = User::fetch(conn, self.sender_id).unwrap();
-            let receiver = User::fetch(conn, self.receiver_id).unwrap();
-
             for sender_item in &self.sender_items {
                 diesel::update(drops.find(sender_item))
                     .set(owner_id.eq(self.receiver_id))
@@ -928,7 +926,7 @@ impl OfferPage {
     pub async fn show(sender: User, Path(receiver_id): Path<i32>) -> Self {
         let conn = crate::establish_db_connection();
         let receiver = User::fetch(&conn, receiver_id).unwrap();
-        
+
         Self {
             sender: sender.profile_stub(&conn),
             // Got to put this somewhere, but don't know where
@@ -946,44 +944,11 @@ impl OfferPage {
     }
 }
 
-/*
-#[rocket::get("/offer/<receiver_id>")]
-pub fn offer(sender: User, receiver_id: i32) -> Template {
-    #[derive(Serialize)]
-    struct Context {
-        sender: UserProfile,
-        sender_inventory: Vec<ItemThumbnail>,
-        receiver: UserProfile,
-        receiver_inventory: Vec<ItemThumbnail>,
-        offer_count: i64,
-    }
-
-    let conn = crate::establish_db_connection();
-    let receiver = User::fetch(&conn, receiver_id).unwrap();
-
-    Template::render(
-        "offer",
-        Context {
-            sender: sender.profile(&conn),
-            // Got to put this somewhere, but don't know where
-            sender_inventory: sender
-                .inventory(&conn)
-                .map(|(_, d)| d.thumbnail(&conn))
-                .collect(),
-            receiver: receiver.profile(&conn),
-            receiver_inventory: receiver
-                .inventory(&conn)
-                .map(|(_, d)| d.thumbnail(&conn))
-                .collect(),
-            offer_count: IncomingOffer::count(&conn, &sender),
-        },
-    )
-}
-*/
-
-/*
-#[rocket::post("/offer/<receiver_id>", data = "<trade>")]
-pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32>>) -> Redirect {
+pub async fn make_offer(
+    sender: User,
+    Path(receiver_id): Path<i32>,
+    Form(trade): Form<HashMap<i32, i32>>,
+) -> Redirect {
     let mut sender_items = Vec::new();
     let mut receiver_items = Vec::new();
 
@@ -992,7 +957,7 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
     for (&item, &trader) in trade.iter() {
         let drop = ItemDrop::fetch(&conn, item);
         if trader != drop.owner_id {
-            return Redirect::to(uri!(crate::threads::index()));
+            return Redirect::to("/".parse().unwrap());
         }
         if trader == sender.id {
             sender_items.push(drop.id);
@@ -1001,69 +966,65 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
         }
     }
 
-    let _: Result<TradeRequest, _> = diesel::insert_into(trade_requests::table)
+    let _ = diesel::insert_into(trade_requests::table)
         .values(&NewTradeRequest {
             sender_id: sender.id,
             sender_items,
             receiver_id,
             receiver_items,
         })
-        .get_result(&conn);
+        .get_result::<TradeRequest>(&conn);
 
-    Redirect::to(uri!(offers(Option::<&str>::None)))
+    Redirect::to("/offers".parse().unwrap())
 }
 
-#[rocket::get("/decline/<trade_id>")]
-pub fn decline(user: User, trade_id: i32) -> Redirect {
+pub async fn decline_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
     let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
     if req.sender_id == user.id || req.receiver_id == user.id {
         req.decline(&conn);
     }
-    Redirect::to(uri!(offers(Option::<&str>::None)))
+
+    Redirect::to("/offers".parse().unwrap())
 }
 
-#[rocket::get("/accept/<trade_id>")]
-pub fn accept(user: User, trade_id: i32) -> Redirect {
+pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
     let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
-    let err = if req.receiver_id == user.id {
-        req.accept(&conn).err()
-    } else {
-        Some("You cannot accept that trade")
-    };
-    Redirect::to(uri!(offers(err)))
-}
-
-#[rocket::get("/offers?<error>")]
-pub fn offers(user: User, error: Option<&str>) -> Template {
-    #[derive(Serialize)]
-    struct Context<'e> {
-        user: UserProfile,
-        incoming_offers: Vec<IncomingOffer>,
-        outgoing_offers: Vec<OutgoingOffer>,
-        offer_count: i64,
-        error: Option<&'e str>,
+    if req.receiver_id == user.id {
+        let _ = req.accept(&conn);
     }
 
-    let conn = crate::establish_db_connection();
-    let mut user_cache = UserCache::new(&conn);
-    // TODO: filter out trade requests that are no longer valid.
-    let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
-    let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
+    Redirect::to("/offers".parse().unwrap())
+}
 
-    Template::render(
-        "offers",
-        Context {
-            user: user.profile(&conn),
-            offer_count: incoming_offers.len() as i64,
+#[derive(Template)]
+#[template(path = "offers.html")]
+pub struct OffersPage {
+    user: ProfileStub,
+    incoming_offers: Vec<IncomingOffer>,
+    outgoing_offers: Vec<OutgoingOffer>,
+    offers: i64,
+    error: Option<String>,
+}
+
+impl OffersPage {
+    pub async fn show(user: User, Path(ErrorMessage { error }): Path<ErrorMessage>) -> Self {
+        let conn = crate::establish_db_connection();
+        let mut user_cache = UserCache::new(&conn);
+        // TODO: filter out trade requests that are no longer valid.
+        let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
+        let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
+
+        Self {
+            user: user.profile_stub(&conn),
+            offers: incoming_offers.len() as i64,
             incoming_offers,
             outgoing_offers,
             error,
-        },
-    )
+        }
+    }
 }
-*/
 
 #[derive(Serialize)]
 pub struct IncomingOffer {

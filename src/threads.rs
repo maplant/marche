@@ -1,9 +1,8 @@
 //! Display threads
 use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
-use crate::users::{User, UserCache, ProfileStub};
-use crate::ErrorMessage;
+use crate::users::{ProfileStub, User, UserCache};
 use askama::Template;
-use axum::extract::{Form, Path, Query};
+use axum::extract::{Form, Path};
 use axum::response::Redirect;
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
@@ -51,27 +50,31 @@ const THREADS_PER_PAGE: i64 = 25;
 const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
-/*
 // TODO: These next two functions absolutely should be done client side.
-#[rocket::post("/remove-tag/<name>", data = "<tags>")]
-pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &str) -> Redirect {
+// #[rocket::post("/remove-tag/<name>", data = "<tags>")]
+pub async fn remove_tag(
+    _user: User,
+    Path(name): Path<String>,
+    Form(mut tags): Form<HashMap<String, String>>,
+) -> Redirect {
     let _ = tags.remove("add-tag");
     let tags = tags
         .iter()
-        .filter_map(|(tname, _)| (tname != name).then(|| tname))
-        .fold(String::new(), |prefix, suffix| prefix + suffix.trim() + "/");
-    Redirect::to(format!("/t/{}", tags))
+        .filter_map(|(tname, _)| (tname != &name).then(|| tname))
+        .fold(String::new(), |prefix, suffix| {
+            prefix + &*urlencoding::encode(suffix.trim()) + "/"
+        });
+    Redirect::to(format!("/t/{}", tags).parse().unwrap())
 }
 
-#[rocket::post("/add-tag", data = "<tags>")]
-pub fn add_tag(_user: User, mut tags: Form<HashMap<String, String>>) -> Redirect {
+// #[rocket::post("/add-tag", data = "<tags>")]
+pub async fn add_tag(_user: User, Form(mut tags): Form<HashMap<String, String>>) -> Redirect {
     let add_tag = clean_tag_name(&tags.remove("add-tag").unwrap_or_else(String::new));
     let tags = tags.iter().fold(String::new(), |prefix, suffix| {
-        prefix + suffix.0.trim() + "/"
+        prefix + &*urlencoding::encode(suffix.0.trim()) + "/"
     });
-    Redirect::to(format!("/t/{}/{}", add_tag, tags))
+    Redirect::to(format!("/t/{}/{}", add_tag, tags).parse().unwrap())
 }
-*/
 
 #[derive(Template)]
 #[template(path = "index.html")]
@@ -97,15 +100,16 @@ struct ThreadLink {
 
 impl Index {
     pub async fn show(user: User) -> Self {
+        Self::show_with_tags(user, Path(String::from("en"))).await
+    }
+
+    pub async fn show_with_tags(user: User, Path(viewed_tags): Path<String>) -> Self {
         use self::threads::dsl::*;
 
         tracing::info!("Loading index");
 
+        let viewed_tags = Tags::from(&*viewed_tags);
         let conn = crate::establish_db_connection();
-
-        let viewed_tags = Tags {
-            tags: vec![Tag::fetch_if_exists(&conn, "en").unwrap()],
-        };
 
         let posts: Vec<_> = threads
             .filter(tags.contains(viewed_tags.clone().into_id_vec()))
@@ -422,10 +426,7 @@ impl AuthorPage {
     pub async fn publish(user: User, thread: Form<NewThreadForm>) -> Result<Redirect, Self> {
         let conn = crate::establish_db_connection();
         if thread.title.is_empty() || thread.body.is_empty() {
-            return Err(Self::new(
-                &user,
-                "Thread title or body cannot be empty",
-            ));
+            return Err(Self::new(&user, "Thread title or body cannot be empty"));
         }
 
         let post_date = Utc::now().naive_utc();
@@ -592,6 +593,22 @@ impl Tags {
 impl Into<Vec<i32>> for Tags {
     fn into(self) -> Vec<i32> {
         self.tags.into_iter().map(|x| x.id).collect()
+    }
+}
+
+impl From<&'_ str> for Tags {
+    fn from(path: &'_ str) -> Self {
+        let conn = crate::establish_db_connection();
+        let mut seen = HashSet::new();
+        let tags = path
+            .split("/")
+            .filter_map(|s| {
+                Tag::fetch_if_exists(&conn, s)
+                    .map(|t| seen.insert(t.id).then(|| t))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        Tags { tags }
     }
 }
 
