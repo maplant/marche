@@ -8,7 +8,6 @@ default-run = "marche-server"
 [dependencies]
 rand = { version = "0.8" , features = ["getrandom"] }
 diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json"] }
-rocket = { version = "0.5.0-rc.1", features = ["secrets"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 libpasta = "0.1"
@@ -30,7 +29,3 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 http = "0.2"
 urlencoding = "2"
-
-[dependencies.rocket_dyn_templates]
-version = "0.1.0-rc.1"
-features = ["handlebars"]

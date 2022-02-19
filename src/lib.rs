@@ -1,9 +1,6 @@
 #[macro_use]
 extern crate diesel;
-#[macro_use]
-extern crate maplit;
 
-pub mod error;
 pub mod items;
 pub mod threads;
 pub mod users;
