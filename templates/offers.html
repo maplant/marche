@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block title %}Trade Offers{% endblock %}
+
+{% block content %}
+{% match error %}
+{% when Some(error) %}
+<li>
+  <div class="error">
+    {{error}}
+  </div>
+</li>
+{% when None %}
+{% endmatch %}
+<li class="menu-item">
+  <div class="table" style="width: 100%">
+    <div class="row">
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell" style="width: 50%"><b>Incoming Trade Offers</b></div>
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell" style="width: 50%"></div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Sender</div>
+      <div class="heavy-cell">Sender's offer</div>
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell">Requested</div>
+    </div>
+    {% for offer in incoming_offers %}
+    <div class="row">
+      <div class="heavy-cell" style="{{offer.sender.background}} text-align: center; vertical-align: top; min-width: 180px">
+        <p><a href="/profile/{{offer.sender.id}}">{{offer.sender.name}}</a></p>
+        {% let picture = offer.sender.picture.as_ref() %}
+        {% include "profile-pic.html" %}
+      </div>
+      <div class="cell">
+        {% for item in offer.sender_items %}
+        {% include "item-thumbnail.html" %}
+        {% endfor %}
+      </div>
+      <div class="heavy-cell" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
+        <p><a href="/profile/{{user.id}}">{{user.name}}</a></p>
+        {% let picture = user.picture.as_ref() %}
+        {% include "profile-pic.html" %}
+      </div>
+      <div class="cell" >
+        {% for item in offer.receiver_items %}
+        {% include "item-thumbnail.html" %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">
+      </div>
+      <div class="heavy-cell">
+        <div style="display: table-row">
+          <div style="display: table-cell; padding: 10px">
+            <form action="/accept/{{offer.id}}">
+              <button type="submit">Accept</button>
+            </form>
+          </div>
+          <div style="display: table-cell; padding: 10px">
+            <form action="/decline/{{offer.id}}">
+              <button type="submit">Decline</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell"></div>
+    </div>
+    {% endfor %}
+  </div>
+</li>
+<li class="menu-item">
+  <div class="table" style="width: 100%">
+    <div class="row">
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell"><b>Outgoing Trade Offers</b></div>
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell"></div>
+    </div>
+    <div class="row">
+      <div class="cell"></div>
+      <div class="cell">Your offer</div>
+      <div class="cell"></div>
+      <div class="cell">For</div>
+    </div>
+    {% for offer in outgoing_offers %}
+    <div class="row">
+      <div class="heavy-cell" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px; border-top: 1px solid black">
+        <p><a href="/profile/{{user.id}}">{{user.name}}</a></p>
+        {% let picture = user.picture.as_ref() %}
+        {% include "profile-pic.html" %}
+      </div>
+      <div class="heavy-cell" style="border-top: 1px solid black">
+        {% for item in offer.sender_items %}
+        {% include "item-thumbnail.html" %}
+        {% endfor %}
+      </div>
+      <div class="heavy-cell" style="{{offer.receiver.background}} text-align: center; vertical-align: top; min-width: 180px; border-top: 1px solid black">
+        <p><a href="/profile/{{offer.receiver.id}}">{{offer.receiver.name}}</a></p>
+        {% let picture = offer.receiver.picture.as_ref() %}
+        {% include "profile-pic.html" %}
+      </div>
+      <div class="heavy-cell" style="border-top: 1px solid black">
+        {% for item in offer.receiver_items %}
+        {% include "item-thumbnail.html" %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="row">
+      <div class="cell">
+      </div>
+      <div class="cell">
+        <div style="display: table-cell; padding: 10px">
+          <form action="/decline/{{offer.id}}">
+            <button type="submit">Rescind</button>
+          </form>
+        </div>
+      </div>
+      <div class="cell"></div>
+      <div class="cell"></div>
+    </div>
+    {% endfor %}
+  </div>
+</li>
+{% endblock %}

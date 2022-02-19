@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+{% block title %}React{% endblock %}
+
+{% block content %}
+<form action="/react/{{post_id}}" method="post">
+  <li class="menu-item">
+    <div style="display: table">
+      <div style="display: table-row">
+        <div class="profile" style="{{author.background}}">
+          <p><a href="/profile/{{author.id}}" style="color: white">{{author.name}}</a></p>
+          {% let picture = author.picture.as_ref() %}
+          {% include "profile-pic.html" %}
+        </div>
+        <div class="post">
+          <div style="min-height: 80px">
+            {{body|e("none")}}
+          </div>
+          {% for item in inventory %}
+          <label class="item-{{item.rarity}}" for="{{item.id}}">
+            <p>{{item.thumbnail|e("none")}}</p>
+            <input type="checkbox" name="{{item.id}}" id="{{item.id}}" />
+            {{item.name}}
+          </label>
+          {% endfor %}
+          <div style="padding: 5px">
+            <button type="submit">React!</button>
+            {% match error %}
+            {% when Some(error) %}
+            <div class="error"> 
+              {{error}}
+            </div>
+            {% when None %}
+            {% endmatch %}
+          </div>
+        </div>
+      </div>
+    </div>
+  </li>
+</form>
+{% endblock %}

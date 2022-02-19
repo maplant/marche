@@ -1,5 +1,9 @@
 use crate::threads::Reply;
-use crate::users::{User, UserCache, UserProfile};
+use crate::users::{ProfileStub, User, UserCache};
+use crate::ErrorMessage;
+use askama::Template;
+use axum::extract::{Form, Path};
+use axum::response::Redirect;
 use chrono::{Duration, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -12,11 +16,8 @@ use maplit::hashmap;
 use rand::prelude::{thread_rng, IteratorRandom};
 use rand::{Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
-use rocket::form::Form;
-use rocket::response::Redirect;
-use rocket::uri;
-use rocket_dyn_templates::Template;
 use serde::{Deserialize, Serialize};
+use std::cmp::PartialEq;
 use std::collections::HashMap;
 
 /// Rarity of an item.
@@ -224,6 +225,12 @@ pub struct ItemDrop {
     pub consumed: bool,
 }
 
+impl PartialEq for ItemDrop {
+    fn eq(&self, rhs: &ItemDrop) -> bool {
+        self.id == rhs.id
+    }
+}
+
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.
     static ref MIN_DROP_PERIOD: Duration = Duration::minutes(30);
@@ -252,6 +259,86 @@ impl ItemDrop {
 
     pub fn fetch_item(&self, conn: &PgConnection) -> Item {
         Item::fetch(conn, self.item_id)
+    }
+
+    /// Equips an item. Up to the caller to ensure current user owns the item.
+    pub fn equip(&self, conn: &PgConnection) {
+        use crate::users::users::dsl::*;
+
+        let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
+            use diesel::result::Error::RollbackTransaction;
+
+            let user = User::fetch(conn, self.owner_id).map_err(|_| RollbackTransaction)?;
+            let item_desc = Item::fetch(conn, self.item_id);
+            let user = match item_desc.item_type {
+                ItemType::Avatar { .. } => diesel::update(users.find(user.id))
+                    .set(equip_slot_prof_pic.eq(Some(self.id)))
+                    .get_result::<User>(conn)
+                    .map_err(|_| RollbackTransaction)?,
+                ItemType::ProfileBackground { .. } => diesel::update(users.find(user.id))
+                    .set(equip_slot_background.eq(Some(self.id)))
+                    .get_result::<User>(conn)
+                    .map_err(|_| RollbackTransaction)?,
+                ItemType::Badge { .. } => {
+                    let mut badges = user.equip_slot_badges.clone();
+                    if !badges.contains(&self.id) && badges.len() < crate::users::MAX_NUM_BADGES {
+                        badges.push(self.id);
+                    }
+                    diesel::update(users.find(user.id))
+                        .set(equip_slot_badges.eq(badges))
+                        .get_result::<User>(conn)
+                        .map_err(|_| RollbackTransaction)?
+                }
+                _ => return Err(RollbackTransaction),
+            };
+            if user.id == self.owner_id {
+                Ok(())
+            } else {
+                Err(RollbackTransaction)
+            }
+        });
+    }
+
+    /// Unequips an item. Up to the caller to ensure current user owns the item.
+    pub fn unequip(&self, conn: &PgConnection) {
+        use crate::users::users::dsl::*;
+
+        // No need for a transaction here
+        let user = User::fetch(conn, self.owner_id).unwrap();
+        let item_desc = Item::fetch(conn, self.item_id);
+        match item_desc.item_type {
+            ItemType::Avatar { .. } => {
+                let _ = diesel::update(users.find(user.id))
+                    .filter(equip_slot_prof_pic.eq(Some(self.id)))
+                    .set(equip_slot_prof_pic.eq(Option::<i32>::None))
+                    .get_result::<User>(conn);
+            }
+            ItemType::ProfileBackground { .. } => {
+                let _ = diesel::update(users.find(user.id))
+                    .filter(equip_slot_background.eq(Some(self.id)))
+                    .set(equip_slot_background.eq(Option::<i32>::None))
+                    .get_result::<User>(conn);
+            }
+            ItemType::Badge { .. } => {
+                let badges = user
+                    .equip_slot_badges
+                    .iter()
+                    .cloned()
+                    .filter(|drop_id| *drop_id != self.id)
+                    .collect::<Vec<_>>();
+                let _ = diesel::update(users.find(user.id))
+                    .set(equip_slot_badges.eq(badges))
+                    .get_result::<User>(conn);
+            }
+            _ => (),
+        }
+    }
+
+    pub fn is_equipped(&self, conn: &PgConnection) -> bool {
+        User::fetch(conn, self.owner_id)
+            .unwrap()
+            .equipped(conn)
+            .contains(&self)
     }
 
     pub fn thumbnail_html(&self, conn: &PgConnection) -> String {
@@ -530,151 +617,184 @@ impl Attributes {
     }
 }
 
-#[rocket::get("/item/<drop_id>")]
-pub fn item(user: User, drop_id: i32) -> Template {
-    #[derive(Serialize)]
-    struct Owner<'n> {
-        id: i32,
-        name: &'n str,
-    }
+#[derive(Template)]
+#[template(path = "item.html")]
+pub struct ItemPage {
+    id: i32,
+    name: String,
+    description: String,
+    pattern: u16,
+    rarity: String,
+    thumbnail: String,
+    equip_action: Option<AvailableEquipAction>,
+    owner_id: i32,
+    owner_name: String,
+    offers: i64,
+}
 
-    #[derive(Serialize)]
-    struct Context<'o> {
-        id: i32,
-        name: String,
-        description: String,
-        pattern: u16,
-        rarity: String,
-        thumbnail: String,
-        is_equipable: bool,
-        owner: Owner<'o>,
-        offer_count: i64,
-    }
+pub enum AvailableEquipAction {
+    Equip,
+    Unequip,
+}
 
-    let conn = crate::establish_db_connection();
-    let drop = ItemDrop::fetch(&conn, drop_id);
-    let item = Item::fetch(&conn, drop.item_id);
-    let owner = User::fetch(&conn, drop.owner_id).unwrap();
-    let is_equipable = user.id == drop.owner_id && item.is_equipable();
+impl ItemPage {
+    pub async fn show(user: User, Path(drop_id): Path<i32>) -> Self {
+        let conn = crate::establish_db_connection();
+        let drop = ItemDrop::fetch(&conn, drop_id);
+        let item = Item::fetch(&conn, drop.item_id);
+        let owner = User::fetch(&conn, drop.owner_id).unwrap();
+        let equip_action = (user.id == drop.owner_id && item.is_equipable()).then(|| {
+            if drop.is_equipped(&conn) {
+                AvailableEquipAction::Unequip
+            } else {
+                AvailableEquipAction::Equip
+            }
+        });
 
-    Template::render(
-        "item",
-        Context {
+        Self {
             id: drop_id,
             name: item.name,
             description: item.description,
             pattern: drop.pattern as u16,
             rarity: item.rarity.to_string(),
             thumbnail: drop.thumbnail_html(&conn),
-            is_equipable,
-            owner: Owner {
-                id: owner.id,
-                name: &owner.name,
-            },
-            offer_count: IncomingOffer::count(&conn, &user),
-        },
-    )
+            owner_id: owner.id,
+            owner_name: owner.name.to_string(),
+            equip_action,
+            offers: IncomingOffer::count(&conn, &user),
+        }
+    }
 }
 
-#[rocket::get("/react/<post_id>")]
-pub fn react(user: User, post_id: i32) -> Template {
-    #[derive(Serialize)]
-    struct Context<'p> {
-        post_id: i32,
-        author: UserProfile,
-        body: &'p str,
-        inventory: Vec<ItemThumbnail>,
-        offer_count: i64,
-    }
-
+pub async fn equip(user: User, Path(drop_id): Path<i32>) -> Redirect {
     let conn = crate::establish_db_connection();
-    let post = Reply::fetch(&conn, post_id).unwrap();
-    let author = User::fetch(&conn, post.author_id).unwrap().profile(&conn);
-    let inventory: Vec<_> = user
-        .inventory(&conn)
-        .filter_map(|(item, drop)| item.is_reaction().then(|| drop.thumbnail(&conn)))
-        .collect();
+    let drop = ItemDrop::fetch(&conn, drop_id);
+    if drop.owner_id == user.id {
+        drop.equip(&conn);
+    }
+    Redirect::to(format!("/item/{drop_id}").parse().unwrap())
+}
 
-    Template::render(
-        "react",
-        Context {
+pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
+    let conn = crate::establish_db_connection();
+    let drop = ItemDrop::fetch(&conn, drop_id);
+    if drop.owner_id == user.id {
+        drop.unequip(&conn);
+    }
+    Redirect::to(format!("/item/{drop_id}").parse().unwrap())
+}
+
+#[derive(Template)]
+#[template(path = "react.html")]
+pub struct ReactPage {
+    post_id: i32,
+    author: ProfileStub,
+    body: String,
+    inventory: Vec<ItemThumbnail>,
+    offers: i64,
+    error: Option<String>,
+}
+
+impl ReactPage {
+    pub fn new(user: &User, post_id: i32, error: Option<String>) -> Self {
+        let conn = crate::establish_db_connection();
+        let post = Reply::fetch(&conn, post_id).unwrap();
+        let author = User::fetch(&conn, post.author_id)
+            .unwrap()
+            .profile_stub(&conn);
+        let inventory: Vec<_> = user
+            .inventory(&conn)
+            .filter_map(|(item, drop)| item.is_reaction().then(|| drop.thumbnail(&conn)))
+            .collect();
+
+        Self {
             post_id,
             author,
-            body: &post.body,
+            body: post.body,
             inventory,
-            offer_count: IncomingOffer::count(&conn, &user),
-        },
-    )
-}
+            offers: IncomingOffer::count(&conn, &user),
+            error,
+        }
+    }
 
-#[rocket::post("/react/<post_id>", data = "<used_reactions>")]
-pub fn react_action(
-    user: User,
-    post_id: i32,
-    used_reactions: Form<HashMap<i32, bool>>,
-) -> Redirect {
-    let conn = crate::establish_db_connection();
+    pub async fn show(user: User, Path(post_id): Path<i32>) -> Self {
+        Self::new(&user, post_id, None)
+    }
 
-    let thread_id = conn
-        .transaction(|| -> Result<i32, diesel::result::Error> {
-            use crate::threads::replies::dsl::*;
-            use diesel::result::Error;
+    pub async fn apply(
+        user: User,
+        Path(post_id): Path<i32>,
+        Form(used_reactions): Form<HashMap<i32, String>>,
+    ) -> Result<Redirect, Self> {
+        let conn = crate::establish_db_connection();
 
-            // Get the reply
-            let reply = Reply::fetch(&conn, post_id).map_err(|_| Error::RollbackTransaction)?;
+        let thread_id = conn
+            .transaction(|| -> Result<i32, diesel::result::Error> {
+                use crate::threads::replies::dsl::*;
+                use diesel::result::Error;
 
-            let mut new_reactions = reply.reactions;
+                // Get the reply
+                let reply = Reply::fetch(&conn, post_id).map_err(|_| Error::RollbackTransaction)?;
 
-            // Verify that the author does not own this reply:
-            if reply.author_id == user.id {
-                return Err(Error::RollbackTransaction);
-            }
+                let mut new_reactions = reply.reactions;
 
-            let author =
-                User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
-
-            // Verify that all of the reactions are owned by the user:
-            for (&reaction, selected) in &*used_reactions {
-                let drop = ItemDrop::fetch(&conn, reaction);
-                let item = Item::fetch(&conn, drop.item_id);
-                if !selected || drop.owner_id != user.id || !item.is_reaction() {
+                // Verify that the author does not own this reply:
+                if reply.author_id == user.id {
                     return Err(Error::RollbackTransaction);
                 }
 
-                // Set the drops to consumed.
-                use self::drops::dsl::*;
+                let author =
+                    User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
 
-                diesel::update(drops.find(reaction))
-                    .filter(consumed.eq(false))
-                    .set(consumed.eq(true))
-                    .get_result::<ItemDrop>(&conn)
+                // Verify that all of the reactions are owned by the user:
+                for (reaction, selected) in used_reactions.into_iter() {
+                    let drop = ItemDrop::fetch(&conn, reaction);
+                    let item = Item::fetch(&conn, drop.item_id);
+                    if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
+                        return Err(Error::RollbackTransaction);
+                    }
+
+                    // Set the drops to consumed.
+                    use self::drops::dsl::*;
+
+                    diesel::update(drops.find(reaction))
+                        .filter(consumed.eq(false))
+                        .set(consumed.eq(true))
+                        .get_result::<ItemDrop>(&conn)
+                        .map_err(|_| Error::RollbackTransaction)?;
+
+                    new_reactions.push(reaction);
+                    match item.item_type {
+                        ItemType::Reaction { xp_value, .. } => {
+                            author.add_experience(&conn, xp_value as i64)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+
+                // Update the post with the new reactions:
+                // TODO: Move into Reply struct
+                diesel::update(replies.find(post_id))
+                    .set(reactions.eq(new_reactions))
+                    .get_result::<Reply>(&conn)
                     .map_err(|_| Error::RollbackTransaction)?;
 
-                new_reactions.push(reaction);
-                match item.item_type {
-                    ItemType::Reaction { xp_value, .. } => {
-                        author.add_experience(&conn, xp_value as i64)
-                    }
-                    _ => unreachable!(),
-                }
-            }
+                Ok(reply.thread_id)
+            })
+            .map_err(|e| {
+                Self::new(
+                    &user,
+                    post_id,
+                    Some(format!("Unable to post reaction: {e}")),
+                )
+            })?;
 
-            // Update the post with the new reactions:
-            // TODO: Move into Reply struct
-            diesel::update(replies.find(post_id))
-                .set(reactions.eq(new_reactions))
-                .get_result::<Reply>(&conn)
-                .map_err(|_| Error::RollbackTransaction)?;
-
-            Ok(reply.thread_id)
-        })
-        .unwrap(); // TODO: Error handling
-
-    Redirect::to(format!(
-        "{}#{}",
-        uri!(crate::threads::thread(thread_id, Option::<&str>::None)),
-        post_id
-    ))
+        Ok(Redirect::to(
+            format!("/thread/{thread_id}?jump_to={post_id}")
+                .parse()
+                .unwrap(),
+        ))
+    }
 }
 
 table! {
@@ -718,28 +838,21 @@ impl TradeRequest {
         use self::drops::dsl::*;
 
         let res = conn.transaction(|| -> Result<(), diesel::result::Error> {
-            let sender = User::fetch(conn, self.sender_id).unwrap();
-            let receiver = User::fetch(conn, self.receiver_id).unwrap();
-
             for sender_item in &self.sender_items {
-                sender.unequip(
-                    conn,
-                    diesel::update(drops.find(sender_item))
-                        .set(owner_id.eq(self.receiver_id))
-                        .filter(owner_id.eq(self.sender_id))
-                        .get_result::<ItemDrop>(conn)
-                        .map_err(|_| diesel::result::Error::RollbackTransaction)?,
-                );
+                diesel::update(drops.find(sender_item))
+                    .set(owner_id.eq(self.receiver_id))
+                    .filter(owner_id.eq(self.sender_id))
+                    .get_result::<ItemDrop>(conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
+                    .unequip(conn);
             }
             for receiver_item in &self.receiver_items {
-                receiver.unequip(
-                    conn,
-                    diesel::update(drops.find(receiver_item))
-                        .set(owner_id.eq(self.sender_id))
-                        .filter(owner_id.eq(self.receiver_id))
-                        .get_result::<ItemDrop>(conn)
-                        .map_err(|_| diesel::result::Error::RollbackTransaction)?,
-                );
+                diesel::update(drops.find(receiver_item))
+                    .set(owner_id.eq(self.sender_id))
+                    .filter(owner_id.eq(self.receiver_id))
+                    .get_result::<ItemDrop>(conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
+                    .unequip(conn);
             }
 
             // Check if any item no longer belongs to their respective owner:
@@ -799,41 +912,43 @@ pub struct NewTradeRequest {
     receiver_items: Vec<i32>,
 }
 
-#[rocket::get("/offer/<receiver_id>")]
-pub fn offer(sender: User, receiver_id: i32) -> Template {
-    #[derive(Serialize)]
-    struct Context {
-        sender: UserProfile,
-        sender_inventory: Vec<ItemThumbnail>,
-        receiver: UserProfile,
-        receiver_inventory: Vec<ItemThumbnail>,
-        offer_count: i64,
-    }
+#[derive(Template)]
+#[template(path = "offer.html")]
+pub struct OfferPage {
+    sender: ProfileStub,
+    sender_inventory: Vec<ItemThumbnail>,
+    receiver: ProfileStub,
+    receiver_inventory: Vec<ItemThumbnail>,
+    offers: i64,
+}
 
-    let conn = crate::establish_db_connection();
-    let receiver = User::fetch(&conn, receiver_id).unwrap();
+impl OfferPage {
+    pub async fn show(sender: User, Path(receiver_id): Path<i32>) -> Self {
+        let conn = crate::establish_db_connection();
+        let receiver = User::fetch(&conn, receiver_id).unwrap();
 
-    Template::render(
-        "offer",
-        Context {
-            sender: sender.profile(&conn),
+        Self {
+            sender: sender.profile_stub(&conn),
             // Got to put this somewhere, but don't know where
             sender_inventory: sender
                 .inventory(&conn)
                 .map(|(_, d)| d.thumbnail(&conn))
                 .collect(),
-            receiver: receiver.profile(&conn),
+            receiver: receiver.profile_stub(&conn),
             receiver_inventory: receiver
                 .inventory(&conn)
                 .map(|(_, d)| d.thumbnail(&conn))
                 .collect(),
-            offer_count: IncomingOffer::count(&conn, &sender),
-        },
-    )
+            offers: IncomingOffer::count(&conn, &sender),
+        }
+    }
 }
 
-#[rocket::post("/offer/<receiver_id>", data = "<trade>")]
-pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32>>) -> Redirect {
+pub async fn make_offer(
+    sender: User,
+    Path(receiver_id): Path<i32>,
+    Form(trade): Form<HashMap<i32, i32>>,
+) -> Redirect {
     let mut sender_items = Vec::new();
     let mut receiver_items = Vec::new();
 
@@ -842,7 +957,7 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
     for (&item, &trader) in trade.iter() {
         let drop = ItemDrop::fetch(&conn, item);
         if trader != drop.owner_id {
-            return Redirect::to(uri!(crate::threads::index()));
+            return Redirect::to("/".parse().unwrap());
         }
         if trader == sender.id {
             sender_items.push(drop.id);
@@ -851,73 +966,70 @@ pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32
         }
     }
 
-    let _: Result<TradeRequest, _> = diesel::insert_into(trade_requests::table)
+    let _ = diesel::insert_into(trade_requests::table)
         .values(&NewTradeRequest {
             sender_id: sender.id,
             sender_items,
             receiver_id,
             receiver_items,
         })
-        .get_result(&conn);
+        .get_result::<TradeRequest>(&conn);
 
-    Redirect::to(uri!(offers(Option::<&str>::None)))
+    Redirect::to("/offers".parse().unwrap())
 }
 
-#[rocket::get("/decline/<trade_id>")]
-pub fn decline(user: User, trade_id: i32) -> Redirect {
+pub async fn decline_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
     let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
     if req.sender_id == user.id || req.receiver_id == user.id {
         req.decline(&conn);
     }
-    Redirect::to(uri!(offers(Option::<&str>::None)))
+
+    Redirect::to("/offers".parse().unwrap())
 }
 
-#[rocket::get("/accept/<trade_id>")]
-pub fn accept(user: User, trade_id: i32) -> Redirect {
+pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
     let conn = crate::establish_db_connection();
     let req = TradeRequest::fetch(&conn, trade_id);
-    let err = if req.receiver_id == user.id {
-        req.accept(&conn).err()
-    } else {
-        Some("You cannot accept that trade")
-    };
-    Redirect::to(uri!(offers(err)))
-}
-
-#[rocket::get("/offers?<error>")]
-pub fn offers(user: User, error: Option<&str>) -> Template {
-    #[derive(Serialize)]
-    struct Context<'e> {
-        user: UserProfile,
-        incoming_offers: Vec<IncomingOffer>,
-        outgoing_offers: Vec<OutgoingOffer>,
-        offer_count: i64,
-        error: Option<&'e str>,
+    if req.receiver_id == user.id {
+        let _ = req.accept(&conn);
     }
 
-    let conn = crate::establish_db_connection();
-    let mut user_cache = UserCache::new(&conn);
-    // TODO: filter out trade requests that are no longer valid.
-    let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
-    let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
+    Redirect::to("/offers".parse().unwrap())
+}
 
-    Template::render(
-        "offers",
-        Context {
-            user: user.profile(&conn),
-            offer_count: incoming_offers.len() as i64,
+#[derive(Template)]
+#[template(path = "offers.html")]
+pub struct OffersPage {
+    user: ProfileStub,
+    incoming_offers: Vec<IncomingOffer>,
+    outgoing_offers: Vec<OutgoingOffer>,
+    offers: i64,
+    error: Option<String>,
+}
+
+impl OffersPage {
+    pub async fn show(user: User, Path(ErrorMessage { error }): Path<ErrorMessage>) -> Self {
+        let conn = crate::establish_db_connection();
+        let mut user_cache = UserCache::new(&conn);
+        // TODO: filter out trade requests that are no longer valid.
+        let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
+        let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
+
+        Self {
+            user: user.profile_stub(&conn),
+            offers: incoming_offers.len() as i64,
             incoming_offers,
             outgoing_offers,
             error,
-        },
-    )
+        }
+    }
 }
 
 #[derive(Serialize)]
 pub struct IncomingOffer {
     id: i32,
-    sender: UserProfile,
+    sender: ProfileStub,
     sender_items: Vec<ItemThumbnail>,
     receiver_items: Vec<ItemThumbnail>,
 }
@@ -968,7 +1080,7 @@ impl IncomingOffer {
 struct OutgoingOffer {
     id: i32,
     sender_items: Vec<ItemThumbnail>,
-    receiver: UserProfile,
+    receiver: ProfileStub,
     receiver_items: Vec<ItemThumbnail>,
 }
 

@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+
+{% block title %}Item - {{name}}{% endblock %}
+
+{% block content %}
+<li class="menu-item" style="display: inherit; text-align: left">
+  <div class="table">
+    <div class="row">
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell" style="width: 100%;">
+        <div class="item-{{rarity}}">
+          {{thumbnail|e("none")}}
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Name:</div>
+      <div class="heavy-cell">{{name}}</div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Description:</div>
+      <div class="heavy-cell">{{description}}</div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Owner:</div>
+      <div class="heavy-cell"><a href="/profile/{{owner_id}}">{{owner_name}}</a></div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Pattern Id:</div>
+      <div class="heavy-cell">{{pattern}}</div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Rarity:</div>
+      <div class="heavy-cell"><div class="rarity-{{rarity}}">{{rarity}}</div></div>
+    </div>
+    <div class="row">
+      <div class="cell">
+      </div>
+      <div class="cell">
+        {% match equip_action %}
+        {% when Some(AvailableEquipAction::Equip) %}
+        <form action="/equip/{{id}}">
+          <button type="submit">Equip</button>
+        </form>
+        {% when Some(AvailableEquipAction::Unequip) %}
+        <form action="/unequip/{{id}}">
+          <button type="submit">Unequip</button>
+        </form>
+        {% when None %}
+        <button disabled>Cannot equip item</button>
+        {% endmatch %}
+      </div>
+    </div>
+  </div>
+</li>
+{% endblock %}
+      

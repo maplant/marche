@@ -1,21 +1,19 @@
-use crate::items::{self, Item, ItemDrop, ItemThumbnail, ItemType};
+use crate::items::{self, Item, ItemDrop, ItemThumbnail};
 use crate::threads::Thread;
+use askama::Template;
+use axum::async_trait;
+use axum::extract::{Form, FromRequest, Path, RequestParts};
+use axum::response::{IntoResponse, Redirect, Response};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
 use libpasta::verify_password;
 use rand::rngs::OsRng;
 use rand::RngCore;
-use rocket::form::{Form, FromForm};
-use rocket::http::{Cookie, CookieJar, Status};
-use rocket::outcome::{try_outcome, IntoOutcome};
-use rocket::request::{self, FromRequest};
-use rocket::response::Redirect;
-use rocket::{uri, Request};
-use rocket_dyn_templates::Template;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use tower_cookies::{Cookie, Cookies, Key};
 
 table! {
     use diesel::sql_types::*;
@@ -143,75 +141,6 @@ impl User {
         }
     }
 
-    /// Equips an item
-    pub fn equip(&self, conn: &PgConnection, item_drop: ItemDrop) {
-        use self::users::dsl::*;
-
-        if item_drop.owner_id != self.id {
-            return;
-        }
-
-        let item_desc = Item::fetch(conn, item_drop.item_id);
-        match item_desc.item_type {
-            ItemType::Avatar { .. } => {
-                diesel::update(users.find(self.id))
-                    .set(equip_slot_prof_pic.eq(Some(item_drop.id)))
-                    .get_result::<Self>(conn)
-                    .unwrap();
-            }
-            ItemType::ProfileBackground { .. } => {
-                diesel::update(users.find(self.id))
-                    .set(equip_slot_background.eq(Some(item_drop.id)))
-                    .get_result::<Self>(conn)
-                    .unwrap();
-            }
-            ItemType::Badge { .. } => {
-                let mut badges = self.equip_slot_badges.clone();
-                if !badges.contains(&item_drop.id) && badges.len() < MAX_NUM_BADGES {
-                    badges.push(item_drop.id);
-                }
-                diesel::update(users.find(self.id))
-                    .set(equip_slot_badges.eq(badges))
-                    .get_result::<Self>(conn)
-                    .unwrap();
-            }
-            _ => (),
-        }
-    }
-
-    /// Unequips an item
-    pub fn unequip(&self, conn: &PgConnection, item_drop: ItemDrop) {
-        use self::users::dsl::*;
-
-        let item_desc = Item::fetch(conn, item_drop.item_id);
-        match item_desc.item_type {
-            ItemType::Avatar { .. } => {
-                let _ = diesel::update(users.find(self.id))
-                    .filter(equip_slot_prof_pic.eq(Some(item_drop.id)))
-                    .set(equip_slot_prof_pic.eq(Option::<i32>::None))
-                    .get_result::<Self>(conn);
-            }
-            ItemType::ProfileBackground { .. } => {
-                let _ = diesel::update(users.find(self.id))
-                    .filter(equip_slot_background.eq(Some(item_drop.id)))
-                    .set(equip_slot_background.eq(Option::<i32>::None))
-                    .get_result::<Self>(conn);
-            }
-            ItemType::Badge { .. } => {
-                let badges = self
-                    .equip_slot_badges
-                    .iter()
-                    .cloned()
-                    .filter(|drop_id| *drop_id != item_drop.id)
-                    .collect::<Vec<_>>();
-                let _ = diesel::update(users.find(self.id))
-                    .set(equip_slot_badges.eq(badges))
-                    .get_result::<Self>(conn);
-            }
-            _ => (),
-        }
-    }
-
     /// Returns a vec of equipped items.
     pub fn equipped(&self, conn: &PgConnection) -> Vec<ItemDrop> {
         let mut items = Vec::new();
@@ -281,8 +210,8 @@ impl User {
             .map_err(|_| ())
     }
 
-    pub fn profile(&self, conn: &PgConnection) -> UserProfile {
-        UserProfile {
+    pub fn profile_stub(&self, conn: &PgConnection) -> ProfileStub {
+        ProfileStub {
             id: self.id,
             name: self.name.clone(),
             picture: self.get_profile_pic(conn),
@@ -372,6 +301,84 @@ impl User {
     }
 }
 
+#[derive(Template)]
+#[template(path = "profile.html")]
+pub struct ProfilePage {
+    id: i32,
+    name: String,
+    picture: Option<String>,
+    bio: String,
+    level: LevelInfo,
+    equipped: Vec<ItemThumbnail>,
+    inventory: Vec<ItemThumbnail>,
+    badges: Vec<String>,
+    background: String,
+    can_trade: bool,
+    offers: i64,
+}
+
+impl ProfilePage {
+    pub async fn show_current(curr_user: User) -> Self {
+        let path = Path(curr_user.id);
+        Self::show(curr_user, path).await
+    }
+
+    pub async fn show(curr_user: User, Path(id): Path<i32>) -> Self {
+        use crate::items::drops;
+
+        let conn = crate::establish_db_connection();
+        let user = User::fetch(&conn, id).unwrap();
+
+        let mut is_equipped = HashSet::new();
+
+        let equipped = user
+            .equipped(&conn)
+            .into_iter()
+            .map(|drop| {
+                // TODO: extract this to function.
+                is_equipped.insert(drop.id);
+                drop.thumbnail(&conn)
+            })
+            .collect::<Vec<_>>();
+
+        let mut inventory = drops::table
+            .filter(drops::dsl::owner_id.eq(user.id))
+            .filter(drops::dsl::consumed.eq(false))
+            .load::<ItemDrop>(&conn)
+            .ok()
+            .unwrap_or_else(Vec::new)
+            .into_iter()
+            .filter_map(|drop| {
+                (!is_equipped.contains(&drop.id)).then(|| {
+                    let id = drop.item_id;
+                    (drop, Item::fetch(&conn, id).rarity)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
+
+        let inventory = inventory
+            .into_iter()
+            .map(|(drop, _)| drop.thumbnail(&conn))
+            .collect::<Vec<_>>();
+
+        Self {
+            id,
+            picture: user.get_profile_pic(&conn),
+            offers: items::IncomingOffer::count(&conn, &curr_user),
+            level: user.level_info(),
+            badges: user.get_badges(&conn),
+            background: user.get_background_style(&conn),
+            name: user.name,
+            bio: user.bio,
+            equipped,
+            inventory,
+            can_trade: user.id != curr_user.id,
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum)]
 pub enum Role {
     Admin,
@@ -381,7 +388,7 @@ pub enum Role {
 
 /// Displayable user profile
 #[derive(Clone, Serialize)]
-pub struct UserProfile {
+pub struct ProfileStub {
     pub id: i32,
     pub name: String,
     pub picture: Option<String>,
@@ -399,157 +406,77 @@ pub struct LevelInfo {
 
 /// Name of the cookie we use to store the session Id.
 const USER_SESSION_ID_COOKIE: &str = "session_id";
+const PRIVATE_COOKIE_KEY: &str = "ea63npVp7Vg+ileGuoO0OJbBLOdSkHKkNwu87B8/joU=";
 
-#[rocket::async_trait]
-impl<'r> FromRequest<'r> for User {
-    type Error = ();
+#[async_trait]
+impl<B> FromRequest<B> for User
+where
+    B: Send,
+{
+    type Rejection = Unauthorized;
 
-    async fn from_request(req: &'r Request<'_>) -> request::Outcome<Self, Self::Error> {
-        let session_id = try_outcome!(req
-            .cookies()
-            .get_private(USER_SESSION_ID_COOKIE)
-            .map(|x| x.value().to_string())
-            .into_outcome((Status::Unauthorized, ())));
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+        let cookies = Cookies::from_request(req).await.map_err(|_| Unauthorized)?;
+        let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
+        let signed = cookies.private(&private_key);
+        let session_id = signed.get(USER_SESSION_ID_COOKIE).ok_or(Unauthorized)?;
         let conn = crate::establish_db_connection();
-        let session = try_outcome!(
-            LoginSession::fetch(&conn, &session_id).into_outcome(Status::Unauthorized)
-        );
-        User::from_session(&conn, &session).into_outcome(Status::Unauthorized)
+        let session = LoginSession::fetch(&conn, session_id.value()).map_err(|_| Unauthorized)?;
+        User::from_session(&conn, &session).map_err(|_| Unauthorized)
     }
 }
 
-#[rocket::get("/equip/<drop_id>")]
-pub fn equip(user: User, drop_id: i32) -> Redirect {
-    let conn = crate::establish_db_connection();
-    let item_drop = ItemDrop::fetch(&conn, drop_id);
-    user.equip(&conn, item_drop);
-    Redirect::to(uri!(profile(user.id)))
-}
+pub struct Unauthorized;
 
-#[rocket::get("/profile")]
-pub fn curr_profile(user: User) -> Redirect {
-    Redirect::to(uri!(profile(user.id)))
-}
-
-#[rocket::get("/profile/<id>")]
-pub fn profile(curr_user: User, id: i32) -> Template {
-    use crate::items::drops;
-
-    #[derive(Serialize)]
-    struct Context<'n, 'p, 'b, 'bg> {
-        id: i32,
-        name: &'n str,
-        picture: Option<&'p str>,
-        bio: &'b str,
-        level: LevelInfo,
-        equipped: Vec<ItemThumbnail>,
-        inventory: Vec<ItemThumbnail>,
-        badges: Vec<String>,
-        background: &'bg str,
-        can_trade: bool,
-        offer_count: i64,
+impl IntoResponse for Unauthorized {
+    fn into_response(self) -> Response {
+        Redirect::to("/login".parse().unwrap()).into_response()
     }
+}
 
-    let conn = crate::establish_db_connection();
-    let user = User::fetch(&conn, id).unwrap();
+#[derive(Template)]
+#[template(path = "leaderboard.html")]
+pub struct LeaderboardPage {
+    offers: i64,
+    users: Vec<UserRank>,
+}
 
-    let mut is_equipped = HashSet::new();
+struct UserRank {
+    rank: usize,
+    bio: String,
+    profile: ProfileStub,
+}
 
-    let equipped = user
-        .equipped(&conn)
-        .into_iter()
-        .map(|drop| {
-            // TODO: extract this to function.
-            is_equipped.insert(drop.id);
-            drop.thumbnail(&conn)
-        })
-        .collect::<Vec<_>>();
+impl LeaderboardPage {
+    pub async fn show(user: User) -> Self {
+        use self::users::dsl::*;
 
-    let mut inventory = drops::table
-        .filter(drops::dsl::owner_id.eq(user.id))
-        .filter(drops::dsl::consumed.eq(false))
-        .load::<ItemDrop>(&conn)
-        .ok()
-        .unwrap_or_else(Vec::new)
-        .into_iter()
-        .filter_map(|drop| {
-            (!is_equipped.contains(&drop.id)).then(|| {
-                let id = drop.item_id;
-                (drop, Item::fetch(&conn, id).rarity)
+        let conn = crate::establish_db_connection();
+
+        let user_profiles = users
+            .order(experience.desc())
+            .limit(100)
+            .load::<User>(&conn)
+            .unwrap()
+            .into_iter()
+            .enumerate()
+            .map(|(i, u)| UserRank {
+                rank: i + 1,
+                bio: u.bio.clone(),
+                profile: u.profile_stub(&conn),
             })
-        })
-        .collect::<Vec<_>>();
+            .collect();
 
-    inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
-
-    let inventory = inventory
-        .into_iter()
-        .map(|(drop, _)| drop.thumbnail(&conn))
-        .collect::<Vec<_>>();
-
-    Template::render(
-        "profile",
-        Context {
-            id,
-            name: &user.name,
-            picture: user.get_profile_pic(&conn).as_deref(),
-            bio: &user.bio,
-            level: user.level_info(),
-            equipped,
-            inventory,
-            badges: user.get_badges(&conn),
-            background: &user.get_background_style(&conn),
-            can_trade: user.id != curr_user.id,
-            offer_count: items::IncomingOffer::count(&conn, &curr_user),
-        },
-    )
-}
-
-#[rocket::get("/leaderboard")]
-pub fn leaderboard(user: User) -> Template {
-    use self::users::dsl::*;
-
-    #[derive(Serialize)]
-    struct UserRank {
-        rank: usize,
-        bio: String,
-        profile: UserProfile,
-    }
-
-    #[derive(Serialize)]
-    struct Context {
-        users: Vec<UserRank>,
-        offer_count: i64,
-    }
-
-    let conn = crate::establish_db_connection();
-
-    let user_profiles = users
-        .order(experience.desc())
-        .limit(100)
-        .load::<User>(&conn)
-        .unwrap()
-        .into_iter()
-        .enumerate()
-        .map(|(i, u)| UserRank {
-            rank: i + 1,
-            bio: u.bio.clone(),
-            profile: u.profile(&conn),
-        })
-        .collect();
-
-    Template::render(
-        "leaderboard",
-        Context {
+        Self {
             users: user_profiles,
-            offer_count: items::IncomingOffer::count(&conn, &user),
-        },
-    )
+            offers: items::IncomingOffer::count(&conn, &user),
+        }
+    }
 }
 
 pub struct UserCache<'a> {
     conn: &'a PgConnection,
-    cached: HashMap<i32, UserProfile>,
+    cached: HashMap<i32, ProfileStub>,
 }
 
 impl<'a> UserCache<'a> {
@@ -560,10 +487,10 @@ impl<'a> UserCache<'a> {
         }
     }
 
-    pub fn get(&mut self, id: i32) -> &UserProfile {
+    pub fn get(&mut self, id: i32) -> &ProfileStub {
         if !self.cached.contains_key(&id) {
             let user = User::fetch(self.conn, id).unwrap();
-            self.cached.insert(id, user.profile(self.conn));
+            self.cached.insert(id, user.profile_stub(self.conn));
         }
         self.cached.get(&id).unwrap()
     }
@@ -670,27 +597,40 @@ impl LoginSession {
     }
 }
 
-#[derive(FromForm, Debug)]
-pub struct LoginReq {
+#[derive(Deserialize)]
+pub struct LoginForm {
     username: String,
     password: String,
 }
 
-#[rocket::post("/login", data = "<login>")]
-pub fn login_action(jar: &CookieJar<'_>, login: Form<LoginReq>) -> Redirect {
-    jar.remove_private(Cookie::new(USER_SESSION_ID_COOKIE, String::new()));
-    let conn = crate::establish_db_connection();
-    let session = LoginSession::login(&conn, &login.username, &login.password);
-    match session {
-        Ok(LoginSession { session_id, .. }) => {
-            jar.add_private(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
-            Redirect::to("/")
-        }
-        Err(_) => Redirect::to(uri!(crate::error::error("Unauthorized login"))),
-    }
+#[derive(Template)]
+#[template(path = "login.html")]
+pub struct LoginPage {
+    error: Option<&'static str>,
+    offers: usize,
 }
 
-#[rocket::get("/login")]
-pub fn login_form() -> Template {
-    Template::render("login", HashMap::<String, String>::new())
+impl LoginPage {
+    pub async fn show() -> Self {
+        Self {
+            error: None,
+            offers: 0,
+        }
+    }
+
+    pub async fn attempt(jar: Cookies, login: Form<LoginForm>) -> Result<Redirect, Self> {
+        let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
+        let private = jar.private(&key);
+        private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
+        let conn = crate::establish_db_connection();
+        LoginSession::login(&conn, &login.username, &login.password)
+            .map(|LoginSession { session_id, .. }| {
+                private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
+                Redirect::to("/".parse().unwrap())
+            })
+            .map_err(|_e| Self {
+                error: Some("Incorrect username or password"),
+                offers: 0,
+            })
+    }
 }

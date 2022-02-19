@@ -1,23 +1,23 @@
-<div class="table item-{{rarity}}" style="margin: 0 auto;">
+<div class="table item-{{item.rarity}}" style="margin: 0 auto;">
     <div class="overlay-row">
         <div class="item-overlay-cell">
-            {{{thumbnail}}}
+            {{item.thumbnail|e("none")}}
         </div>
     </div>
     <div class="item-overlay-row">
         <div class="item-overlay-cell">
-            {{name}}
+            {{item.name}}
         </div>
     </div>
     <div class="item-overlay-row" style="text-align: justify;">
         <div class="item-overlay-cell">
-            {{description}}
+            {{item.description}}
         </div>
     </div>
     <div class="item-overlay-row">
         <div class="item-overlay-cell">
-            <div class="rarity-{{rarity}}" style="border-left-color: #FFFFFF;border-top-color: #FFFFFF;">
-                {{rarity}}
+            <div class="rarity-{{item.rarity}}" style="border-left-color: #FFFFFF;border-top-color: #FFFFFF;">
+                {{item.rarity}}
             </div>
         </div>
     </div>

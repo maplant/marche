@@ -1,19 +1,14 @@
 //! Display threads
 use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
-use crate::users::{User, UserCache, UserProfile};
+use crate::users::{ProfileStub, User, UserCache};
+use askama::Template;
+use axum::extract::{Form, Path};
+use axum::response::Redirect;
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
-use rocket::form::Form;
-use rocket::http::uri::fmt::Path;
-use rocket::http::uri::Segments;
-use rocket::http::{Cookie, CookieJar};
-use rocket::request::FromSegments;
-use rocket::response::Redirect;
-use rocket::{uri, FromForm};
-use rocket_dyn_templates::Template;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
 table! {
@@ -56,339 +51,428 @@ const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 // TODO: These next two functions absolutely should be done client side.
-#[rocket::post("/remove-tag/<name>", data = "<tags>")]
-pub fn remove_tag(_user: User, mut tags: Form<HashMap<String, String>>, name: &str) -> Redirect {
+// #[rocket::post("/remove-tag/<name>", data = "<tags>")]
+pub async fn remove_tag(
+    _user: User,
+    Path(name): Path<String>,
+    Form(mut tags): Form<HashMap<String, String>>,
+) -> Redirect {
     let _ = tags.remove("add-tag");
     let tags = tags
         .iter()
-        .filter_map(|(tname, _)| (tname != name).then(|| tname))
-        .fold(String::new(), |prefix, suffix| prefix + suffix.trim() + "/");
-    Redirect::to(format!("/t/{}", tags))
+        .filter_map(|(tname, _)| (tname != &name).then(|| tname))
+        .fold(String::new(), |prefix, suffix| {
+            prefix + &*urlencoding::encode(suffix.trim()) + "/"
+        });
+    Redirect::to(format!("/t/{}", tags).parse().unwrap())
 }
 
-#[rocket::post("/add-tag", data = "<tags>")]
-pub fn add_tag(_user: User, mut tags: Form<HashMap<String, String>>) -> Redirect {
+// #[rocket::post("/add-tag", data = "<tags>")]
+pub async fn add_tag(_user: User, Form(mut tags): Form<HashMap<String, String>>) -> Redirect {
     let add_tag = clean_tag_name(&tags.remove("add-tag").unwrap_or_else(String::new));
     let tags = tags.iter().fold(String::new(), |prefix, suffix| {
-        prefix + suffix.0.trim() + "/"
+        prefix + &*urlencoding::encode(suffix.0.trim()) + "/"
     });
-    Redirect::to(format!("/t/{}/{}", add_tag, tags))
+    Redirect::to(format!("/t/{}/{}", add_tag, tags).parse().unwrap())
 }
 
-#[rocket::get("/t/<viewed_tags..>")]
-pub fn view_tags(user: User, mut viewed_tags: Tags) -> Template {
-    use self::threads::dsl::*;
+#[derive(Template)]
+#[template(path = "index.html")]
+pub struct Index {
+    tags: Vec<Tag>,
+    posts: Vec<ThreadLink>,
+    curr_path: String,
+    offers: i64,
+}
 
-    #[derive(Serialize)]
-    struct Context {
-        tags: Vec<Tag>,
-        posts: Vec<ThreadLink>,
-        curr_path: String,
-        offer_count: i64,
+#[derive(Serialize)]
+struct ThreadLink {
+    num: usize,
+    id: i32,
+    title: String,
+    date: String,
+    emphasize_date: bool,
+    read: bool,
+    jump_to: i32,
+    replies: String,
+    tags: Vec<String>,
+}
+
+impl Index {
+    pub async fn show(user: User) -> Self {
+        Self::show_with_tags(user, Path(String::from("en"))).await
     }
 
-    #[derive(Serialize)]
-    struct ThreadLink {
-        num: usize,
-        id: i32,
-        title: String,
-        date: String,
-        emphasize_date: bool,
-        read: bool,
-        jump_to: i32,
-        replies: String,
-        tags: Vec<String>,
-    }
+    pub async fn show_with_tags(user: User, Path(viewed_tags): Path<String>) -> Self {
+        use self::threads::dsl::*;
 
-    let conn = crate::establish_db_connection();
+        tracing::info!("Loading index");
 
-    if viewed_tags.is_empty() {
-        viewed_tags = Tags {
-            tags: vec![Tag::fetch_if_exists(&conn, "en").unwrap()],
-        };
-    }
+        let viewed_tags = Tags::from(&*viewed_tags);
+        let conn = crate::establish_db_connection();
 
-    let posts: Vec<_> = threads
-        .filter(tags.contains(viewed_tags.clone().into_id_vec()))
-        .order(last_post.desc())
-        .limit(THREADS_PER_PAGE)
-        .load::<Thread>(&conn)
-        .ok()
-        .unwrap_or_else(Vec::new)
-        .into_iter()
-        .enumerate()
-        .map(|(i, thread)| {
-            // Format the date:
-            // TODO: Consider moving duration->plaintext into common utility
-            let duration_since_last_post =
-                Utc::now().naive_utc() - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
-            let duration_min = duration_since_last_post.num_minutes();
-            let duration_hours = duration_since_last_post.num_hours();
-            let duration_days = duration_since_last_post.num_days();
-            let duration_weeks = duration_since_last_post.num_weeks();
-            let duration_string: String = if duration_weeks > 0 {
-                format!(
-                    "{} week{} ago",
-                    duration_weeks,
-                    if duration_weeks > 1 { "s" } else { "" }
-                )
-            } else if duration_days > 0 {
-                format!(
-                    "{} day{} ago",
-                    duration_days,
-                    if duration_days > 1 { "s" } else { "" }
-                )
-            } else if duration_hours > 0 {
-                format!(
-                    "{} hour{} ago",
-                    duration_hours,
-                    if duration_hours > 1 { "s" } else { "" }
-                )
-            } else if duration_min >= 5 {
-                format!(
-                    "{} minute{} ago",
-                    duration_min,
-                    if duration_min > 1 { "s" } else { "" }
-                )
-            } else {
-                String::from("just now!")
-            };
+        let posts: Vec<_> = threads
+            .filter(tags.contains(viewed_tags.clone().into_id_vec()))
+            .order(last_post.desc())
+            .limit(THREADS_PER_PAGE)
+            .load::<Thread>(&conn)
+            .ok()
+            .unwrap_or_else(Vec::new)
+            .into_iter()
+            .enumerate()
+            .map(|(i, thread)| {
+                // Format the date:
+                // TODO: Consider moving duration->plaintext into common utility
+                let duration_since_last_post = Utc::now().naive_utc()
+                    - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
+                let duration_min = duration_since_last_post.num_minutes();
+                let duration_hours = duration_since_last_post.num_hours();
+                let duration_days = duration_since_last_post.num_days();
+                let duration_weeks = duration_since_last_post.num_weeks();
+                let duration_string: String = if duration_weeks > 0 {
+                    format!(
+                        "{} week{} ago",
+                        duration_weeks,
+                        if duration_weeks > 1 { "s" } else { "" }
+                    )
+                } else if duration_days > 0 {
+                    format!(
+                        "{} day{} ago",
+                        duration_days,
+                        if duration_days > 1 { "s" } else { "" }
+                    )
+                } else if duration_hours > 0 {
+                    format!(
+                        "{} hour{} ago",
+                        duration_hours,
+                        if duration_hours > 1 { "s" } else { "" }
+                    )
+                } else if duration_min >= 5 {
+                    format!(
+                        "{} minute{} ago",
+                        duration_min,
+                        if duration_min > 1 { "s" } else { "" }
+                    )
+                } else {
+                    String::from("just now!")
+                };
 
-            // Count the number of replies:
-            let num_replies = {
-                use self::replies::dsl::*;
+                // Count the number of replies:
+                let num_replies = {
+                    use self::replies::dsl::*;
 
-                replies
-                    .filter(thread_id.eq(thread.id))
-                    .count()
-                    .get_result(&conn)
-                    .unwrap_or(0)
-            };
+                    replies
+                        .filter(thread_id.eq(thread.id))
+                        .count()
+                        .get_result(&conn)
+                        .unwrap_or(0)
+                };
 
-            let replies = match num_replies {
-                0 | 1 => format!("No replies"),
-                2 => format!("1 reply"),
-                x => format!("{} replies", x - 1),
-            };
+                let replies = match num_replies {
+                    0 | 1 => format!("No replies"),
+                    2 => format!("1 reply"),
+                    x => format!("{} replies", x - 1),
+                };
 
-            let read = user.has_read(&conn, &thread);
-            let jump_to = user.next_unread(&conn, &thread);
+                let read = user.has_read(&conn, &thread);
+                let jump_to = user.next_unread(&conn, &thread);
 
-            ThreadLink {
-                num: i + 1,
-                id: thread.id,
-                title: thread.title,
-                date: duration_string,
-                emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
-                read,
-                jump_to,
-                replies,
-                tags: thread
-                    .tags
-                    .into_iter()
-                    .filter_map(|tid| Tag::fetch_from_id(&conn, tid))
-                    .map(|t| t.name)
-                    .collect(),
-            }
-        })
-        .collect();
+                ThreadLink {
+                    num: i + 1,
+                    id: thread.id,
+                    title: thread.title,
+                    date: duration_string,
+                    emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
+                    read,
+                    jump_to,
+                    replies,
+                    tags: thread
+                        .tags
+                        .into_iter()
+                        .filter_map(|tid| Tag::fetch_from_id(&conn, tid))
+                        .map(|t| t.name)
+                        .collect(),
+                }
+            })
+            .collect();
 
-    Template::render(
-        "index",
-        Context {
+        Self {
             curr_path: viewed_tags.fmt(),
             tags: viewed_tags.tags,
             posts: posts,
-            offer_count: IncomingOffer::count(&conn, &user),
-        },
-    )
+            offers: IncomingOffer::count(&conn, &user),
+        }
+    }
 }
 
+/*
 #[rocket::get("/")]
 pub fn index(_user: User) -> Redirect {
     // TODO: change this to the user's preferred default language.
     Redirect::to(format!("/t/en"))
 }
+ */
 
-#[rocket::get("/thread/<thread_id>?<error>")]
-pub fn thread(
-    user: User,
-    cookies: &CookieJar<'_>,
-    thread_id: i32,
-    error: Option<&str>,
-) -> Template {
-    use self::replies;
-    use self::threads::dsl::*;
-
-    // Consider removing this in favor of just using ItemThumbnail instead
-    #[derive(Serialize)]
-    struct Reward {
-        thumbnail: String,
-        name: String,
-        description: String,
-        rarity: String,
-    }
-
-    #[derive(Serialize)]
-    struct Post {
-        id: i32,
-        author: UserProfile,
-        body: String,
-        date: String,
-        reactions: Vec<ItemThumbnail>,
-        reward: Option<Reward>,
-        can_react: bool,
-    }
-
-    #[derive(Serialize)]
-    struct Context<'t, 'e> {
-        id: i32,
-        title: &'t str,
-        posts: Vec<Post>,
-        error: Option<&'e str>,
-        offer_count: i64,
-    }
-
-    let conn = crate::establish_db_connection();
-    let mut user_cache = UserCache::new(&conn);
-    let thread = &threads
-        .filter(id.eq(thread_id))
-        .first::<Thread>(&conn)
-        .unwrap();
-    user.read_thread(&conn, &thread);
-
-    let posts = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
-        .load::<Reply>(&conn)
-        .unwrap()
-        .into_iter()
-        .map(|t| Post {
-            id: t.id,
-            author: user_cache.get(t.author_id).clone(),
-            body: t.body,
-            date: t.post_date.format(DATE_FMT).to_string(),
-            reactions: t
-                .reactions
-                .into_iter()
-                .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
-                .collect(),
-            reward: t.reward.map(|r| {
-                let drop = ItemDrop::fetch(&conn, r);
-                let item = drop.fetch_item(&conn);
-                Reward {
-                    name: item.name,
-                    description: item.description,
-                    thumbnail: drop.thumbnail_html(&conn),
-                    rarity: item.rarity.to_string(),
-                }
-            }),
-            can_react: t.author_id != user.id,
-        })
-        .collect::<Vec<_>>();
-
-    // Update the last_seen_{thread_id} cookie to the latest date.
-    posts.last().map(|last| {
-        cookies.add(Cookie::new(
-            format!("last_seen_{}", thread_id),
-            last.date.clone(),
-        ))
-    });
-
-    Template::render(
-        "thread",
-        Context {
-            id: thread_id,
-            title: &thread.title,
-            posts,
-            offer_count: IncomingOffer::count(&conn, &user),
-            error,
-        },
-    )
-}
-
-// TODO: Make error a vec of strs.
-#[rocket::get("/author?<error>")]
-pub fn author_form(user: User, error: Option<&str>) -> Template {
-    #[derive(Serialize)]
-    struct Context<'e> {
-        error: Option<&'e str>,
-        offer_count: i64,
-    }
-
-    let conn = crate::establish_db_connection();
-    Template::render(
-        "author",
-        Context {
-            error,
-            offer_count: IncomingOffer::count(&conn, &user),
-        },
-    )
-}
-
-#[derive(FromForm)]
-pub struct NewThreadReq {
+#[derive(Template)]
+#[template(path = "thread.html")]
+pub struct ThreadPage {
+    id: i32,
     title: String,
-    tags: String,
-    body: String,
+    posts: Vec<Post>,
+    error: Option<&'static str>,
+    offers: i64,
 }
 
-#[rocket::post("/author", data = "<thread>")]
-pub fn author_action(user: User, thread: Form<NewThreadReq>) -> Redirect {
-    use self::{replies, threads};
+#[derive(Serialize)]
+struct Reward {
+    thumbnail: String,
+    name: String,
+    description: String,
+    rarity: String,
+}
 
-    if thread.title.is_empty() || thread.body.is_empty() {
-        return Redirect::to(uri!(author_form(Some(
-            "Thread title or body cannot be empty"
-        ))));
+#[derive(Serialize)]
+struct Post {
+    id: i32,
+    author: ProfileStub,
+    body: String,
+    date: String,
+    reactions: Vec<ItemThumbnail>,
+    reward: Option<Reward>,
+    can_react: bool,
+}
+
+impl ThreadPage {
+    pub fn new(user: &User, thread_id: i32, error: Option<&'static str>) -> Self {
+        use self::threads::dsl::*;
+
+        let conn = crate::establish_db_connection();
+        let mut user_cache = UserCache::new(&conn);
+        let thread = &threads
+            .filter(id.eq(thread_id))
+            .first::<Thread>(&conn)
+            .unwrap();
+        user.read_thread(&conn, &thread);
+
+        let posts = replies::dsl::replies
+            .filter(replies::dsl::thread_id.eq(thread_id))
+            .order(replies::dsl::post_date.asc())
+            .load::<Reply>(&conn)
+            .unwrap()
+            .into_iter()
+            .map(|t| Post {
+                id: t.id,
+                author: user_cache.get(t.author_id).clone(),
+                body: t.body,
+                date: t.post_date.format(DATE_FMT).to_string(),
+                reactions: t
+                    .reactions
+                    .into_iter()
+                    .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
+                    .collect(),
+                reward: t.reward.map(|r| {
+                    let drop = ItemDrop::fetch(&conn, r);
+                    let item = drop.fetch_item(&conn);
+                    Reward {
+                        name: item.name,
+                        description: item.description,
+                        thumbnail: drop.thumbnail_html(&conn),
+                        rarity: item.rarity.to_string(),
+                    }
+                }),
+                can_react: t.author_id != user.id,
+            })
+            .collect::<Vec<_>>();
+
+        Self {
+            id: thread_id,
+            title: thread.title.clone(), // I feel like I should be able to move this
+            posts,
+            offers: IncomingOffer::count(&conn, &user),
+            error,
+        }
     }
 
-    let conn = crate::establish_db_connection();
-    let post_date = Utc::now().naive_utc();
+    pub async fn show(user: User, Path(thread_id): Path<i32>) -> Self {
+        Self::new(&user, thread_id, None)
+    }
 
-    // Parse the body as markdown
-    let html_output = parse_markdown(&thread.body);
+    // Probably should be done over ajax.
+    pub async fn reply(
+        user: User,
+        Path(thread_id): Path<i32>,
+        Form(ReplyForm { reply }): Form<ReplyForm>,
+    ) -> Result<Redirect, Self> {
+        let reply = reply.trim();
+        if reply.is_empty() {
+            return Err(Self::new(&user, thread_id, Some("Reply cannot be empty")));
+        }
 
-    let tags = parse_tag_list(&thread.tags)
-        .filter_map(|t| Tag::fetch_and_inc(&conn, t))
-        .map(|t| t.id())
-        .collect();
+        let conn = crate::establish_db_connection();
+        let mut user_cache = UserCache::new(&conn);
+        let post_date = Utc::now().naive_utc();
 
-    conn.transaction(|| -> Result<Thread, diesel::result::Error> {
-        use diesel::result::Error::RollbackTransaction;
+        // Regex out commands in reply body of the form @command:argument
+        lazy_static! {
+            static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
+        };
 
-        let next_thread = diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
-            .first::<i64>(&conn)
-            .map_err(|_| RollbackTransaction)? as i32;
+        let referenced_reply_ids = REPLY_RE
+            .captures_iter(&reply)
+            .map(|captured_group| captured_group["reply_id"].to_string())
+            .collect::<Vec<String>>();
 
-        let next_thread = next_thread as i32;
+        let id_to_author = replies::dsl::replies
+            .filter(replies::dsl::thread_id.eq(thread_id))
+            .order(replies::dsl::post_date.asc())
+            .load::<Reply>(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
+            .map(|reply| {
+                (
+                    reply.id.to_string(),
+                    user_cache.get(reply.author_id).clone().name,
+                )
+            })
+            .collect::<HashMap<String, String>>();
 
-        let first_post: Reply = diesel::insert_into(replies::table)
+        let response_divs = replies::dsl::replies
+            .filter(replies::dsl::thread_id.eq(thread_id))
+            .order(replies::dsl::post_date.asc())
+            .load::<Reply>(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
+                format!(
+                    r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
+                    reply_id = reply.id.to_string(),
+                    author_name = user_cache.get(reply.author_id).clone().name,
+                )
+            })
+            .collect::<String>();
+
+        // Parse the body as markdown
+        let html_output = response_divs + &parse_markdown(&reply);
+
+        // Swap out "respond" command sequences for @ mentions
+        let html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
+            let reply_id = &captured_group["reply_id"];
+            if id_to_author.contains_key(reply_id) {
+                format!(
+                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
+                    reply_id = reply_id,
+                    author_name = id_to_author[reply_id],
+                )
+            } else {
+                captured_group[0].to_string()
+            }
+        }).to_string();
+
+        let reply: Reply = diesel::insert_into(replies::table)
             .values(&NewReply {
                 author_id: user.id,
-                thread_id: next_thread,
+                thread_id,
                 post_date,
                 body: &html_output,
                 reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
                 reactions: Vec::new(),
             })
             .get_result(&conn)
-            .map_err(|_| RollbackTransaction)?;
+            .unwrap();
 
-        diesel::insert_into(threads::table)
-            .values(&NewThread {
-                id: next_thread,
-                last_post: first_post.id,
-                title: &thread.title,
-                tags,
-            })
-            .get_result(&conn)
-            .map_err(|_| RollbackTransaction)
-    })
-    .map_or_else(
-        |err| Redirect::to(uri!(crate::error::error(format!("{}", err)))),
-        |thread| Redirect::to(uri!(thread(thread.id, Option::<&str>::None))),
-    )
+        let _: Result<Thread, _> = diesel::update(threads::table)
+            .filter(threads::dsl::id.eq(thread_id))
+            .set(threads::dsl::last_post.eq(reply.id))
+            .get_result(&conn);
+
+        Ok(Redirect::to(
+            format!("/thread/{thread_id}?jump_to={}", reply.id)
+                .parse()
+                .unwrap(),
+        ))
+    }
+}
+
+#[derive(Template)]
+#[template(path = "author.html")]
+pub struct AuthorPage {
+    error: Option<&'static str>,
+    offers: i64,
+}
+
+#[derive(Deserialize)]
+pub struct NewThreadForm {
+    title: String,
+    tags: String,
+    body: String,
+}
+
+impl AuthorPage {
+    fn new(user: &User, error: &'static str) -> Self {
+        Self {
+            error: Some(error),
+            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
+        }
+    }
+
+    pub async fn show(user: User) -> Self {
+        Self {
+            error: None,
+            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
+        }
+    }
+
+    pub async fn publish(user: User, thread: Form<NewThreadForm>) -> Result<Redirect, Self> {
+        let conn = crate::establish_db_connection();
+        if thread.title.is_empty() || thread.body.is_empty() {
+            return Err(Self::new(&user, "Thread title or body cannot be empty"));
+        }
+
+        let post_date = Utc::now().naive_utc();
+
+        // Parse the body as markdown
+        let html_output = parse_markdown(&thread.body);
+
+        let tags = parse_tag_list(&thread.tags)
+            .filter_map(|t| Tag::fetch_and_inc(&conn, t))
+            .map(|t| t.id())
+            .collect();
+
+        conn.transaction(|| -> Result<Thread, diesel::result::Error> {
+            use diesel::result::Error::RollbackTransaction;
+
+            let next_thread = diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
+                .first::<i64>(&conn)
+                .map_err(|_| RollbackTransaction)? as i32;
+
+            let next_thread = next_thread as i32;
+
+            let first_post: Reply = diesel::insert_into(replies::table)
+                .values(&NewReply {
+                    author_id: user.id,
+                    thread_id: next_thread,
+                    post_date,
+                    body: &html_output,
+                    reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
+                    reactions: Vec::new(),
+                })
+                .get_result(&conn)
+                .map_err(|_| RollbackTransaction)?;
+
+            diesel::insert_into(threads::table)
+                .values(&NewThread {
+                    id: next_thread,
+                    last_post: first_post.id,
+                    title: &thread.title,
+                    tags,
+                })
+                .get_result(&conn)
+                .map_err(|_| RollbackTransaction)
+        })
+        .map_err(|_| Self::new(&user, "Unable to post thread. Try again later"))
+        .map(|thread| Redirect::to(format!("thread/{}", thread.id).parse().unwrap()))
+    }
 }
 
 table! {
@@ -512,6 +596,23 @@ impl Into<Vec<i32>> for Tags {
     }
 }
 
+impl From<&'_ str> for Tags {
+    fn from(path: &'_ str) -> Self {
+        let conn = crate::establish_db_connection();
+        let mut seen = HashSet::new();
+        let tags = path
+            .split("/")
+            .filter_map(|s| {
+                Tag::fetch_if_exists(&conn, s)
+                    .map(|t| seen.insert(t.id).then(|| t))
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        Tags { tags }
+    }
+}
+
+/*
 impl<'r> FromSegments<'r> for Tags {
     type Error = crate::DbConnectionFailure;
 
@@ -528,6 +629,7 @@ impl<'r> FromSegments<'r> for Tags {
         Ok(Tags { tags })
     }
 }
+*/
 
 fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
     // TODO: More stuff!
@@ -583,105 +685,9 @@ pub struct NewReply<'b> {
     reactions: Vec<i32>,
 }
 
-#[derive(FromForm)]
-pub struct ReplyReq {
+#[derive(Deserialize)]
+pub struct ReplyForm {
     reply: String,
-}
-
-#[rocket::post("/reply/<thread_id>", data = "<reply>")]
-pub fn reply_action(user: User, reply: Form<ReplyReq>, thread_id: i32) -> Redirect {
-    use self::{replies, threads};
-
-    let conn = crate::establish_db_connection();
-    let post_date = Utc::now().naive_utc();
-    let mut user_cache = UserCache::new(&conn);
-
-    if reply.reply.trim().is_empty() {
-        return Redirect::to(format!(
-            "{}#reply",
-            uri!(thread(thread_id, Some("Cannot post an empty reply")))
-        ));
-    }
-
-    // Regex out commands in reply body of the form @command:argument
-    lazy_static! {
-        static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
-    };
-
-    let referenced_reply_ids = REPLY_RE
-        .captures_iter(&reply.reply)
-        .map(|captured_group| captured_group["reply_id"].to_string())
-        .collect::<Vec<String>>();
-
-    let id_to_author = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
-        .load::<Reply>(&conn)
-        .unwrap()
-        .into_iter()
-        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
-        .map(|reply| {
-            (
-                reply.id.to_string(),
-                user_cache.get(reply.author_id).clone().name,
-            )
-        })
-        .collect::<HashMap<String, String>>();
-
-    let response_divs = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
-        .load::<Reply>(&conn)
-        .unwrap()
-        .into_iter()
-        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
-            format!(
-                r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
-                reply_id = reply.id.to_string(),
-                author_name = user_cache.get(reply.author_id).clone().name,
-            )
-        })
-        .collect::<String>();
-
-    // Parse the body as markdown
-    let html_output = response_divs + &parse_markdown(&reply.reply);
-
-    // Swap out "respond" command sequences for @ mentions
-    let html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
-        let reply_id = &captured_group["reply_id"];
-        if id_to_author.contains_key(reply_id) {
-            format!(
-                r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
-                reply_id = reply_id,
-                author_name = id_to_author[reply_id],
-            )
-        } else {
-            captured_group[0].to_string()
-        }
-    }).to_string();
-
-    let reply: Reply = diesel::insert_into(replies::table)
-        .values(&NewReply {
-            author_id: user.id,
-            thread_id,
-            post_date,
-            body: &html_output,
-            reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-            reactions: Vec::new(),
-        })
-        .get_result(&conn)
-        .unwrap();
-
-    let _: Result<Thread, _> = diesel::update(threads::table)
-        .filter(threads::dsl::id.eq(thread_id))
-        .set(threads::dsl::last_post.eq(reply.id))
-        .get_result(&conn);
-
-    Redirect::to(format!(
-        "{}#{}",
-        uri!(thread(thread_id, Option::<&str>::None)),
-        reply.id
-    ))
 }
 
 use comrak::{markdown_to_html, ComrakOptions};

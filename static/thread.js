@@ -79,6 +79,18 @@ $(document).ready(function() {
         response_container_div.parent().append(response_overlay_div);
         response_container_div.append(response_preview_div);
     });
+
+    // Check if error exists, and scroll to it if it does
+    const error = $('#error');
+    if (error.length) {
+        error[0].scrollIntoView({ block: "center" });
+    } else {
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.has('jump_to')) {
+            const jump_to = urlParams.get('jump_to');
+            $(`#${jump_to}`)[0].scrollIntoView({ block: "center" });
+        }
+    }
 });
 
 function insertAtCurrentLine(mde, text) {
