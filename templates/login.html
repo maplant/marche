@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Log In{% endblock %}
+
+{% block content %}
+<li class="menu-item">
+  <form action="/login/" method="post">
+    <div class="header">
+      Login
+    </div>
+    <div class="table">
+      <div class="row">
+        <div class="heavy-cell" style="border-top: 1px solid black">
+          <label for="title">Username: </label>
+        </div>
+        <div class="heavy-cell" style="width: 100%; border-top: 1px solid black">
+          <input type="text" name="username" id="username">
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell">
+          <label for="content">Password: </label>
+        </div>
+        <div class="heavy-cell">
+          <input type="password" name="password" id="password">
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell">
+          <button type="submit">Log In</button>
+        </div>
+        {% match error %}
+        {% when Some with (error) %}
+        <div class="error">
+          {{error|e}} 
+        </div>
+        {% else %}
+        {% endmatch %}
+      </div>
+    </div>
+  </form>
+</li>
+{% endblock %}

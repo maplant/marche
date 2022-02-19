@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock %}
+
+{% block content %}
+<form action="/add-tag" method="post">
+  <li style="display: inline; vertical-align: middle">
+    <label class="selected-tag">
+      <input type="text" name="add-tag" placeholder="add a tag" style="width: 80px; border-radius: 5px; padding: 5px;">
+      <input type="submit" value="+">
+    </label>
+    {% for tag in  tags %}
+    <label class="selected-tag">
+      <input type="hidden" name="{{tag.name}}" value="{{tag.id}}">
+      {{tag.name|e}}
+      <input type="submit" value="−" style="color: red" formaction="/remove-tag/{{tag.name}}">
+    </label>
+    {% endfor %}
+  </li>
+</form>
+{% for post in posts %}
+<li class="menu-item" style="display: grid">
+  <div class="table">
+    <div class="row">
+      <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
+        <a href="/thread/{{post.id}}?jump_to={{post.jump_to}}">{{post.title}}</a>
+        <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">
+          └{{post.replies}}
+          | last activity {% if post.emphasize_date %}<b>{{post.date}}</b>{% else %}{{post.date}}{% endif %}{% if !post.read %} 📨{% endif %}
+        </div>
+      </div>
+      <div class="cell" style="width: 40%; text-align: right">
+        {% for tag in post.tags %}
+        <a href="/t/{{curr_path}}{{tag}}">
+          <div class="tag">{{tag}}</div>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</li>
+{% endfor %}
+{% endblock %}

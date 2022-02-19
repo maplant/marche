@@ -211,7 +211,7 @@ pub fn index(_user: User) -> Redirect {
 
 #[derive(Template)]
 #[template(path = "thread.html")]
-pub struct ThreadView {
+pub struct ThreadPage {
     id: i32,
     title: String,
     posts: Vec<Post>,
@@ -238,7 +238,7 @@ struct Post {
     can_react: bool,
 }
 
-impl ThreadView {
+impl ThreadPage {
     pub fn new(user: &User, thread_id: i32, error: Option<&'static str>) -> Self {
         use self::threads::dsl::*;
 
@@ -392,7 +392,7 @@ impl ThreadView {
 
 #[derive(Template)]
 #[template(path = "author.html")]
-pub struct Author {
+pub struct AuthorPage {
     error: Option<&'static str>,
     offers: i64,
 }
@@ -404,15 +404,15 @@ pub struct NewThreadForm {
     body: String,
 }
 
-impl Author {
-    fn new_with_error(conn: &PgConnection, user: &User, error: &'static str) -> Self {
+impl AuthorPage {
+    fn new(user: &User, error: &'static str) -> Self {
         Self {
             error: Some(error),
             offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
         }
     }
 
-    pub async fn show(user: User) -> Author {
+    pub async fn show(user: User) -> Self {
         Self {
             error: None,
             offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
@@ -422,8 +422,7 @@ impl Author {
     pub async fn publish(user: User, thread: Form<NewThreadForm>) -> Result<Redirect, Self> {
         let conn = crate::establish_db_connection();
         if thread.title.is_empty() || thread.body.is_empty() {
-            return Err(Self::new_with_error(
-                &conn,
+            return Err(Self::new(
                 &user,
                 "Thread title or body cannot be empty",
             ));
@@ -470,7 +469,7 @@ impl Author {
                 .get_result(&conn)
                 .map_err(|_| RollbackTransaction)
         })
-        .map_err(|_| Self::new_with_error(&conn, &user, "Unable to post thread. Try again later"))
+        .map_err(|_| Self::new(&user, "Unable to post thread. Try again later"))
         .map(|thread| Redirect::to(format!("thread/{}", thread.id).parse().unwrap()))
     }
 }

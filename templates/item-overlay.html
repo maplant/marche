@@ -1,0 +1,24 @@
+<div class="table item-{{item.rarity}}" style="margin: 0 auto;">
+    <div class="overlay-row">
+        <div class="item-overlay-cell">
+            {{item.thumbnail|e("none")}}
+        </div>
+    </div>
+    <div class="item-overlay-row">
+        <div class="item-overlay-cell">
+            {{item.name}}
+        </div>
+    </div>
+    <div class="item-overlay-row" style="text-align: justify;">
+        <div class="item-overlay-cell">
+            {{item.description}}
+        </div>
+    </div>
+    <div class="item-overlay-row">
+        <div class="item-overlay-cell">
+            <div class="rarity-{{item.rarity}}" style="border-left-color: #FFFFFF;border-top-color: #FFFFFF;">
+                {{item.rarity}}
+            </div>
+        </div>
+    </div>
+</div>
