@@ -1,5 +1,5 @@
 use crate::threads::Reply;
-use crate::users::{User, UserCache, UserProfile};
+use crate::users::{User, UserCache, ProfileStub};
 use chrono::{Duration, Utc};
 use diesel::pg::Pg;
 use diesel::prelude::*;
@@ -530,6 +530,7 @@ impl Attributes {
     }
 }
 
+/*
 #[rocket::get("/item/<drop_id>")]
 pub fn item(user: User, drop_id: i32) -> Template {
     #[derive(Serialize)]
@@ -606,7 +607,9 @@ pub fn react(user: User, post_id: i32) -> Template {
         },
     )
 }
+*/
 
+/*
 #[rocket::post("/react/<post_id>", data = "<used_reactions>")]
 pub fn react_action(
     user: User,
@@ -676,6 +679,7 @@ pub fn react_action(
         post_id
     ))
 }
+*/
 
 table! {
     trade_requests(id) {
@@ -799,6 +803,7 @@ pub struct NewTradeRequest {
     receiver_items: Vec<i32>,
 }
 
+/*
 #[rocket::get("/offer/<receiver_id>")]
 pub fn offer(sender: User, receiver_id: i32) -> Template {
     #[derive(Serialize)]
@@ -831,7 +836,9 @@ pub fn offer(sender: User, receiver_id: i32) -> Template {
         },
     )
 }
+*/
 
+/*
 #[rocket::post("/offer/<receiver_id>", data = "<trade>")]
 pub fn offer_action(sender: User, receiver_id: i32, trade: Form<HashMap<i32, i32>>) -> Redirect {
     let mut sender_items = Vec::new();
@@ -913,11 +920,12 @@ pub fn offers(user: User, error: Option<&str>) -> Template {
         },
     )
 }
+*/
 
 #[derive(Serialize)]
 pub struct IncomingOffer {
     id: i32,
-    sender: UserProfile,
+    sender: ProfileStub,
     sender_items: Vec<ItemThumbnail>,
     receiver_items: Vec<ItemThumbnail>,
 }
@@ -968,7 +976,7 @@ impl IncomingOffer {
 struct OutgoingOffer {
     id: i32,
     sender_items: Vec<ItemThumbnail>,
-    receiver: UserProfile,
+    receiver: ProfileStub,
     receiver_items: Vec<ItemThumbnail>,
 }
 

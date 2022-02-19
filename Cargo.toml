@@ -19,6 +19,17 @@ diesel-derive-enum = { version = "1", features = ["postgres"] }
 rand_xorshift = "0.3.0"
 regex = "1"
 comrak = "0.12"
+askama = { version = "0.11", features = ["with-axum"] }
+askama_axum = "0.1.0"
+axum = "0.4"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.2", features = ["fs", "trace"] }
+tower-cookies = { version = "0.5", features = ["private"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+http = "0.2"
+urlencoding = "2"
 
 [dependencies.rocket_dyn_templates]
 version = "0.1.0-rc.1"
