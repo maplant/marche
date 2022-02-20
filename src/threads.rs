@@ -475,7 +475,7 @@ impl AuthorPage {
                 .map_err(|_| RollbackTransaction)
         })
         .map_err(|_| Self::new(&user, "Unable to post thread. Try again later"))
-        .map(|thread| Redirect::to(format!("thread/{}", thread.id).parse().unwrap()))
+        .map(|thread| Redirect::to(format!("/thread/{}", thread.id).parse().unwrap()))
     }
 }
 
