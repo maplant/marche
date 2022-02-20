@@ -672,7 +672,7 @@ pub async fn equip(user: User, Path(drop_id): Path<i32>) -> Redirect {
     if drop.owner_id == user.id {
         drop.equip(&conn);
     }
-    Redirect::to(format!("/item/{drop_id}").parse().unwrap())
+    Redirect::to(format!("/profile/{}", user.id).parse().unwrap())
 }
 
 pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
@@ -681,7 +681,7 @@ pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
     if drop.owner_id == user.id {
         drop.unequip(&conn);
     }
-    Redirect::to(format!("/item/{drop_id}").parse().unwrap())
+    Redirect::to(format!("/profile/{}", user.id).parse().unwrap())
 }
 
 #[derive(Template)]
