@@ -711,5 +711,5 @@ fn parse_markdown(text: &str) -> String {
         };
     }
 
-    markdown_to_html(text, &MARKDOWN_OPTIONS)
+    markdown_to_html(&text.replace("\n", "\n\n"), &MARKDOWN_OPTIONS)
 }

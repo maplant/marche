@@ -12,24 +12,30 @@
 </li>
 {% when None %}
 {% endmatch %}
+{% if incoming_offers.is_empty() %}
+<li class="menu-item">
+  <div class="post" style="padding-left: 150px">
+    <h3>No incoming trade offers</h3>
+  </div>
+</li>
+{% else %}
+<li class="menu-item">
+  <div class="post" style="padding-left: 150px">
+    <h3>Incoming trade offers:</h3>
+  </div>
+</li>
+{% for offer in incoming_offers %}
 <li class="menu-item">
   <div class="table" style="width: 100%">
     <div class="row">
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell" style="width: 50%"><b>Incoming Trade Offers</b></div>
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell" style="width: 50%"></div>
+      <div class="cell"></div>
+      <div class="cell" style="width: 50%">Sender offers:</div>
+      <div class="cell"></div>
+      <div class="cell" style="width: 50%">For:</div>
     </div>
     <div class="row">
-      <div class="heavy-cell">Sender</div>
-      <div class="heavy-cell">Sender's offer</div>
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell">Requested</div>
-    </div>
-    {% for offer in incoming_offers %}
-    <div class="row">
-      <div class="heavy-cell" style="{{offer.sender.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{offer.sender.id}}">{{offer.sender.name}}</a></p>
+      <div class="profile" style="{{offer.sender.background}} text-align: center; vertical-align: top; min-width: 180px">
+        <p><a href="/profile/{{offer.sender.id}}" style="color: white">{{offer.sender.name}}</a></p>
         {% let picture = offer.sender.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
@@ -38,8 +44,8 @@
         {% include "item-thumbnail.html" %}
         {% endfor %}
       </div>
-      <div class="heavy-cell" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{user.id}}">{{user.name}}</a></p>
+      <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
+        <p><a href="/profile/{{user.id}}" style="color: white">{{user.name}}</a></p>
         {% let picture = user.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
@@ -66,44 +72,53 @@
           </div>
         </div>
       </div>
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell"></div>
+      <div class="cell"></div>
+      <div class="cell"></div>
     </div>
-    {% endfor %}
   </div>
 </li>
+{% endfor %}
+{% endif %}
+
+{% if outgoing_offers.is_empty() %}
+<li class="menu-item">
+  <div class="post" style="padding-left: 150px">
+    <h3>No outgoing trade offers</h3>
+    <p>You can make trade offers by pressing the "draft trade offer" button on a user's profile.</p>
+  </div>
+</li>
+{% else %}
+<li class="menu-item">
+  <div class="post" style="padding-left: 150px">
+    <h3>Outgoing trade offers:</h3>
+  </div>
+</li>
+{% for offer in outgoing_offers %}
 <li class="menu-item">
   <div class="table" style="width: 100%">
     <div class="row">
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell"><b>Outgoing Trade Offers</b></div>
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell"></div>
+      <div class="cell"></div>
+      <div class="cell" style="width: 50%">You offer:</div>
+      <div class="cell" ></div>
+      <div class="cell" style="width: 50%">For:</div>
     </div>
     <div class="row">
-      <div class="cell"></div>
-      <div class="cell">Your offer</div>
-      <div class="cell"></div>
-      <div class="cell">For</div>
-    </div>
-    {% for offer in outgoing_offers %}
-    <div class="row">
-      <div class="heavy-cell" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px; border-top: 1px solid black">
-        <p><a href="/profile/{{user.id}}">{{user.name}}</a></p>
+      <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
+        <p><a href="/profile/{{user.id}}" style="color: white">{{user.name}}</a></p>
         {% let picture = user.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
-      <div class="heavy-cell" style="border-top: 1px solid black">
+      <div class="cell">
         {% for item in offer.sender_items %}
         {% include "item-thumbnail.html" %}
         {% endfor %}
       </div>
-      <div class="heavy-cell" style="{{offer.receiver.background}} text-align: center; vertical-align: top; min-width: 180px; border-top: 1px solid black">
-        <p><a href="/profile/{{offer.receiver.id}}">{{offer.receiver.name}}</a></p>
+      <div class="profile" style="{{offer.receiver.background}} text-align: center; vertical-align: top; min-width: 180px">
+        <p><a href="/profile/{{offer.receiver.id}}" style="color: white">{{offer.receiver.name}}</a></p>
         {% let picture = offer.receiver.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
-      <div class="heavy-cell" style="border-top: 1px solid black">
+      <div class="cell">
         {% for item in offer.receiver_items %}
         {% include "item-thumbnail.html" %}
         {% endfor %}
@@ -122,7 +137,7 @@
       <div class="cell"></div>
       <div class="cell"></div>
     </div>
-    {% endfor %}
-  </div>
 </li>
+{% endfor %}
+{% endif %}
 {% endblock %}

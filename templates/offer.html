@@ -23,7 +23,7 @@
         </div>
         <div class="cell">
           {% for item in sender_inventory %}
-          <label class="item-{{item.rarity}}" for="{{item.id}}">
+          <label class="item-{{item.rarity}}" for="{{item.id}}" style="user-select: none">
             <div class="hover-triggers-overlay">
               <p>{{item.thumbnail|e("none")}}</p>
               <div class="overlay-on-hover item-overlay">
@@ -57,7 +57,7 @@
         </div>
         <div class="cell">
           {% for item in receiver_inventory %}
-          <label class="item-{{item.rarity}}" for="{{item.id}}">
+          <label class="item-{{item.rarity}}" for="{{item.id}}" style="user-select: none">
             <div class="hover-triggers-overlay">
               <p>{{item.thumbnail|e("none")}}</p>
               <div class="overlay-on-hover item-overlay">
