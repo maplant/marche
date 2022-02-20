@@ -1,6 +1,7 @@
 //! Display threads
 use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
 use crate::users::{ProfileStub, User, UserCache};
+use crate::NotFound;
 use askama::Template;
 use axum::extract::{Form, Path};
 use axum::response::Redirect;
@@ -51,7 +52,6 @@ const DATE_FMT: &str = "%m/%d %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 // TODO: These next two functions absolutely should be done client side.
-// #[rocket::post("/remove-tag/<name>", data = "<tags>")]
 pub async fn remove_tag(
     _user: User,
     Path(name): Path<String>,
@@ -67,7 +67,6 @@ pub async fn remove_tag(
     Redirect::to(format!("/t/{}", tags).parse().unwrap())
 }
 
-// #[rocket::post("/add-tag", data = "<tags>")]
 pub async fn add_tag(_user: User, Form(mut tags): Form<HashMap<String, String>>) -> Redirect {
     let add_tag = clean_tag_name(&tags.remove("add-tag").unwrap_or_else(String::new));
     let tags = tags.iter().fold(String::new(), |prefix, suffix| {
@@ -243,17 +242,22 @@ struct Post {
 }
 
 impl ThreadPage {
-    pub fn new(user: &User, thread_id: i32, error: Option<&'static str>) -> Self {
+    pub fn new(
+        user: &User,
+        thread_id: i32,
+        error: Option<&'static str>,
+    ) -> Result<Self, crate::NotFound> {
         use self::threads::dsl::*;
 
         let conn = crate::establish_db_connection();
-        let mut user_cache = UserCache::new(&conn);
+        let offers = user.incoming_offers(&conn);
         let thread = &threads
             .filter(id.eq(thread_id))
             .first::<Thread>(&conn)
-            .unwrap();
+            .map_err(|_| NotFound::new(offers))?;
         user.read_thread(&conn, &thread);
 
+        let mut user_cache = UserCache::new(&conn);
         let posts = replies::dsl::replies
             .filter(replies::dsl::thread_id.eq(thread_id))
             .order(replies::dsl::post_date.asc())
@@ -284,16 +288,16 @@ impl ThreadPage {
             })
             .collect::<Vec<_>>();
 
-        Self {
+        Ok(Self {
             id: thread_id,
             title: thread.title.clone(), // I feel like I should be able to move this
             posts,
             offers: IncomingOffer::count(&conn, &user),
             error,
-        }
+        })
     }
 
-    pub async fn show(user: User, Path(thread_id): Path<i32>) -> Self {
+    pub async fn show(user: User, Path(thread_id): Path<i32>) -> Result<Self, NotFound> {
         Self::new(&user, thread_id, None)
     }
 
@@ -302,7 +306,7 @@ impl ThreadPage {
         user: User,
         Path(thread_id): Path<i32>,
         Form(ReplyForm { reply }): Form<ReplyForm>,
-    ) -> Result<Redirect, Self> {
+    ) -> Result<Redirect, Result<Self, NotFound>> {
         let reply = reply.trim();
         if reply.is_empty() {
             return Err(Self::new(&user, thread_id, Some("Reply cannot be empty")));

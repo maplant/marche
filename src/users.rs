@@ -1,5 +1,6 @@
 use crate::items::{self, Item, ItemDrop, ItemThumbnail};
 use crate::threads::Thread;
+use crate::NotFound;
 use askama::Template;
 use axum::async_trait;
 use axum::extract::{Form, FromRequest, Path, RequestParts};
@@ -322,16 +323,12 @@ pub struct ProfilePage {
 }
 
 impl ProfilePage {
-    pub async fn show_current(curr_user: User) -> Self {
-        let path = Path(curr_user.id);
-        Self::show(curr_user, path).await
-    }
-
-    pub async fn show(curr_user: User, Path(id): Path<i32>) -> Self {
+    pub async fn show(curr_user: User, Path(id): Path<i32>) -> Result<Self, NotFound> {
         use crate::items::drops;
 
         let conn = crate::establish_db_connection();
-        let user = User::fetch(&conn, id).unwrap();
+        let user =
+            User::fetch(&conn, id).map_err(|_| NotFound::new(curr_user.incoming_offers(&conn)))?;
 
         let mut is_equipped = HashSet::new();
 
@@ -367,7 +364,7 @@ impl ProfilePage {
             .map(|(drop, _)| drop.thumbnail(&conn))
             .collect::<Vec<_>>();
 
-        Self {
+        Ok(Self {
             id,
             picture: user.get_profile_pic(&conn),
             offers: items::IncomingOffer::count(&conn, &curr_user),
@@ -379,8 +376,12 @@ impl ProfilePage {
             equipped,
             inventory,
             can_trade: user.id != curr_user.id,
-        }
+        })
     }
+}
+
+pub async fn show_current_user(curr_user: User) -> Redirect {
+    Redirect::to(format!("/profile/{}", curr_user.id).parse().unwrap())
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum)]

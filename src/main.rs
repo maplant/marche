@@ -1,4 +1,3 @@
-use askama::Template;
 use axum::{
     http::StatusCode,
     routing::{get, get_service, post},
@@ -10,22 +9,7 @@ use tower_http::{services::ServeDir, trace::TraceLayer};
 
 use marche_server::items::{self, ItemPage, OfferPage, OffersPage, ReactPage};
 use marche_server::threads::{self, AuthorPage, Index, ThreadPage};
-use marche_server::users::{LeaderboardPage, LoginPage, ProfilePage, User};
-
-#[derive(Template)]
-#[template(path = "404.html")]
-pub struct Fallback {
-    offers: i64,
-}
-
-impl Fallback {
-    async fn show(user: User) -> Self {
-        let conn = marche_server::establish_db_connection();
-        Self {
-            offers: user.incoming_offers(&conn),
-        }
-    }
-}
+use marche_server::users::{self, LeaderboardPage, LoginPage, ProfilePage};
 
 #[tokio::main]
 async fn main() {
@@ -50,7 +34,7 @@ async fn main() {
         .route("/login", get(LoginPage::show).post(LoginPage::attempt))
         .route("/author", get(AuthorPage::show).post(AuthorPage::publish))
         .route("/profile/:user_id", get(ProfilePage::show))
-        .route("/profile", get(ProfilePage::show_current))
+        .route("/profile", get(users::show_current_user))
         .route("/leaderboard", get(LeaderboardPage::show))
         .route("/item/:item_id", get(ItemPage::show))
         .route("/equip/:item_id", get(items::equip))
@@ -60,7 +44,7 @@ async fn main() {
         .route("/decline/:trade_id", get(items::decline_offer))
         .route("/offer/:receiver_id", get(OfferPage::show))
         .route("/offers", get(OffersPage::show))
-        .route("/:catch/*catch", get(Fallback::show))
+        .route("/:catch/*catch", get(marche_server::NotFound::show))
         .nest(
             "/static",
             get_service(ServeDir::new("static")).handle_error(|error: std::io::Error| async move {
