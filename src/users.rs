@@ -299,6 +299,10 @@ impl User {
             .set(last_read.eq(thread.last_post))
             .execute(conn);
     }
+
+    pub fn incoming_offers(&self, conn: &PgConnection) -> i64 {
+        items::IncomingOffer::count(&conn, self)
+    }
 }
 
 #[derive(Template)]
