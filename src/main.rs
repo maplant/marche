@@ -1,5 +1,6 @@
 use axum::{
     http::StatusCode,
+    response::Redirect,
     routing::{get, get_service, post},
     Router,
 };
@@ -20,6 +21,10 @@ async fn main() {
 
     let app = Router::new()
         .route("/", get(Index::show))
+        .route(
+            "/favicon.ico",
+            get(|| async { Redirect::permanent("/static/favicon.ico".parse().unwrap()) }),
+        )
         .route("/t/*tags", get(Index::show_with_tags))
         .route(
             "/thread/:thread_id",
