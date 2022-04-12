@@ -63,7 +63,7 @@
 <form action="/thread/{{id}}" method="post" id="reply">
   <li class="menu-item" style="padding-left: 25px; padding-right: 25px">
     <div>
-      <textarea name="reply" id="reply-textarea" rows="8" cols="100" style="width: 75%; border-radius: 5px; padding: 5px"></textarea>
+      <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; margin-top: 20px; resize: none"></textarea></div>
       <button type="submit" class="action-box" style="margin-bottom: 15px; margin-top: 15px; margin-left: 0px;">+ Reply!</button>
       {% match error %}
       {% when Some(error) %}

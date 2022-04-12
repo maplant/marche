@@ -1,10 +1,7 @@
 $(document).ready(function() {
-    var easymde = new EasyMDE({ status: false, lineWrapping: true });
-    $(".editor-toolbar").css("border", "none");
-
     $(".reply-to-button").click(function() {
         $("#reply")[0].scrollIntoView({ behavior: "smooth" });
-        insertAtCurrentLine(easymde, ` @${$(this).attr("replyid")}`);
+        $("#reply-textarea")[0].value += `@${$(this).attr("replyid")} `
     });
 
     $(".respond-to-preview").click(function() {
@@ -92,18 +89,6 @@ $(document).ready(function() {
         }
     }
 });
-
-function insertAtCurrentLine(mde, text) {
-    cm = mde.codemirror;
-    var doc = cm.getDoc();
-    var cursor = doc.getCursor();
-    var line = doc.getLine(cursor.line);
-    var pos = {
-        line: cursor.line,
-        ch: line.length,
-    };
-    doc.replaceRange(text, pos);
-}
 
 function getOverlayDiv(origin) {
     var overlay_div = origin.next("div.reply-overlay");
