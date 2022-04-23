@@ -46,7 +46,10 @@ CREATE TABLE replies (
   post_date TIMESTAMP NOT NULL,
   body TEXT NOT NULL,
   reward INT,
-  reactions INTEGER[] NOT NULL
+  reactions INTEGER[] NOT NULL,
+  image TEXT,
+  thumbnail TEXT,
+  filename TEXT
 );
 
 CREATE TABLE tags (

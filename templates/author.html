@@ -4,7 +4,7 @@
 
 {% block content %}
 <li class="menu-item" style="padding-left: 25px; padding-right: 25px">
-  <form action="/author" method="post">
+  <form action="/author" method="post" enctype="multipart/form-data">
     <h3 style="padding-top: 15px">
       New Post
     </h3>
@@ -21,21 +21,39 @@
       <textarea name="body" id="body" rows="18" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea>
     </div>
     <div style="padding-top: 15px; padding-bottom: 15px">
+      <b><label for="title">Image</label></b>
+    </div>
+    <div>
+      <input type="file" name="file" id="file" style="width: 100%; box-sizing: border-box; padding: 5px" multipart>
+    </div>
+    <div style="padding-top: 15px; padding-bottom: 15px">
       <b><label for="title">Tags</label></b>
     </div>
     <div>
-      <input type="text" name="tags" id="title" value="en, " style="width: 100%; box-sizing: border-box; padding: 5px">
+      <input type="text" name="tags" id="tags" value="en, " style="width: 100%; box-sizing: border-box; padding: 5px">
     </div>
     <div style="padding-top: 15px; padding-bottom: 15px">
       <button type="submit">Post</button>
-      {% match error %}
-      {% when Some(error) %}
-      <div class="error"> 
-        {{error}}
-      </div>
-      {% when None %}
-      {% endmatch %}
+      <div id="error" style="display: inline"></div>
     </div>
+    <script>
+      $(document).ready(function () {       
+          $("form").ajaxForm({
+              url: '/author',
+              type: 'post',
+              success: function(response, _, _, _) {
+                  if (response.error !== undefined) {
+                      $("#error").html(`<div class="error" id="error">${response.error}</div>`)
+                  } else if (response.id !== undefined) {
+                      location.href = `/thread/${response.id}`;
+                  }
+              },
+              error: function(_, status, error) {
+                  $("#error").html(`<div class="error" id="error">Unable to upload image</div>`)
+              }
+          });
+      });
+    </script>
   </form>
 </li>
 {% endblock %} 

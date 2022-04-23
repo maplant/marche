@@ -9,7 +9,7 @@ use tower_cookies::CookieManagerLayer;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
 use marche_server::items::{self, ItemPage, OfferPage, OffersPage, ReactPage};
-use marche_server::threads::{self, AuthorPage, Index, ThreadPage};
+use marche_server::threads::{self, AuthorPage, Index, ReplyForm, ThreadForm, ThreadPage};
 use marche_server::users::{self, LeaderboardPage, LoginPage, ProfilePage};
 
 #[tokio::main]
@@ -28,7 +28,7 @@ async fn main() {
         .route("/t/*tags", get(Index::show_with_tags))
         .route(
             "/thread/:thread_id",
-            get(ThreadPage::show).post(ThreadPage::reply),
+            get(ThreadPage::show).post(ReplyForm::submit),
         )
         .route(
             "/react/:thread_id",
@@ -37,7 +37,7 @@ async fn main() {
         .route("/remove-tag/:name", post(threads::remove_tag))
         .route("/add-tag", post(threads::add_tag))
         .route("/login", get(LoginPage::show).post(LoginPage::attempt))
-        .route("/author", get(AuthorPage::show).post(AuthorPage::publish))
+        .route("/author", get(AuthorPage::show).post(ThreadForm::submit))
         .route("/profile/:user_id", get(ProfilePage::show))
         .route("/profile", get(users::show_current_user))
         .route("/leaderboard", get(LeaderboardPage::show))
