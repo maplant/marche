@@ -316,15 +316,7 @@ pub struct ThreadForm {
 impl ThreadForm {
     pub async fn submit(
         user: User,
-        form: Result<
-            MultipartForm<
-                Self,
-                {
-                    2 * 1024 * 1024 /* 2mb */
-                },
-            >,
-            JsonError,
-        >,
+        form: Result<MultipartForm<Self, MAXIMUM_FILE_SIZE>, JsonError>,
     ) -> Result<Json<Thread>, JsonError> {
         let MultipartForm { file, form: thread } = form?;
 
@@ -599,12 +591,7 @@ impl ReplyForm {
         MultipartForm {
             file,
             form: ReplyForm { reply },
-        }: MultipartForm<
-            Self,
-            {
-                2 * 1024 * 1024 /* 2mb */
-            },
-        >,
+        }: MultipartForm<Self, MAXIMUM_FILE_SIZE>,
     ) -> Result<Json<Reply>, JsonError> {
         let reply = reply.trim();
         if reply.is_empty() && file.is_none() {
@@ -739,6 +726,8 @@ pub const IMAGE_STORE_BUCKET: &'static str = "images";
 pub fn get_url(filename: &str) -> String {
     format!("{IMAGE_STORE_ENDPOINT}/{IMAGE_STORE_BUCKET}/{filename}")
 }
+
+pub const MAXIMUM_FILE_SIZE: u64 = 12 * 1024 * 1024; /* 12mb */
 
 async fn image_exists(client: &Client, filename: &str) -> bool {
     client
