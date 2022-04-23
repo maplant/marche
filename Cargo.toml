@@ -6,10 +6,16 @@ edition = "2021"
 default-run = "marche-server"
 
 [dependencies]
+anyhow = "1.0"
+base64ct = "1.5"
+thiserror = "1.0"
+aws-config = "0.10.1"
+aws-sdk-s3 = "0.10.1"
 rand = { version = "0.8" , features = ["getrandom"] }
 diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha2 = "0.10"
 libpasta = "0.1"
 chrono = "0.4"
 maplit = "1.0"
@@ -20,7 +26,7 @@ regex = "1"
 comrak = "0.12"
 askama = { version = "0.11", features = ["with-axum"] }
 askama_axum = "0.1.0"
-axum = "0.4"
+axum = { version = "0.4", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
 tower-http = { version = "0.2", features = ["fs", "trace"] }
@@ -29,3 +35,4 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 http = "0.2"
 urlencoding = "2"
+image = "0.24"

@@ -1,10 +1,12 @@
 //! Display threads
 use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
 use crate::users::{ProfileStub, User, UserCache};
-use crate::NotFound;
+use crate::{bail, error, File, JsonError, MultipartForm, NotFound};
 use askama::Template;
+use axum::body::Bytes;
 use axum::extract::{Form, Path};
 use axum::response::Redirect;
+use axum::Json;
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use lazy_static::lazy_static;
@@ -26,7 +28,7 @@ use diesel::sql_types::{BigInt, Text};
 sql_function!(fn nextval(x: Text) -> BigInt);
 sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
 
-#[derive(Queryable, Debug)]
+#[derive(Queryable, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
     pub id: i32,
@@ -204,21 +206,12 @@ impl Index {
     }
 }
 
-/*
-#[rocket::get("/")]
-pub fn index(_user: User) -> Redirect {
-    // TODO: change this to the user's preferred default language.
-    Redirect::to(format!("/t/en"))
-}
- */
-
 #[derive(Template)]
 #[template(path = "thread.html")]
 pub struct ThreadPage {
     id: i32,
     title: String,
     posts: Vec<Post>,
-    error: Option<&'static str>,
     offers: i64,
 }
 
@@ -239,14 +232,13 @@ struct Post {
     reactions: Vec<ItemThumbnail>,
     reward: Option<Reward>,
     can_react: bool,
+    image: Option<String>,
+    thumbnail: Option<String>,
+    filename: String,
 }
 
 impl ThreadPage {
-    pub fn new(
-        user: &User,
-        thread_id: i32,
-        error: Option<&'static str>,
-    ) -> Result<Self, crate::NotFound> {
+    pub async fn show(user: User, Path(thread_id): Path<i32>) -> Result<Self, crate::NotFound> {
         use self::threads::dsl::*;
 
         let conn = crate::establish_db_connection();
@@ -285,6 +277,9 @@ impl ThreadPage {
                     }
                 }),
                 can_react: t.author_id != user.id,
+                image: t.image,
+                thumbnail: t.thumbnail,
+                filename: t.filename,
             })
             .collect::<Vec<_>>();
 
@@ -293,151 +288,49 @@ impl ThreadPage {
             title: thread.title.clone(), // I feel like I should be able to move this
             posts,
             offers: IncomingOffer::count(&conn, &user),
-            error,
         })
-    }
-
-    pub async fn show(user: User, Path(thread_id): Path<i32>) -> Result<Self, NotFound> {
-        Self::new(&user, thread_id, None)
-    }
-
-    // Probably should be done over ajax.
-    pub async fn reply(
-        user: User,
-        Path(thread_id): Path<i32>,
-        Form(ReplyForm { reply }): Form<ReplyForm>,
-    ) -> Result<Redirect, Result<Self, NotFound>> {
-        let reply = reply.trim();
-        if reply.is_empty() {
-            return Err(Self::new(&user, thread_id, Some("Reply cannot be empty")));
-        }
-
-        let conn = crate::establish_db_connection();
-        let mut user_cache = UserCache::new(&conn);
-        let post_date = Utc::now().naive_utc();
-
-        // Regex out commands in reply body of the form @command:argument
-        lazy_static! {
-            static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
-        };
-
-        let referenced_reply_ids = REPLY_RE
-            .captures_iter(&reply)
-            .map(|captured_group| captured_group["reply_id"].to_string())
-            .collect::<Vec<String>>();
-
-        let id_to_author = replies::dsl::replies
-            .filter(replies::dsl::thread_id.eq(thread_id))
-            .order(replies::dsl::post_date.asc())
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
-            .map(|reply| {
-                (
-                    reply.id.to_string(),
-                    user_cache.get(reply.author_id).clone().name,
-                )
-            })
-            .collect::<HashMap<String, String>>();
-
-        let response_divs = replies::dsl::replies
-            .filter(replies::dsl::thread_id.eq(thread_id))
-            .order(replies::dsl::post_date.asc())
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
-                format!(
-                    r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
-                    reply_id = reply.id.to_string(),
-                    author_name = user_cache.get(reply.author_id).clone().name,
-                )
-            })
-            .collect::<String>();
-
-        // Parse the body as markdown
-        let html_output = response_divs + &parse_markdown(&reply);
-
-        // Swap out "respond" command sequences for @ mentions
-        let html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
-            let reply_id = &captured_group["reply_id"];
-            if id_to_author.contains_key(reply_id) {
-                format!(
-                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
-                    reply_id = reply_id,
-                    author_name = id_to_author[reply_id],
-                )
-            } else {
-                captured_group[0].to_string()
-            }
-        }).to_string();
-
-        let reply: Reply = diesel::insert_into(replies::table)
-            .values(&NewReply {
-                author_id: user.id,
-                thread_id,
-                post_date,
-                body: &html_output,
-                reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-                reactions: Vec::new(),
-            })
-            .get_result(&conn)
-            .unwrap();
-
-        let _: Result<Thread, _> = diesel::update(threads::table)
-            .filter(threads::dsl::id.eq(thread_id))
-            .set(threads::dsl::last_post.eq(reply.id))
-            .get_result(&conn);
-
-        Ok(Redirect::to(
-            format!("/thread/{thread_id}?jump_to={}", reply.id)
-                .parse()
-                .unwrap(),
-        ))
     }
 }
 
-#[derive(Template)]
+#[derive(Template, Debug)]
 #[template(path = "author.html")]
 pub struct AuthorPage {
-    error: Option<&'static str>,
     offers: i64,
 }
 
-#[derive(Deserialize)]
-pub struct NewThreadForm {
+impl AuthorPage {
+    pub async fn show(user: User) -> Self {
+        Self {
+            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ThreadForm {
     title: String,
     tags: String,
     body: String,
 }
 
-impl AuthorPage {
-    fn new(user: &User, error: &'static str) -> Self {
-        Self {
-            error: Some(error),
-            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
-        }
-    }
+impl ThreadForm {
+    pub async fn submit(
+        user: User,
+        form: Result<MultipartForm<Self, MAXIMUM_FILE_SIZE>, JsonError>,
+    ) -> Result<Json<Thread>, JsonError> {
+        let MultipartForm { file, form: thread } = form?;
 
-    pub async fn show(user: User) -> Self {
-        Self {
-            error: None,
-            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
-        }
-    }
-
-    pub async fn publish(user: User, thread: Form<NewThreadForm>) -> Result<Redirect, Self> {
-        let conn = crate::establish_db_connection();
-        if thread.title.is_empty() || thread.body.is_empty() {
-            return Err(Self::new(&user, "Thread title or body cannot be empty"));
+        if thread.title.is_empty() || (thread.body.is_empty() && file.is_none()) {
+            bail!("Thread title or body cannot be empty");
         }
 
         let post_date = Utc::now().naive_utc();
+        let (image, thumbnail, filename) = upload_image(file).await?;
 
         // Parse the body as markdown
         let html_output = parse_markdown(&thread.body);
 
+        let conn = crate::establish_db_connection();
         let tags = parse_tag_list(&thread.tags)
             .filter_map(|t| Tag::fetch_and_inc(&conn, t))
             .map(|t| t.id())
@@ -460,6 +353,9 @@ impl AuthorPage {
                     body: &html_output,
                     reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
                     reactions: Vec::new(),
+                    image,
+                    thumbnail,
+                    filename,
                 })
                 .get_result(&conn)
                 .map_err(|_| RollbackTransaction)?;
@@ -474,8 +370,8 @@ impl AuthorPage {
                 .get_result(&conn)
                 .map_err(|_| RollbackTransaction)
         })
-        .map_err(|_| Self::new(&user, "Unable to post thread. Try again later"))
-        .map(|thread| Redirect::to(format!("/thread/{}", thread.id).parse().unwrap()))
+        .map_err(|_| error!("Unable to post thread. Try again later"))
+        .map(Json)
     }
 }
 
@@ -616,25 +512,6 @@ impl From<&'_ str> for Tags {
     }
 }
 
-/*
-impl<'r> FromSegments<'r> for Tags {
-    type Error = crate::DbConnectionFailure;
-
-    fn from_segments(segments: Segments<'r, Path>) -> Result<Self, Self::Error> {
-        let conn = crate::establish_db_connection();
-        let mut seen = HashSet::new();
-        let tags = segments
-            .filter_map(|s| {
-                Tag::fetch_if_exists(&conn, s)
-                    .map(|t| seen.insert(t.id).then(|| t))
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
-        Ok(Tags { tags })
-    }
-}
-*/
-
 fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
     // TODO: More stuff!
     list.split(",").map(|i| i.trim())
@@ -649,10 +526,13 @@ table! {
         body -> Text,
         reward -> Nullable<Integer>,
         reactions -> Array<Integer>,
+        image -> Nullable<Text>,
+        thumbnail -> Nullable<Text>,
+        filename -> Text,
     }
 }
 
-#[derive(Queryable, Debug)]
+#[derive(Queryable, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
     pub id: i32,
@@ -661,6 +541,7 @@ pub struct Reply {
     /// Id of the thread
     pub thread_id: i32,
     /// Date of posting
+    #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
     pub body: String,
@@ -668,6 +549,12 @@ pub struct Reply {
     pub reward: Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
+    /// Image associated with this post
+    pub image: Option<String>,
+    /// Thumbnail associated with this post's image
+    pub thumbnail: Option<String>,
+    /// Filename associated with the image
+    pub filename: String,
 }
 
 impl Reply {
@@ -687,11 +574,113 @@ pub struct NewReply<'b> {
     body: &'b str,
     reward: Option<i32>,
     reactions: Vec<i32>,
+    image: Option<String>,
+    thumbnail: Option<String>,
+    filename: String,
 }
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
     reply: String,
+}
+
+impl ReplyForm {
+    pub async fn submit(
+        user: User,
+        Path(thread_id): Path<i32>,
+        MultipartForm {
+            file,
+            form: ReplyForm { reply },
+        }: MultipartForm<Self, MAXIMUM_FILE_SIZE>,
+    ) -> Result<Json<Reply>, JsonError> {
+        let reply = reply.trim();
+        if reply.is_empty() && file.is_none() {
+            bail!("Reply cannot be empty");
+        }
+
+        let post_date = Utc::now().naive_utc();
+        let (image, thumbnail, filename) = upload_image(file).await?;
+
+        // Regex out commands in reply body of the form @command:argument
+        lazy_static! {
+            static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
+        };
+
+        let referenced_reply_ids = REPLY_RE
+            .captures_iter(&reply)
+            .map(|captured_group| captured_group["reply_id"].to_string())
+            .collect::<Vec<String>>();
+
+        let conn = crate::establish_db_connection();
+        let mut user_cache = UserCache::new(&conn);
+        let id_to_author = replies::dsl::replies
+            .filter(replies::dsl::thread_id.eq(thread_id))
+            .order(replies::dsl::post_date.asc())
+            .load::<Reply>(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
+            .map(|reply| {
+                (
+                    reply.id.to_string(),
+                    user_cache.get(reply.author_id).clone().name,
+                )
+            })
+            .collect::<HashMap<String, String>>();
+
+        let response_divs = replies::dsl::replies
+            .filter(replies::dsl::thread_id.eq(thread_id))
+            .order(replies::dsl::post_date.asc())
+            .load::<Reply>(&conn)
+            .unwrap()
+            .into_iter()
+            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
+                format!(
+                    r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
+                    reply_id = reply.id.to_string(),
+                    author_name = user_cache.get(reply.author_id).clone().name,
+                )
+            })
+            .collect::<String>();
+
+        // Parse the body as markdown
+        let html_output = response_divs + &parse_markdown(&reply);
+
+        // Swap out "respond" command sequences for @ mentions
+        let html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
+            let reply_id = &captured_group["reply_id"];
+            if id_to_author.contains_key(reply_id) {
+                format!(
+                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
+                    reply_id = reply_id,
+                    author_name = id_to_author[reply_id],
+                )
+            } else {
+                captured_group[0].to_string()
+            }
+        }).to_string();
+
+        let reply: Reply = diesel::insert_into(replies::table)
+            .values(&NewReply {
+                author_id: user.id,
+                thread_id,
+                post_date,
+                body: &html_output,
+                reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
+                reactions: Vec::new(),
+                image,
+                thumbnail,
+                filename,
+            })
+            .get_result(&conn)?;
+
+        let _: Thread = diesel::update(threads::table)
+            .filter(threads::dsl::id.eq(thread_id))
+            .set(threads::dsl::last_post.eq(reply.id))
+            .get_result(&conn)?;
+
+        Ok(Json(reply))
+    }
 }
 
 use comrak::{markdown_to_html, ComrakOptions};
@@ -712,4 +701,132 @@ fn parse_markdown(text: &str) -> String {
     }
 
     markdown_to_html(&text.replace("\n", "\n\n"), &MARKDOWN_OPTIONS)
+}
+
+use aws_sdk_s3::error::PutObjectError;
+use aws_sdk_s3::model::ObjectCannedAcl;
+use aws_sdk_s3::output::PutObjectOutput;
+use aws_sdk_s3::types::ByteStream;
+use aws_sdk_s3::types::SdkError;
+use aws_sdk_s3::{Client, Endpoint};
+use base64ct::{Base64Url, Encoding};
+use image::ImageFormat;
+use sha2::{Digest, Sha256};
+use std::io::Cursor;
+use tokio::task;
+
+pub struct Image {
+    pub filename: String,
+    pub thumbnail: Option<String>,
+}
+
+pub const IMAGE_STORE_ENDPOINT: &'static str = "https://marche-storage.nyc3.digitaloceanspaces.com";
+pub const IMAGE_STORE_BUCKET: &'static str = "images";
+
+pub fn get_url(filename: &str) -> String {
+    format!("{IMAGE_STORE_ENDPOINT}/{IMAGE_STORE_BUCKET}/{filename}")
+}
+
+pub const MAXIMUM_FILE_SIZE: u64 = 12 * 1024 * 1024; /* 12mb */
+
+async fn image_exists(client: &Client, filename: &str) -> bool {
+    client
+        .head_object()
+        .bucket(IMAGE_STORE_BUCKET)
+        .key(filename)
+        .send()
+        .await
+        .is_ok()
+}
+
+async fn put_image(
+    client: &Client,
+    filename: &str,
+    body: ByteStream,
+) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
+    client
+        .put_object()
+        .acl(ObjectCannedAcl::PublicRead)
+        .bucket(IMAGE_STORE_BUCKET)
+        .key(filename)
+        .body(body)
+        .send()
+        .await
+}
+
+// TODO: move return type to struct
+async fn upload_image(
+    file: Option<File>,
+) -> Result<(Option<String>, Option<String>, String), JsonError> {
+    match file {
+        Some(file) => {
+            let Image {
+                filename,
+                thumbnail,
+            } = upload_bytes(file.bytes).await?;
+            Ok((Some(filename), thumbnail, file.name))
+        }
+        None => Ok((None, None, String::new())),
+    }
+}
+
+/// Upload image to object storage
+async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
+    const MAX_WH: u32 = 400;
+
+    let format = image::guess_format(&bytes)?;
+    let ext = match format {
+        ImageFormat::Png => "png",
+        ImageFormat::Jpeg => "jpeg",
+        ImageFormat::Gif => "gif",
+        ImageFormat::WebP => "webp",
+        _ => bail!("Invalid extension"),
+    };
+
+    let (bytes, hash) = task::spawn_blocking(move || {
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        (bytes, Base64Url::encode_string(&hasher.finalize()))
+    })
+    .await?;
+
+    // Check if file already exists:
+    let config = aws_config::from_env()
+        .endpoint_resolver(Endpoint::immutable(
+            IMAGE_STORE_ENDPOINT.parse().expect("valid URI"),
+        ))
+        .load()
+        .await;
+    let client = Client::new(&config);
+    let filename = format!("{hash}.{ext}");
+
+    if image_exists(&client, &filename).await {
+        let thumbnail = format!("{hash}_thumbnail.{ext}");
+        return Ok(Image {
+            filename,
+            thumbnail: image_exists(&client, &thumbnail)
+                .await
+                .then(move || thumbnail),
+        });
+    }
+
+    // Resize the image if it is necessary
+    let image = image::load_from_memory(&bytes)?;
+    let thumbnail = if image.height() > MAX_WH || image.width() > MAX_WH {
+        let thumb = task::spawn_blocking(move || image.thumbnail(MAX_WH, MAX_WH)).await?;
+        let mut output = Cursor::new(Vec::with_capacity(thumb.as_bytes().len()));
+        thumb.write_to(&mut output, format)?;
+        let thumbnail = format!("{hash}_thumbnail.{ext}");
+        put_image(&client, &thumbnail, ByteStream::from(output.into_inner())).await?;
+        Some(thumbnail)
+    } else {
+        None
+    };
+
+    put_image(&client, &filename, ByteStream::from(bytes)).await?;
+
+    Ok(Image {
+        filename: get_url(&filename),
+        thumbnail: thumbnail.as_deref().map(get_url),
+    })
 }

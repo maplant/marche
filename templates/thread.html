@@ -23,6 +23,16 @@
       <div class="post">
         <div style="display: grid">
           <div style="min-height: 80px">
+            {% match post.image %}
+            {% when Some with (image) %}
+            {% match post.thumbnail %}
+            {% when Some with(thumbnail) %}
+            <p><a href="{{image}}"><img src="{{thumbnail}}" alt="{{post.filename}}"></a></p>
+            {% when None %}
+            <p><img src="{{image}}" alt="{{post.filename}}"></p>
+            {% endmatch %}
+            {% when None %}
+            {% endmatch %}
             {{post.body|e("none")}}
           </div>
           <div style="display: inline">
@@ -60,19 +70,32 @@
   </div>
 </li>
 {% endfor %}
-<form action="/thread/{{id}}" method="post" id="reply">
+<form action="/thread/{{id}}" method="post" id="reply" enctype="multipart/form-data">
   <li class="menu-item" style="padding: 25px">
-    <div>
+    <div style="display: flow-root">
       <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
-      <button type="submit" class="action-box" style="margin-top: 15px; margin-left: 0px;">+ Reply!</button>
-      {% match error %}
-      {% when Some(error) %}
-      <div class="error" id="error"> 
-        {{error|e}}
-      </div>
-      {% when None %}
-      {% endmatch %}
+      <input style="margin-top: 15px; margin-left: 5px" type="file" name="file" multiple>
+      <button type="submit" class="action-box" style="float: right; margin-top: 15px; margin-left: 0px;">+ Reply!</button>
+      <div id="error"></div>
     </div>
+    <script>
+      $(document).ready(function () {       
+          $("form").ajaxForm({
+              url: '/thread/{{id}}',
+              type: 'post',
+              success: function(response, _, _, _) {
+                  if (response.error !== undefined) {
+                      $("#error").html(`<div class="error" id="error">${response.error}</div>`)
+                  } else if (response.id !== undefined) {
+                      location.href = `/thread/{{id}}?jump_to=${response.id}`;
+                  }
+              },
+              error: function(_, status, error) {
+                  $("#error").html(`<div class="error" id="error">Unable to upload image</div>`)
+              }
+          });
+      });
+    </script>
   </li>
 </form>
 {% endblock %}
