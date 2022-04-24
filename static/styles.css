@@ -300,15 +300,22 @@ div.item-overlay-row {
     border: 1px solid black;
     border-radius: 5px;
     cursor: pointer;
-}
-
-.action-box:hover {
-    background-color: white;
     transition: all 300ms ease-in-out;
     -o-transition: all 300ms ease-in-out;
     -ms-transition: all 300ms ease-in-out;
     -moz-transition: all 300ms ease-in-out;
     -webkit-transition: all 300ms ease-in-out;
+}
+
+.action-box:hover {
+    background-color: white;
+}
+
+.action-box-standard-size {
+    resize: none; 
+    width: 5.5em; 
+    height: 1.4em;
+    box-sizing: content-box;
 }
 
 .fixed-item-thumbnail {
