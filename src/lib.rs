@@ -112,6 +112,9 @@ where
                 continue;
             };
             if name == "file" {
+                if field.file_name().is_none(){
+                    continue;
+                }
                 let name = field.file_name().unwrap_or("").to_string();
                 let bytes = field.bytes().await?.clone();
                 file = Some(File { name, bytes });
