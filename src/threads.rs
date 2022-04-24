@@ -803,10 +803,10 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
     if image_exists(&client, &filename).await {
         let thumbnail = format!("{hash}_thumbnail.{ext}");
         return Ok(Image {
-            filename,
+            filename: get_url(&filename),
             thumbnail: image_exists(&client, &thumbnail)
                 .await
-                .then(move || thumbnail),
+                .then(move || get_url(&thumbnail)),
         });
     }
 
