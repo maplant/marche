@@ -88,6 +88,27 @@ $(document).ready(function() {
             $(`#${jump_to}`)[0].scrollIntoView({ block: "center" });
         }
     }
+
+    // Custom file input button
+    $("#attach-file-to-reply-input").change(function(event) {
+        var file = event.target.files[0];
+        var button = $(this).parents("#attach-file-to-reply-button");
+        var buttonTextHolder = $("#attach-file-to-reply-text-container");
+        var filenameTextHolder = $("#attached-filename-text-container");
+        if (file){
+            button.attr("title", file.name);
+            button.css("background-color", "lightgreen");
+            buttonTextHolder[0].textContent="✔️ File!";
+            filenameTextHolder[0].textContent=`└ ${file.name}`;
+        }
+        else{
+            button.attr("title", "");
+            button.css("background-color", "");
+            buttonTextHolder[0].textContent="+ File!";
+            filenameTextHolder[0].textContent="";
+        }
+        // alert( event.target.files[0].name );
+      });
 });
 
 function getOverlayDiv(origin) {

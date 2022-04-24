@@ -26,6 +26,6 @@ $(document).ready(function() {
 
 function darkenRGBString(rgb, factor)
 {
-    rgb = rgb.replace(/[^\d,.]/g, '').split(',');
-    return `rgb(${rgb[0]*factor}, ${rgb[0]*factor}, ${rgb[0]*factor})`
+    rgb = rgb.replace(/\).*/g, '').replace(/[^\d,.]/g, '').split(',');
+    return `rgb(${rgb[0]*factor}, ${rgb[1]*factor}, ${rgb[2]*factor})`
 }
