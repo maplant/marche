@@ -693,6 +693,9 @@ pub struct ReactPage {
     inventory: Vec<ItemThumbnail>,
     offers: i64,
     error: Option<String>,
+    image: Option<String>,
+    thumbnail: Option<String>,
+    filename: String,
 }
 
 impl ReactPage {
@@ -714,6 +717,9 @@ impl ReactPage {
             inventory,
             offers: IncomingOffer::count(&conn, &user),
             error,
+            image: post.image,
+            thumbnail: post.thumbnail,
+            filename: post.filename,
         }
     }
 

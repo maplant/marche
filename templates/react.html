@@ -14,6 +14,16 @@
         </div>
         <div class="post">
           <div style="min-height: 80px">
+            {% match image %}
+            {% when Some with (image) %}
+            {% match thumbnail %}
+            {% when Some with(thumbnail) %}
+            <p><a href="{{image}}"><img src="{{thumbnail}}" alt="{{filename}}"></a></p>
+            {% when None %}
+            <p><img src="{{image}}" alt="{{filename}}"></p>
+            {% endmatch %}
+            {% when None %}
+            {% endmatch %}
             {{body|e("none")}}
           </div>
           {% for item in inventory %}
