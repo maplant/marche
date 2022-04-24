@@ -3,6 +3,7 @@
 {% block title %}Home{% endblock %}
 
 {% block content %}
+<script src="/static/index.js" async></script>
 <form action="/add-tag" method="post">
   <li style="display: inline; vertical-align: middle">
     <label class="selected-tag">
@@ -21,9 +22,9 @@
 {% for post in posts %}
 <li class="menu-item" style="display: grid">
   <div class="table">
-    <div class="row">
+    <div class="thread-row row" onclick="window.location='/thread/{{post.id}}?jump_to={{post.jump_to}}'">
       <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
-        <a href="/thread/{{post.id}}?jump_to={{post.jump_to}}">{{post.title}}</a>
+        {{post.title}}
         <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">
           └{{post.replies}}
           | last activity {% if post.emphasize_date %}<b>{{post.date}}</b>{% else %}{{post.date}}{% endif %}{% if !post.read %} 📨{% endif %}
