@@ -18,9 +18,9 @@
             {% when Some with (image) %}
             {% match thumbnail %}
             {% when Some with(thumbnail) %}
-            <p><a href="{{image}}"><img src="{{thumbnail}}" alt="{{filename}}"></a></p>
+            <p><a href="{{image}}"><img src="{{thumbnail}}" title="{{filename}}"></a></p>
             {% when None %}
-            <p><img src="{{image}}" alt="{{filename}}"></p>
+            <p><img src="{{image}}" title="{{filename}}"></p>
             {% endmatch %}
             {% when None %}
             {% endmatch %}
