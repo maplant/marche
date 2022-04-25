@@ -742,11 +742,13 @@ async fn image_exists(client: &Client, filename: &str) -> bool {
 async fn put_image(
     client: &Client,
     filename: &str,
+    ext: &str,
     body: ByteStream,
 ) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
     client
         .put_object()
         .acl(ObjectCannedAcl::PublicRead)
+        .content_type(format!("image/{}", ext))
         .bucket(IMAGE_STORE_BUCKET)
         .key(filename)
         .body(body)
@@ -817,13 +819,19 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
         let mut output = Cursor::new(Vec::with_capacity(thumb.as_bytes().len()));
         thumb.write_to(&mut output, format)?;
         let thumbnail = format!("{hash}_thumbnail.{ext}");
-        put_image(&client, &thumbnail, ByteStream::from(output.into_inner())).await?;
+        put_image(
+            &client,
+            &thumbnail,
+            &ext,
+            ByteStream::from(output.into_inner()),
+        )
+        .await?;
         Some(thumbnail)
     } else {
         None
     };
 
-    put_image(&client, &filename, ByteStream::from(bytes)).await?;
+    put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
 
     Ok(Image {
         filename: get_url(&filename),
