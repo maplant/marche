@@ -56,11 +56,11 @@
             {% when None %}
             {% endmatch %}
             {% if post.can_react %}
-            <a href="/react/{{post.id}}" class="react-button action-box">
+            <a href="/react/{{post.id}}" class="react-button action-box action-box-standard-size">
               + React!
             </a>
             {% endif %}
-            <div class = "reply-to-button action-box" replyid={{post.id}}>
+            <div class = "reply-to-button action-box action-box-standard-size" style="margin-right: 0px;" replyid={{post.id}}>
               + Respond!
             </div>
           </div>
@@ -74,8 +74,12 @@
   <li class="menu-item" style="padding: 25px">
     <div style="display: flow-root">
       <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
-      <input style="margin-top: 15px; margin-left: 5px" type="file" name="file">
-      <button type="submit" class="action-box" style="float: right; margin-top: 15px; margin-left: 0px;">+ Reply!</button>
+      <span id="attached-filename-text-container"></span>
+      <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">+ Reply!</button>
+      <label id="attach-file-to-reply-button" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-bottom: 0px; margin-right: 7px;">
+        <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
+        <span id="attach-file-to-reply-text-container">+ File!</span>
+      </label>
       <div id="error"></div>
     </div>
     <script>
