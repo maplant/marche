@@ -312,7 +312,7 @@ div.item-overlay-row {
 
 .action-box-standard-size {
     resize: none; 
-    width: 5.5em; 
+    width: 6em;
     height: 1.4em;
     box-sizing: content-box;
 }
