@@ -33,7 +33,12 @@
             {% endmatch %}
             {% when None %}
             {% endmatch %}
-            {{post.body|e("none")}}
+            <form action="/edit/{{post.id}}" method="post" id="{{post.id}}-unparsed" style="display: none">
+              <div><textarea name="contents" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
+              <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">⇒ Update!</button>
+              <div id="error" style="margin-top: 15px"></div>
+            </form>
+            <span id="{{post.id}}-parsed">{{post.body|e("none")}}</span>
             <p style="font-size: 80%; color: grey">Posted on {{post.date}} UTC</p>
           </div>
           <div style="display: inline">
@@ -60,8 +65,10 @@
             <a href="/react/{{post.id}}" class="react-button action-box action-box-standard-size">
               + React!
             </a>
+            {% else %}
+            <div class="edit-post-button action-box action-box-standard-size" postid={{post.id}}>⚙️ Edit!</div>
             {% endif %}
-            <div class = "reply-to-button action-box action-box-standard-size" style="margin-right: 0px;" replyid={{post.id}}>
+            <div class="reply-to-button action-box action-box-standard-size" style="margin-right: 0px;" replyid={{post.id}}>
               + Respond!
             </div>
           </div>

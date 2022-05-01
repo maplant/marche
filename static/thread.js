@@ -1,4 +1,10 @@
 $(document).ready(function() {
+    $(".edit-post-button").click(function() {
+        const id = $(this).attr("postid");
+        $(`#${id}-unparsed`).slideToggle();
+        $(`#${id}-parsed`).slideToggle();
+    });
+
     $(".reply-to-button").click(function() {
         $("#reply")[0].scrollIntoView({ behavior: "smooth" });
         $("#reply-textarea")[0].value += `@${$(this).attr("replyid")} `
