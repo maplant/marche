@@ -50,7 +50,7 @@ pub struct NewThread<'t> {
 }
 
 const THREADS_PER_PAGE: i64 = 25;
-const DATE_FMT: &str = "%m/%d %I:%M %P";
+const DATE_FMT: &str = "%B %-d at %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 // TODO: These next two functions absolutely should be done client side.
@@ -106,8 +106,6 @@ impl Index {
 
     pub async fn show_with_tags(user: User, Path(viewed_tags): Path<String>) -> Self {
         use self::threads::dsl::*;
-
-        tracing::info!("Loading index");
 
         let viewed_tags = Tags::from(&*viewed_tags);
         let conn = crate::establish_db_connection();
@@ -260,6 +258,7 @@ impl ThreadPage {
                 id: t.id,
                 author: user_cache.get(t.author_id).clone(),
                 body: t.body,
+                // TODO: we need to add a user setting to format this to the local time. 
                 date: t.post_date.format(DATE_FMT).to_string(),
                 reactions: t
                     .reactions
@@ -774,6 +773,7 @@ async fn upload_image(
 
 /// Upload image to object storage
 async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
+    /// Maximum width/height of an image.
     const MAX_WH: u32 = 400;
 
     let format = image::guess_format(&bytes)?;

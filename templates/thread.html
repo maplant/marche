@@ -34,6 +34,7 @@
             {% when None %}
             {% endmatch %}
             {{post.body|e("none")}}
+            <p style="font-size: 80%; color: grey">Posted on {{post.date}} UTC</p>
           </div>
           <div style="display: inline">
             <div class="response-container" id="response-container-{{post.id}}"></div>
