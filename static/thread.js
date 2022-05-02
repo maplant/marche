@@ -1,9 +1,29 @@
 $(document).ready(function() {
     $(".edit-post-button").click(function() {
         const id = $(this).attr("postid");
-        $(`#${id}-unparsed`).slideToggle();
-        $(`#${id}-parsed`).slideToggle();
+        $(`.unparsed-${id}`).slideToggle();
+        $(`.parsed-${id}`).slideToggle();
     });
+
+    $(".edit-post-form").each(function() {
+        const id = $(this).attr("postid");
+        $(this).ajaxForm({
+            url: `/edit/${id}`,
+            type: 'post',
+            success: function(response, _, _, _) {
+                console.log(response);
+                if (response.error !== undefined) {
+                    $(`#error-${id}`).html(`<div class="error" id="error">${response.error}</div>`)
+                } else {
+                    // TODO: Do this properly
+                    location.href = `/thread/${response.thread_id}?jump_to=${response.id}`;
+                }
+            },
+            error: function(_, status, error) {
+                  $(`#error-${id}`).html(`<div class="error" id="error">Error attempting to update post</div>`)
+            }
+        });
+    })
 
     $(".reply-to-button").click(function() {
         $("#reply")[0].scrollIntoView({ behavior: "smooth" });
@@ -84,15 +104,10 @@ $(document).ready(function() {
     });
 
     // Check if error exists, and scroll to it if it does
-    const error = $('#error');
-    if (error.length) {
-        error[0].scrollIntoView({ block: "center" });
-    } else {
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.has('jump_to')) {
-            const jump_to = urlParams.get('jump_to');
-            $(`#${jump_to}`)[0].scrollIntoView({ block: "center" });
-        }
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has('jump_to')) {
+        const jump_to = urlParams.get('jump_to');
+        $(`#${jump_to}`)[0].scrollIntoView({ block: "center" });
     }
 
     // Custom file input button

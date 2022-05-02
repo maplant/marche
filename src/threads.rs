@@ -226,10 +226,12 @@ struct Post {
     id: i32,
     author: ProfileStub,
     body: String,
+    body_html: String,
     date: String,
     reactions: Vec<ItemThumbnail>,
     reward: Option<Reward>,
     can_react: bool,
+    can_edit: bool,
     image: Option<String>,
     thumbnail: Option<String>,
     filename: String,
@@ -258,7 +260,8 @@ impl ThreadPage {
                 id: t.id,
                 author: user_cache.get(t.author_id).clone(),
                 body: t.body,
-                // TODO: we need to add a user setting to format this to the local time. 
+                body_html: t.body_html,
+                // TODO: we need to add a user setting to format this to the local time.
                 date: t.post_date.format(DATE_FMT).to_string(),
                 reactions: t
                     .reactions
@@ -275,6 +278,7 @@ impl ThreadPage {
                         rarity: item.rarity.to_string(),
                     }
                 }),
+                can_edit: t.author_id == user.id, // TODO: Add time limit for replies
                 can_react: t.author_id != user.id,
                 image: t.image,
                 thumbnail: t.thumbnail,
@@ -327,7 +331,7 @@ impl ThreadForm {
         let (image, thumbnail, filename) = upload_image(file).await?;
 
         // Parse the body as markdown
-        let html_output = parse_markdown(&thread.body);
+        let html_output = markdown_to_html(&thread.body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
 
         let conn = crate::establish_db_connection();
         let tags = parse_tag_list(&thread.tags)
@@ -349,7 +353,8 @@ impl ThreadForm {
                     author_id: user.id,
                     thread_id: next_thread,
                     post_date,
-                    body: &html_output,
+                    body: &thread.body,
+                    body_html: &html_output,
                     reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
                     reactions: Vec::new(),
                     image,
@@ -523,6 +528,7 @@ table! {
         thread_id -> Integer,
         post_date -> Timestamp,
         body -> Text,
+        body_html -> Text,
         reward -> Nullable<Integer>,
         reactions -> Array<Integer>,
         image -> Nullable<Text>,
@@ -544,6 +550,8 @@ pub struct Reply {
     pub post_date: NaiveDateTime,
     /// Body of the reply
     pub body: String,
+    /// Body of the reply parsed to html (what the user typically sees)
+    pub body_html: String,
     /// Any item that was rewarded for this post
     pub reward: Option<i32>,
     /// Reactions attached to this post
@@ -566,11 +574,12 @@ impl Reply {
 
 #[derive(Insertable, Debug)]
 #[table_name = "replies"]
-pub struct NewReply<'b> {
+pub struct NewReply<'b, 'h> {
     author_id: i32,
     thread_id: i32,
     post_date: NaiveDateTime,
     body: &'b str,
+    body_html: &'h str,
     reward: Option<i32>,
     reactions: Vec<i32>,
     image: Option<String>,
@@ -600,71 +609,16 @@ impl ReplyForm {
         let post_date = Utc::now().naive_utc();
         let (image, thumbnail, filename) = upload_image(file).await?;
 
-        // Regex out commands in reply body of the form @command:argument
-        lazy_static! {
-            static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
-        };
-
-        let referenced_reply_ids = REPLY_RE
-            .captures_iter(&reply)
-            .map(|captured_group| captured_group["reply_id"].to_string())
-            .collect::<Vec<String>>();
-
         let conn = crate::establish_db_connection();
-        let mut user_cache = UserCache::new(&conn);
-        let id_to_author = replies::dsl::replies
-            .filter(replies::dsl::thread_id.eq(thread_id))
-            .order(replies::dsl::post_date.asc())
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
-            .map(|reply| {
-                (
-                    reply.id.to_string(),
-                    user_cache.get(reply.author_id).clone().name,
-                )
-            })
-            .collect::<HashMap<String, String>>();
-
-        let response_divs = replies::dsl::replies
-            .filter(replies::dsl::thread_id.eq(thread_id))
-            .order(replies::dsl::post_date.asc())
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
-                format!(
-                    r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
-                    reply_id = reply.id.to_string(),
-                    author_name = user_cache.get(reply.author_id).clone().name,
-                )
-            })
-            .collect::<String>();
-
-        // Parse the body as markdown
-        let html_output = response_divs + &parse_markdown(&reply);
-
-        // Swap out "respond" command sequences for @ mentions
-        let html_output = REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
-            let reply_id = &captured_group["reply_id"];
-            if id_to_author.contains_key(reply_id) {
-                format!(
-                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
-                    reply_id = reply_id,
-                    author_name = id_to_author[reply_id],
-                )
-            } else {
-                captured_group[0].to_string()
-            }
-        }).to_string();
+        let html_output = parse_post(&conn, reply, thread_id);
 
         let reply: Reply = diesel::insert_into(replies::table)
             .values(&NewReply {
                 author_id: user.id,
                 thread_id,
                 post_date,
-                body: &html_output,
+                body: &reply,
+                body_html: &html_output,
                 reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
                 reactions: Vec::new(),
                 image,
@@ -682,24 +636,125 @@ impl ReplyForm {
     }
 }
 
+#[derive(Deserialize)]
+pub struct EditPostForm {
+    // TODO: Name every post contents field "body"
+    body: String,
+}
+
+impl EditPostForm {
+    pub async fn submit(
+        user: User,
+        Path(post_id): Path<i32>,
+        Form(EditPostForm { body }): Form<EditPostForm>,
+    ) -> Result<Json<Reply>, JsonError> {
+        let body = body.trim();
+
+        let conn = crate::establish_db_connection();
+        let post = Reply::fetch(&conn, post_id)?;
+
+        if post.author_id != user.id {
+            bail!("Cannot edit post you do not own");
+        }
+
+        if post.image.is_none() && body.is_empty() {
+            bail!("Cannot edit a post to make it empty");
+        }
+
+        // TODO: check if time period to edit has expired.
+        let html_output = parse_post(&conn, body, post.thread_id)
+            + &format!(
+                r#" <span style="font-size: 80%; color: grey">Edited on {}</span>"#,
+                Utc::now().naive_utc().format(DATE_FMT)
+            );
+
+        Ok(diesel::update(replies::table)
+            .filter(replies::dsl::id.eq(post_id))
+            .set((
+                replies::dsl::body.eq(body),
+                replies::dsl::body_html.eq(html_output),
+            ))
+            .get_result(&conn)
+            .map(Json)?)
+    }
+}
+
 use comrak::{markdown_to_html, ComrakOptions};
 
-fn parse_markdown(text: &str) -> String {
+lazy_static! {
+    static ref MARKDOWN_OPTIONS: ComrakOptions = {
+        let mut options = ComrakOptions::default();
+        options.extension.strikethrough = true;
+        options.extension.table = true;
+        options.extension.autolink = true;
+        options.extension.tasklist = true;
+        options.render.hardbreaks = true;
+        options.render.escape = true;
+        options.parse.smart = true;
+        options
+    };
+}
+
+// TODO: This probably needs to be async
+fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
     lazy_static! {
-        static ref MARKDOWN_OPTIONS: ComrakOptions = {
-            let mut options = ComrakOptions::default();
-            options.extension.strikethrough = true;
-            options.extension.table = true;
-            options.extension.autolink = true;
-            options.extension.tasklist = true;
-            options.render.hardbreaks = true;
-            options.render.escape = true;
-            options.parse.smart = true;
-            options
-        };
+        static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
     }
 
-    markdown_to_html(&text.replace("\n", "\n\n"), &MARKDOWN_OPTIONS)
+    let referenced_reply_ids = REPLY_RE
+        .captures_iter(&body)
+        .map(|captured_group| captured_group["reply_id"].to_string())
+        .collect::<Vec<String>>();
+
+    let mut user_cache = UserCache::new(conn);
+    let id_to_author = replies::dsl::replies
+        .filter(replies::dsl::thread_id.eq(thread_id))
+        .order(replies::dsl::post_date.asc())
+        .load::<Reply>(conn)
+        .unwrap()
+        .into_iter()
+        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
+        .map(|reply| {
+            (
+                reply.id.to_string(),
+                user_cache.get(reply.author_id).clone().name,
+            )
+        })
+        .collect::<HashMap<String, String>>();
+
+    let response_divs = replies::dsl::replies
+        .filter(replies::dsl::thread_id.eq(thread_id))
+        .order(replies::dsl::post_date.asc())
+        .load::<Reply>(conn)
+        .unwrap()
+        .into_iter()
+        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
+            format!(
+                r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
+                reply_id = reply.id.to_string(),
+                author_name = user_cache.get(reply.author_id).clone().name,
+            )
+        })
+        .collect::<String>();
+
+    // TODO: replace markdown parser with our own
+    // Parse the body as markdown
+    let html_output =
+        response_divs + &markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
+
+    // Swap out "respond" command sequences for @ mentions
+    REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
+            let reply_id = &captured_group["reply_id"];
+            if id_to_author.contains_key(reply_id) {
+                format!(
+                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
+                    reply_id = reply_id,
+                    author_name = id_to_author[reply_id],
+                )
+            } else {
+                captured_group[0].to_string()
+            }
+        }).to_string()
 }
 
 use aws_sdk_s3::error::PutObjectError;
