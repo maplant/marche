@@ -37,7 +37,7 @@
             <form class="unparsed-{{post.id}} edit-post-form" action="/edit/{{post.id}}" method="post" postid="{{post.id}}" hidden>
               <div><textarea name="body" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px">{{post.body}}</textarea></div>
               <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">⇒ Update!</button>
-              <div id="${{post.id}}-error" style="margin-top: 15px"></div>
+              <div class="error-{{post.id}}" style="margin-top: 15px"></div>
             </form>
             {% endif %}
             <span class="parsed-{{post.id}}">{{post.body_html|e("none")}}</span>

@@ -13,14 +13,14 @@ $(document).ready(function() {
             success: function(response, _, _, _) {
                 console.log(response);
                 if (response.error !== undefined) {
-                    $(`#error-${id}`).html(`<div class="error" id="error">${response.error}</div>`)
+                    $(`.error-${id}`).html(`<div class="error">${response.error}</div>`)
                 } else {
                     // TODO: Do this properly
                     location.href = `/thread/${response.thread_id}?jump_to=${response.id}`;
                 }
             },
             error: function(_, status, error) {
-                  $(`#error-${id}`).html(`<div class="error" id="error">Error attempting to update post</div>`)
+                  $(`.error-${id}`).html(`<div class="error">Error attempting to update post</div>`)
             }
         });
     })
