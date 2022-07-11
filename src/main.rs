@@ -9,7 +9,7 @@ use axum::{
 use marche_server::{
     items::{self, ItemPage, OfferPage, OffersPage, ReactPage},
     threads::{self, AuthorPage, EditPostForm, Index, ReplyForm, ThreadForm, ThreadPage},
-    users::{self, LeaderboardPage, LoginPage, ProfilePage},
+    users::{self, LeaderboardPage, LoginPage, ProfilePage, UpdateBioPage},
 };
 use tower_cookies::CookieManagerLayer;
 use tower_http::{services::ServeDir, trace::TraceLayer};
@@ -43,6 +43,10 @@ async fn main() {
         .route("/author", get(AuthorPage::show).post(ThreadForm::submit))
         .route("/profile/:user_id", get(ProfilePage::show))
         .route("/profile", get(users::show_current_user))
+        .route(
+            "/update_bio",
+            get(UpdateBioPage::show).post(UpdateBioPage::submit),
+        )
         .route("/leaderboard", get(LeaderboardPage::show))
         .route("/item/:item_id", get(ItemPage::show))
         .route("/equip/:item_id", get(items::equip))

@@ -316,17 +316,18 @@ impl User {
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct ProfilePage {
-    id:         i32,
-    name:       String,
-    picture:    Option<String>,
-    bio:        String,
-    level:      LevelInfo,
-    equipped:   Vec<ItemThumbnail>,
-    inventory:  Vec<ItemThumbnail>,
-    badges:     Vec<String>,
-    background: String,
-    can_trade:  bool,
-    offers:     i64,
+    id:             i32,
+    name:           String,
+    picture:        Option<String>,
+    bio:            String,
+    level:          LevelInfo,
+    equipped:       Vec<ItemThumbnail>,
+    inventory:      Vec<ItemThumbnail>,
+    badges:         Vec<String>,
+    background:     String,
+    is_curr_user:   bool,
+    can_viewer_ban: bool,
+    offers:         i64,
 }
 
 impl ProfilePage {
@@ -382,7 +383,8 @@ impl ProfilePage {
             bio: user.bio,
             equipped,
             inventory,
-            can_trade: user.id != curr_user.id,
+            is_curr_user: user.id == curr_user.id,
+            can_viewer_ban: false,
         })
     }
 }
@@ -645,5 +647,49 @@ impl LoginPage {
                 error:  Some("Incorrect username or password"),
                 offers: 0,
             })
+    }
+}
+
+#[derive(Template)]
+#[template(path = "update_bio.html")]
+pub struct UpdateBioPage {
+    name:       String,
+    picture:    Option<String>,
+    badges:     Vec<String>,
+    background: String,
+    bio:        String,
+    offers:     usize,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateBioForm {
+    bio: String,
+}
+
+impl UpdateBioPage {
+    pub async fn show(curr_user: User) -> Self {
+        let conn = crate::establish_db_connection();
+        Self {
+            picture:    curr_user.get_profile_pic(&conn),
+            badges:     curr_user.get_badges(&conn),
+            background: curr_user.get_background_style(&conn),
+            offers:     curr_user.incoming_offers(&conn) as usize,
+            bio:        curr_user.bio,
+            name:       curr_user.name,
+        }
+    }
+
+    pub async fn submit(
+        curr_user: User,
+        Form(UpdateBioForm { bio: new_bio }): Form<UpdateBioForm>,
+    ) -> Redirect {
+        use self::users::dsl::*;
+
+        let conn = crate::establish_db_connection();
+        let _ = diesel::update(users.find(curr_user.id))
+            .set(bio.eq(new_bio))
+            .get_result::<User>(&conn);
+
+        Redirect::to(format!("/profile/{}", curr_user.id).parse().unwrap())
     }
 }

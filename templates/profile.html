@@ -19,7 +19,12 @@
         </div>
       </div>
       <div class="heavy-cell" style="vertical-align: top; padding: 15px">
-        {{bio}}
+        <p>{{bio}}</p>
+        {% if is_curr_user %}
+        <form action="/update_bio/">
+          <button type="submit">Edit Bio</button>
+        </form>
+        {% endif %}
       </div>
     </div>
     <div class="row">
@@ -51,7 +56,7 @@
         {% endfor %}
       </div>
     </div>
-    {% if can_trade %}
+    {% if !is_curr_user %}
     <div class="row">
       <div class="cell"></div>
       <div class="cell">
