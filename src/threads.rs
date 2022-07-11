@@ -1,18 +1,25 @@
 //! Display threads
-use crate::items::{IncomingOffer, ItemDrop, ItemThumbnail};
-use crate::users::{ProfileStub, User, UserCache};
-use crate::{bail, error, File, JsonError, MultipartForm, NotFound};
+use std::collections::{HashMap, HashSet};
+
 use askama::Template;
-use axum::body::Bytes;
-use axum::extract::{Form, Path};
-use axum::response::Redirect;
-use axum::Json;
+use axum::{
+    body::Bytes,
+    extract::{Form, Path},
+    response::Redirect,
+    Json,
+};
 use chrono::{prelude::*, NaiveDateTime};
 use diesel::prelude::*;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+
+use crate::{
+    bail, error,
+    items::{IncomingOffer, ItemDrop, ItemThumbnail},
+    users::{ProfileStub, User, UserCache},
+    File, JsonError, MultipartForm, NotFound,
+};
 
 table! {
     threads(id) {
@@ -31,21 +38,21 @@ sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
 #[derive(Queryable, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id: i32,
+    pub id:        i32,
     /// Id of the last post
     pub last_post: i32,
     /// Title of the thread
-    pub title: String,
+    pub title:     String,
     /// Tags given to this thread
-    pub tags: Vec<i32>,
+    pub tags:      Vec<i32>,
 }
 
 #[derive(Insertable)]
 #[table_name = "threads"]
 pub struct NewThread<'t> {
-    id: i32,
-    title: &'t str,
-    tags: Vec<i32>,
+    id:        i32,
+    title:     &'t str,
+    tags:      Vec<i32>,
     last_post: i32,
 }
 
@@ -80,23 +87,23 @@ pub async fn add_tag(_user: User, Form(mut tags): Form<HashMap<String, String>>)
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
-    tags: Vec<Tag>,
-    posts: Vec<ThreadLink>,
+    tags:      Vec<Tag>,
+    posts:     Vec<ThreadLink>,
     curr_path: String,
-    offers: i64,
+    offers:    i64,
 }
 
 #[derive(Serialize)]
 struct ThreadLink {
-    num: usize,
-    id: i32,
-    title: String,
-    date: String,
+    num:            usize,
+    id:             i32,
+    title:          String,
+    date:           String,
     emphasize_date: bool,
-    read: bool,
-    jump_to: i32,
-    replies: String,
-    tags: Vec<String>,
+    read:           bool,
+    jump_to:        i32,
+    replies:        String,
+    tags:           Vec<String>,
 }
 
 impl Index {
@@ -197,9 +204,9 @@ impl Index {
 
         Self {
             curr_path: viewed_tags.fmt(),
-            tags: viewed_tags.tags,
-            posts: posts,
-            offers: IncomingOffer::count(&conn, &user),
+            tags:      viewed_tags.tags,
+            posts:     posts,
+            offers:    IncomingOffer::count(&conn, &user),
         }
     }
 }
@@ -207,34 +214,34 @@ impl Index {
 #[derive(Template)]
 #[template(path = "thread.html")]
 pub struct ThreadPage {
-    id: i32,
-    title: String,
-    posts: Vec<Post>,
+    id:     i32,
+    title:  String,
+    posts:  Vec<Post>,
     offers: i64,
 }
 
 #[derive(Serialize)]
 struct Reward {
-    thumbnail: String,
-    name: String,
+    thumbnail:   String,
+    name:        String,
     description: String,
-    rarity: String,
+    rarity:      String,
 }
 
 #[derive(Serialize)]
 struct Post {
-    id: i32,
-    author: ProfileStub,
-    body: String,
+    id:        i32,
+    author:    ProfileStub,
+    body:      String,
     body_html: String,
-    date: String,
+    date:      String,
     reactions: Vec<ItemThumbnail>,
-    reward: Option<Reward>,
+    reward:    Option<Reward>,
     can_react: bool,
-    can_edit: bool,
-    image: Option<String>,
+    can_edit:  bool,
+    image:     Option<String>,
     thumbnail: Option<String>,
-    filename: String,
+    filename:  String,
 }
 
 impl ThreadPage {
@@ -257,32 +264,32 @@ impl ThreadPage {
             .unwrap()
             .into_iter()
             .map(|t| Post {
-                id: t.id,
-                author: user_cache.get(t.author_id).clone(),
-                body: t.body,
+                id:        t.id,
+                author:    user_cache.get(t.author_id).clone(),
+                body:      t.body,
                 body_html: t.body_html,
                 // TODO: we need to add a user setting to format this to the local time.
-                date: t.post_date.format(DATE_FMT).to_string(),
+                date:      t.post_date.format(DATE_FMT).to_string(),
                 reactions: t
                     .reactions
                     .into_iter()
                     .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
                     .collect(),
-                reward: t.reward.map(|r| {
+                reward:    t.reward.map(|r| {
                     let drop = ItemDrop::fetch(&conn, r);
                     let item = drop.fetch_item(&conn);
                     Reward {
-                        name: item.name,
+                        name:        item.name,
                         description: item.description,
-                        thumbnail: drop.thumbnail_html(&conn),
-                        rarity: item.rarity.to_string(),
+                        thumbnail:   drop.thumbnail_html(&conn),
+                        rarity:      item.rarity.to_string(),
                     }
                 }),
-                can_edit: t.author_id == user.id, // TODO: Add time limit for replies
+                can_edit:  t.author_id == user.id, // TODO: Add time limit for replies
                 can_react: t.author_id != user.id,
-                image: t.image,
+                image:     t.image,
                 thumbnail: t.thumbnail,
-                filename: t.filename,
+                filename:  t.filename,
             })
             .collect::<Vec<_>>();
 
@@ -312,8 +319,8 @@ impl AuthorPage {
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
-    tags: String,
-    body: String,
+    tags:  String,
+    body:  String,
 }
 
 impl ThreadForm {
@@ -389,8 +396,8 @@ table! {
 
 #[derive(Debug, Queryable, Serialize, Clone)]
 pub struct Tag {
-    pub id: i32,
-    pub name: String,
+    pub id:         i32,
+    pub name:       String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
 }
@@ -416,8 +423,8 @@ impl Tag {
             .unwrap_or_default()
     }
 
-    /// Fetches a tag, creating it if it doesn't already exist. num_tagged is incremented
-    /// or set to one.
+    /// Fetches a tag, creating it if it doesn't already exist. num_tagged is
+    /// incremented or set to one.
     pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Option<Self> {
         use self::tags::dsl::*;
 
@@ -540,7 +547,7 @@ table! {
 #[derive(Queryable, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
-    pub id: i32,
+    pub id:        i32,
     /// Id of the author
     pub author_id: i32,
     /// Id of the thread
@@ -549,19 +556,19 @@ pub struct Reply {
     #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
-    pub body: String,
+    pub body:      String,
     /// Body of the reply parsed to html (what the user typically sees)
     pub body_html: String,
     /// Any item that was rewarded for this post
-    pub reward: Option<i32>,
+    pub reward:    Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
     /// Image associated with this post
-    pub image: Option<String>,
+    pub image:     Option<String>,
     /// Thumbnail associated with this post's image
     pub thumbnail: Option<String>,
     /// Filename associated with the image
-    pub filename: String,
+    pub filename:  String,
 }
 
 impl Reply {
@@ -578,13 +585,13 @@ pub struct NewReply<'b, 'h> {
     author_id: i32,
     thread_id: i32,
     post_date: NaiveDateTime,
-    body: &'b str,
+    body:      &'b str,
     body_html: &'h str,
-    reward: Option<i32>,
+    reward:    Option<i32>,
     reactions: Vec<i32>,
-    image: Option<String>,
+    image:     Option<String>,
     thumbnail: Option<String>,
-    filename: String,
+    filename:  String,
 }
 
 #[derive(Deserialize)]
@@ -757,20 +764,22 @@ fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
         }).to_string()
 }
 
-use aws_sdk_s3::error::PutObjectError;
-use aws_sdk_s3::model::ObjectCannedAcl;
-use aws_sdk_s3::output::PutObjectOutput;
-use aws_sdk_s3::types::ByteStream;
-use aws_sdk_s3::types::SdkError;
-use aws_sdk_s3::{Client, Endpoint};
+use std::io::Cursor;
+
+use aws_sdk_s3::{
+    error::PutObjectError,
+    model::ObjectCannedAcl,
+    output::PutObjectOutput,
+    types::{ByteStream, SdkError},
+    Client, Endpoint,
+};
 use base64ct::{Base64Url, Encoding};
 use image::ImageFormat;
 use sha2::{Digest, Sha256};
-use std::io::Cursor;
 use tokio::task;
 
 pub struct Image {
-    pub filename: String,
+    pub filename:  String,
     pub thumbnail: Option<String>,
 }
 
@@ -860,7 +869,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
     if image_exists(&client, &filename).await {
         let thumbnail = format!("{hash}_thumbnail.{ext}");
         return Ok(Image {
-            filename: get_url(&filename),
+            filename:  get_url(&filename),
             thumbnail: image_exists(&client, &thumbnail)
                 .await
                 .then(move || get_url(&thumbnail)),
@@ -889,7 +898,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
     put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
 
     Ok(Image {
-        filename: get_url(&filename),
+        filename:  get_url(&filename),
         thumbnail: thumbnail.as_deref().map(get_url),
     })
 }

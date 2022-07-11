@@ -5,19 +5,19 @@ pub mod items;
 pub mod threads;
 pub mod users;
 
+use std::{collections::HashMap, env, error::Error as StdError};
+
 use anyhow::Error;
 use askama::Template;
-use axum::body::Bytes;
-use axum::extract::{ContentLengthLimit, FromRequest, Multipart, RequestParts};
-use axum::response::{IntoResponse, Response};
-use axum::{async_trait, Json};
-use diesel::pg::PgConnection;
-use diesel::Connection;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
-use std::collections::HashMap;
-use std::env;
-use std::error::Error as StdError;
+use axum::{
+    async_trait,
+    body::Bytes,
+    extract::{ContentLengthLimit, FromRequest, Multipart, RequestParts},
+    response::{IntoResponse, Response},
+    Json,
+};
+use diesel::{pg::PgConnection, Connection};
+use serde::{de::DeserializeOwned, Serialize};
 
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be
@@ -29,7 +29,7 @@ pub struct MultipartForm<Form, const N: u64> {
 
 #[derive(Debug)]
 pub struct File {
-    pub name: String,
+    pub name:  String,
     pub bytes: Bytes,
 }
 
@@ -112,7 +112,7 @@ where
                 continue;
             };
             if name == "file" {
-                if field.file_name().is_none(){
+                if field.file_name().is_none() {
                     continue;
                 }
                 let name = field.file_name().unwrap_or("").to_string();

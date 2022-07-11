@@ -1,16 +1,18 @@
+use std::net::SocketAddr;
+
 use axum::{
     http::StatusCode,
     response::Redirect,
     routing::{get, get_service, post},
     Router,
 };
-use std::net::SocketAddr;
+use marche_server::{
+    items::{self, ItemPage, OfferPage, OffersPage, ReactPage},
+    threads::{self, AuthorPage, EditPostForm, Index, ReplyForm, ThreadForm, ThreadPage},
+    users::{self, LeaderboardPage, LoginPage, ProfilePage},
+};
 use tower_cookies::CookieManagerLayer;
 use tower_http::{services::ServeDir, trace::TraceLayer};
-
-use marche_server::items::{self, ItemPage, OfferPage, OffersPage, ReactPage};
-use marche_server::threads::{self, AuthorPage, Index, ReplyForm, ThreadForm, ThreadPage, EditPostForm};
-use marche_server::users::{self, LeaderboardPage, LoginPage, ProfilePage};
 
 #[tokio::main]
 async fn main() {

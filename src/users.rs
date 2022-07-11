@@ -1,20 +1,27 @@
-use crate::items::{self, Item, ItemDrop, ItemThumbnail};
-use crate::threads::Thread;
-use crate::NotFound;
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+};
+
 use askama::Template;
-use axum::async_trait;
-use axum::extract::{Form, FromRequest, Path, RequestParts};
-use axum::response::{IntoResponse, Redirect, Response};
+use axum::{
+    async_trait,
+    extract::{Form, FromRequest, Path, RequestParts},
+    response::{IntoResponse, Redirect, Response},
+};
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
 use libpasta::verify_password;
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
-use std::ops::Range;
 use tower_cookies::{Cookie, Cookies, Key};
+
+use crate::{
+    items::{self, Item, ItemDrop, ItemThumbnail},
+    threads::Thread,
+    NotFound,
+};
 
 table! {
     use diesel::sql_types::*;
@@ -48,32 +55,32 @@ table! {
 #[derive(Queryable, Debug)]
 pub struct User {
     /// Id of the user
-    pub id: i32,
+    pub id:                    i32,
     /// User name
-    pub name: String,
+    pub name:                  String,
     /// Password hash
-    pub password: String,
+    pub password:              String,
     /// Biography of the user
-    pub bio: String,
+    pub bio:                   String,
     /// Role
-    pub role: Role,
+    pub role:                  Role,
     /// Exprerience
-    pub experience: i64,
+    pub experience:            i64,
     /// Last reward
-    pub last_reward: NaiveDateTime,
+    pub last_reward:           NaiveDateTime,
     /// ProfilePic equipment slot
-    pub equip_slot_prof_pic: Option<i32>,
+    pub equip_slot_prof_pic:   Option<i32>,
     /// ProfileBackground equipment slot
     pub equip_slot_background: Option<i32>,
     /// Badge equipment slots
-    pub equip_slot_badges: Vec<i32>,
+    pub equip_slot_badges:     Vec<i32>,
 }
 
 pub const MAX_NUM_BADGES: usize = 10;
 
 #[derive(Queryable)]
 pub struct ReadingHistory {
-    pub id: i32,
+    pub id:        i32,
     pub reader_id: i32,
     pub thread_id: i32,
     pub last_read: i32,
@@ -93,8 +100,8 @@ impl User {
         self.experience as u64
     }
 
-    /// Returns the level of the user. The level is defined as the log_2 of the user's
-    /// experience value.
+    /// Returns the level of the user. The level is defined as the log_2 of the
+    /// user's experience value.
     pub fn level(&self) -> u32 {
         let xp = self.experience();
         // Base level is 1
@@ -117,8 +124,8 @@ impl User {
     pub fn level_info(&self) -> LevelInfo {
         let completion = self.level_completion();
         LevelInfo {
-            level: self.level(),
-            curr_xp: completion.start,
+            level:         self.level(),
+            curr_xp:       completion.start,
             next_level_xp: completion.end,
         }
     }
@@ -213,12 +220,12 @@ impl User {
 
     pub fn profile_stub(&self, conn: &PgConnection) -> ProfileStub {
         ProfileStub {
-            id: self.id,
-            name: self.name.clone(),
-            picture: self.get_profile_pic(conn),
+            id:         self.id,
+            name:       self.name.clone(),
+            picture:    self.get_profile_pic(conn),
             background: self.get_background_style(conn),
-            badges: self.get_badges(conn),
-            level: self.level_info(),
+            badges:     self.get_badges(conn),
+            level:      self.level_info(),
         }
     }
 
@@ -309,17 +316,17 @@ impl User {
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct ProfilePage {
-    id: i32,
-    name: String,
-    picture: Option<String>,
-    bio: String,
-    level: LevelInfo,
-    equipped: Vec<ItemThumbnail>,
-    inventory: Vec<ItemThumbnail>,
-    badges: Vec<String>,
+    id:         i32,
+    name:       String,
+    picture:    Option<String>,
+    bio:        String,
+    level:      LevelInfo,
+    equipped:   Vec<ItemThumbnail>,
+    inventory:  Vec<ItemThumbnail>,
+    badges:     Vec<String>,
     background: String,
-    can_trade: bool,
-    offers: i64,
+    can_trade:  bool,
+    offers:     i64,
 }
 
 impl ProfilePage {
@@ -394,18 +401,18 @@ pub enum Role {
 /// Displayable user profile
 #[derive(Clone, Serialize)]
 pub struct ProfileStub {
-    pub id: i32,
-    pub name: String,
-    pub picture: Option<String>,
+    pub id:         i32,
+    pub name:       String,
+    pub picture:    Option<String>,
     pub background: String,
-    pub badges: Vec<String>,
-    pub level: LevelInfo,
+    pub badges:     Vec<String>,
+    pub level:      LevelInfo,
 }
 
 #[derive(Copy, Clone, Serialize)]
 pub struct LevelInfo {
-    level: u32,
-    curr_xp: u64,
+    level:         u32,
+    curr_xp:       u64,
     next_level_xp: u64,
 }
 
@@ -443,12 +450,12 @@ impl IntoResponse for Unauthorized {
 #[template(path = "leaderboard.html")]
 pub struct LeaderboardPage {
     offers: i64,
-    users: Vec<UserRank>,
+    users:  Vec<UserRank>,
 }
 
 struct UserRank {
-    rank: usize,
-    bio: String,
+    rank:    usize,
+    bio:     String,
     profile: ProfileStub,
 }
 
@@ -466,21 +473,21 @@ impl LeaderboardPage {
             .into_iter()
             .enumerate()
             .map(|(i, u)| UserRank {
-                rank: i + 1,
-                bio: u.bio.clone(),
+                rank:    i + 1,
+                bio:     u.bio.clone(),
                 profile: u.profile_stub(&conn),
             })
             .collect();
 
         Self {
-            users: user_profiles,
+            users:  user_profiles,
             offers: items::IncomingOffer::count(&conn, &user),
         }
     }
 }
 
 pub struct UserCache<'a> {
-    conn: &'a PgConnection,
+    conn:   &'a PgConnection,
     cached: HashMap<i32, ProfileStub>,
 }
 
@@ -516,11 +523,11 @@ table! {
 #[derive(Queryable)]
 pub struct LoginSession {
     /// Id of the login session
-    pub id: i32,
+    pub id:            i32,
     /// Auth token
-    pub session_id: String,
+    pub session_id:    String,
     /// UserId of the session
-    pub user_id: i32,
+    pub user_id:       i32,
     /// When the session began
     pub session_start: NaiveDateTime,
 }
@@ -528,8 +535,8 @@ pub struct LoginSession {
 #[derive(Insertable)]
 #[table_name = "login_sessions"]
 pub struct NewSession {
-    user_id: i32,
-    session_id: String,
+    user_id:       i32,
+    session_id:    String,
     session_start: NaiveDateTime,
 }
 
@@ -550,7 +557,8 @@ impl LoginSession {
             .first::<Self>(conn)
             .ok()
             .ok_or(())?;
-        // The session is automatically invalid if the session is longer than a month old.
+        // The session is automatically invalid if the session is longer than a month
+        // old.
         if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
             Err(())
         } else {
@@ -611,14 +619,14 @@ pub struct LoginForm {
 #[derive(Template)]
 #[template(path = "login.html")]
 pub struct LoginPage {
-    error: Option<&'static str>,
+    error:  Option<&'static str>,
     offers: usize,
 }
 
 impl LoginPage {
     pub async fn show() -> Self {
         Self {
-            error: None,
+            error:  None,
             offers: 0,
         }
     }
@@ -634,7 +642,7 @@ impl LoginPage {
                 Redirect::to("/".parse().unwrap())
             })
             .map_err(|_e| Self {
-                error: Some("Incorrect username or password"),
+                error:  Some("Incorrect username or password"),
                 offers: 0,
             })
     }

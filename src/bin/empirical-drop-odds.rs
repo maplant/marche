@@ -1,5 +1,6 @@
-use marche_server::items::Rarity;
 use std::collections::HashMap;
+
+use marche_server::items::Rarity;
 
 fn main() {
     println!("pass = {}", libpasta::hash_password("test"));

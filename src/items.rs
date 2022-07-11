@@ -1,24 +1,33 @@
-use crate::threads::Reply;
-use crate::users::{ProfileStub, User, UserCache};
-use crate::ErrorMessage;
+use std::{cmp::PartialEq, collections::HashMap};
+
 use askama::Template;
-use axum::extract::{Form, Path};
-use axum::response::Redirect;
+use axum::{
+    extract::{Form, Path},
+    response::Redirect,
+};
 use chrono::{Duration, Utc};
-use diesel::pg::Pg;
-use diesel::prelude::*;
-use diesel::serialize::Output;
-use diesel::sql_types::Jsonb;
-use diesel::types::{FromSql, ToSql};
+use diesel::{
+    pg::Pg,
+    prelude::*,
+    serialize::Output,
+    sql_types::Jsonb,
+    types::{FromSql, ToSql},
+};
 use diesel_derive_enum::DbEnum;
 use lazy_static::lazy_static;
 use maplit::hashmap;
-use rand::prelude::{thread_rng, IteratorRandom};
-use rand::{Rng, SeedableRng};
+use rand::{
+    prelude::{thread_rng, IteratorRandom},
+    Rng, SeedableRng,
+};
 use rand_xorshift::XorShiftRng;
 use serde::{Deserialize, Serialize};
-use std::cmp::PartialEq;
-use std::collections::HashMap;
+
+use crate::{
+    threads::Reply,
+    users::{ProfileStub, User, UserCache},
+    ErrorMessage,
+};
 
 /// Rarity of an item.
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, DbEnum)]
@@ -73,14 +82,16 @@ impl Rarity {
     }
 }
 
-/// The type of an item. Determines if the item has any associated actions or is purely cosmetic,
-/// and further if the item is cosmetic how many can be equipped
+/// The type of an item. Determines if the item has any associated actions or is
+/// purely cosmetic, and further if the item is cosmetic how many can be
+/// equipped
 #[derive(Clone, Debug, Serialize, Deserialize, FromSqlRow, AsExpression)]
 #[sql_type = "Jsonb"]
 pub enum ItemType {
     /// An item with no use
     Useless,
-    /// Cosmetic profile picture, displayable in user profile and next to all posts
+    /// Cosmetic profile picture, displayable in user profile and next to all
+    /// posts
     Avatar { filename: String },
     /// Cosmetic background, displayed behind the profile
     ProfileBackground { colors: Vec<String> },
@@ -119,7 +130,7 @@ pub struct AttributeMap {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct AttrInfo {
     rarity: u32,
-    seed: usize,
+    seed:   usize,
 }
 
 impl ToSql<Jsonb, Pg> for AttributeMap {
@@ -158,21 +169,21 @@ table! {
 #[derive(Queryable, Debug)]
 pub struct Item {
     /// Id of the available item
-    pub id: i32,
+    pub id:          i32,
     /// Name of the item
-    pub name: String,
+    pub name:        String,
     /// Description of the item
     pub description: String,
     /// Availability of the item (can the item be dropped?)
-    pub available: bool,
+    pub available:   bool,
     /// Rarity of the item
-    pub rarity: Rarity,
+    pub rarity:      Rarity,
     /// Type of the item
     #[diesel(sql_type = "ItemType")]
-    pub item_type: ItemType,
+    pub item_type:   ItemType,
     /// Attribute rarity
     #[diesel(sql_type = "AttributeMap")]
-    pub attributes: AttributeMap,
+    pub attributes:  AttributeMap,
 }
 
 impl Item {
@@ -214,13 +225,13 @@ table! {
 #[derive(Queryable, Debug)]
 pub struct ItemDrop {
     /// Id of the dropped item
-    pub id: i32,
+    pub id:       i32,
     /// UserId of the owner
     pub owner_id: i32,
     /// ItemId of the item
-    pub item_id: i32,
+    pub item_id:  i32,
     /// Unique pattern Id for the item
-    pub pattern: i16,
+    pub pattern:  i16,
     /// Indicates if the drop has been consumed
     pub consumed: bool,
 }
@@ -245,8 +256,8 @@ pub const DROP_CHANCE: u32 = 2;
 #[table_name = "drops"]
 pub struct NewDrop {
     owner_id: i32,
-    item_id: i32,
-    pattern: i16,
+    item_id:  i32,
+    pattern:  i16,
     consumed: bool,
 }
 
@@ -382,10 +393,10 @@ impl ItemDrop {
     pub fn thumbnail(&self, conn: &PgConnection) -> ItemThumbnail {
         let item = Item::fetch(&conn, self.item_id);
         ItemThumbnail {
-            id: self.id,
-            name: item.name.clone(),
-            rarity: item.rarity.to_string(),
-            thumbnail: self.thumbnail_html(conn),
+            id:          self.id,
+            name:        item.name.clone(),
+            rarity:      item.rarity.to_string(),
+            thumbnail:   self.thumbnail_html(conn),
             description: item.description,
         }
     }
@@ -455,8 +466,8 @@ impl ItemDrop {
                             diesel::insert_into(drops::table)
                                 .values(NewDrop {
                                     owner_id: user.id,
-                                    item_id: chosen.id,
-                                    pattern: rand::random(),
+                                    item_id:  chosen.id,
+                                    pattern:  rand::random(),
                                     consumed: false,
                                 })
                                 .get_result(conn)
@@ -488,10 +499,10 @@ impl ItemDrop {
 // TODO: Take this struct and extract it somewhere
 #[derive(Serialize)]
 pub struct ItemThumbnail {
-    pub id: i32,
-    pub name: String,
-    pub rarity: String,
-    pub thumbnail: String,
+    pub id:          i32,
+    pub name:        String,
+    pub rarity:      String,
+    pub thumbnail:   String,
     pub description: String,
 }
 
@@ -504,7 +515,7 @@ pub enum AttributeType {
 }
 
 pub struct Attribute {
-    pub ty: AttributeType,
+    pub ty:     AttributeType,
     pub fmt_fn: fn(&mut XorShiftRng) -> String,
 }
 
@@ -568,10 +579,10 @@ lazy_static! {
 
 #[derive(Debug)]
 pub struct Attributes {
-    pub filter: String,
+    pub filter:        String,
     pub div_animation: String,
-    pub animation: String,
-    pub transform: String,
+    pub animation:     String,
+    pub transform:     String,
 }
 
 impl Attributes {
@@ -593,7 +604,7 @@ impl Attributes {
         }
 
         Self {
-            filter: attr_res
+            filter:        attr_res
                 .remove(&AttributeType::Filter)
                 .as_deref()
                 .unwrap_or(&[])
@@ -603,12 +614,12 @@ impl Attributes {
                 .as_deref()
                 .unwrap_or(&[])
                 .join(", "),
-            animation: attr_res
+            animation:     attr_res
                 .remove(&AttributeType::Animation)
                 .as_deref()
                 .unwrap_or(&[])
                 .join(", "),
-            transform: attr_res
+            transform:     attr_res
                 .remove(&AttributeType::Transform)
                 .as_deref()
                 .unwrap_or(&[])
@@ -620,16 +631,16 @@ impl Attributes {
 #[derive(Template)]
 #[template(path = "item.html")]
 pub struct ItemPage {
-    id: i32,
-    name: String,
-    description: String,
-    pattern: u16,
-    rarity: String,
-    thumbnail: String,
+    id:           i32,
+    name:         String,
+    description:  String,
+    pattern:      u16,
+    rarity:       String,
+    thumbnail:    String,
     equip_action: Option<AvailableEquipAction>,
-    owner_id: i32,
-    owner_name: String,
-    offers: i64,
+    owner_id:     i32,
+    owner_name:   String,
+    offers:       i64,
 }
 
 pub enum AvailableEquipAction {
@@ -687,15 +698,15 @@ pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
 #[derive(Template)]
 #[template(path = "react.html")]
 pub struct ReactPage {
-    post_id: i32,
-    author: ProfileStub,
-    body: String,
+    post_id:   i32,
+    author:    ProfileStub,
+    body:      String,
     inventory: Vec<ItemThumbnail>,
-    offers: i64,
-    error: Option<String>,
-    image: Option<String>,
+    offers:    i64,
+    error:     Option<String>,
+    image:     Option<String>,
     thumbnail: Option<String>,
-    filename: String,
+    filename:  String,
 }
 
 impl ReactPage {
@@ -736,8 +747,9 @@ impl ReactPage {
 
         let thread_id = conn
             .transaction(|| -> Result<i32, diesel::result::Error> {
-                use crate::threads::replies::dsl::*;
                 use diesel::result::Error;
+
+                use crate::threads::replies::dsl::*;
 
                 // Get the reply
                 let reply = Reply::fetch(&conn, post_id).map_err(|_| Error::RollbackTransaction)?;
@@ -817,13 +829,13 @@ table! {
 #[derive(Queryable)]
 pub struct TradeRequest {
     /// Id of the trade.
-    pub id: i32,
+    pub id:             i32,
     /// UserId of the sender.
-    pub sender_id: i32,
+    pub sender_id:      i32,
     /// Items offered for trade (expressed as a vec of OwnedItemIds).
-    pub sender_items: Vec<i32>,
+    pub sender_items:   Vec<i32>,
     /// UserId of the receiver.
-    pub receiver_id: i32,
+    pub receiver_id:    i32,
     /// Items requested for trade
     pub receiver_items: Vec<i32>,
 }
@@ -912,20 +924,20 @@ impl TradeRequest {
 #[derive(Insertable)]
 #[table_name = "trade_requests"]
 pub struct NewTradeRequest {
-    sender_id: i32,
-    sender_items: Vec<i32>,
-    receiver_id: i32,
+    sender_id:      i32,
+    sender_items:   Vec<i32>,
+    receiver_id:    i32,
     receiver_items: Vec<i32>,
 }
 
 #[derive(Template)]
 #[template(path = "offer.html")]
 pub struct OfferPage {
-    sender: ProfileStub,
-    sender_inventory: Vec<ItemThumbnail>,
-    receiver: ProfileStub,
+    sender:             ProfileStub,
+    sender_inventory:   Vec<ItemThumbnail>,
+    receiver:           ProfileStub,
     receiver_inventory: Vec<ItemThumbnail>,
-    offers: i64,
+    offers:             i64,
 }
 
 impl OfferPage {
@@ -934,18 +946,18 @@ impl OfferPage {
         let receiver = User::fetch(&conn, receiver_id).unwrap();
 
         Self {
-            sender: sender.profile_stub(&conn),
+            sender:             sender.profile_stub(&conn),
             // Got to put this somewhere, but don't know where
-            sender_inventory: sender
+            sender_inventory:   sender
                 .inventory(&conn)
                 .map(|(_, d)| d.thumbnail(&conn))
                 .collect(),
-            receiver: receiver.profile_stub(&conn),
+            receiver:           receiver.profile_stub(&conn),
             receiver_inventory: receiver
                 .inventory(&conn)
                 .map(|(_, d)| d.thumbnail(&conn))
                 .collect(),
-            offers: IncomingOffer::count(&conn, &sender),
+            offers:             IncomingOffer::count(&conn, &sender),
         }
     }
 }
@@ -1007,11 +1019,11 @@ pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
 #[derive(Template)]
 #[template(path = "offers.html")]
 pub struct OffersPage {
-    user: ProfileStub,
+    user:            ProfileStub,
     incoming_offers: Vec<IncomingOffer>,
     outgoing_offers: Vec<OutgoingOffer>,
-    offers: i64,
-    error: Option<String>,
+    offers:          i64,
+    error:           Option<String>,
 }
 
 impl OffersPage {
@@ -1034,9 +1046,9 @@ impl OffersPage {
 
 #[derive(Serialize)]
 pub struct IncomingOffer {
-    id: i32,
-    sender: ProfileStub,
-    sender_items: Vec<ItemThumbnail>,
+    id:             i32,
+    sender:         ProfileStub,
+    sender_items:   Vec<ItemThumbnail>,
     receiver_items: Vec<ItemThumbnail>,
 }
 
@@ -1055,9 +1067,9 @@ impl IncomingOffer {
             .into_iter()
             .map(|trade| -> IncomingOffer {
                 IncomingOffer {
-                    id: trade.id,
-                    sender: user_cache.get(trade.sender_id).clone(),
-                    sender_items: trade
+                    id:             trade.id,
+                    sender:         user_cache.get(trade.sender_id).clone(),
+                    sender_items:   trade
                         .sender_items
                         .into_iter()
                         .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
@@ -1084,9 +1096,9 @@ impl IncomingOffer {
 
 #[derive(Serialize)]
 struct OutgoingOffer {
-    id: i32,
-    sender_items: Vec<ItemThumbnail>,
-    receiver: ProfileStub,
+    id:             i32,
+    sender_items:   Vec<ItemThumbnail>,
+    receiver:       ProfileStub,
     receiver_items: Vec<ItemThumbnail>,
 }
 
@@ -1105,9 +1117,9 @@ impl OutgoingOffer {
             .into_iter()
             .map(|trade| -> OutgoingOffer {
                 OutgoingOffer {
-                    id: trade.id,
-                    receiver: user_cache.get(trade.receiver_id).clone(),
-                    sender_items: trade
+                    id:             trade.id,
+                    receiver:       user_cache.get(trade.receiver_id).clone(),
+                    sender_items:   trade
                         .sender_items
                         .into_iter()
                         .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
