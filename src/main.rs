@@ -8,7 +8,9 @@ use axum::{
 };
 use marche_server::{
     items::{self, ItemPage, OfferPage, OffersPage, ReactPage},
-    threads::{self, AuthorPage, EditPostForm, Index, ReplyForm, ThreadForm, ThreadPage},
+    threads::{
+        self, AuthorPage, EditPostForm, Index, ReplyForm, SetPinned, ThreadForm, ThreadPage,
+    },
     users::{self, LeaderboardPage, LoginPage, ProfilePage, UpdateBioPage},
 };
 use tower_cookies::CookieManagerLayer;
@@ -21,6 +23,7 @@ async fn main() {
     }
     tracing_subscriber::fmt::init();
 
+    // TODO: Use the inventory crate to clean this up.
     let app = Router::new()
         .route("/", get(Index::show))
         .route(
@@ -36,6 +39,7 @@ async fn main() {
             "/react/:thread_id",
             get(ReactPage::show).post(ReactPage::apply),
         )
+        .route("/set_pinned", post(SetPinned::set_pinned))
         .route("/edit/:post_id", post(EditPostForm::submit))
         .route("/remove-tag/:name", post(threads::remove_tag))
         .route("/add-tag", post(threads::add_tag))

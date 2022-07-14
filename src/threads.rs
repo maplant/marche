@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use askama::Template;
 use axum::{
     body::Bytes,
-    extract::{Form, Path},
+    extract::{Form, Path, Query},
     response::Redirect,
     Json,
 };
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     bail, error,
     items::{IncomingOffer, ItemDrop, ItemThumbnail},
-    users::{ProfileStub, User, UserCache},
+    users::{ProfileStub, Role, User, UserCache},
     File, JsonError, MultipartForm, NotFound,
 };
 
@@ -27,6 +27,7 @@ table! {
         last_post -> Integer,
         title -> Text,
         tags -> Array<Integer>,
+        pinned -> Bool,
     }
 }
 
@@ -45,6 +46,8 @@ pub struct Thread {
     pub title:     String,
     /// Tags given to this thread
     pub tags:      Vec<i32>,
+    /// Whether or not the thread is pinned
+    pub pinned:    bool,
 }
 
 #[derive(Insertable)]
@@ -54,6 +57,7 @@ pub struct NewThread<'t> {
     title:     &'t str,
     tags:      Vec<i32>,
     last_post: i32,
+    pinned:    bool,
 }
 
 const THREADS_PER_PAGE: i64 = 25;
@@ -104,6 +108,7 @@ struct ThreadLink {
     jump_to:        i32,
     replies:        String,
     tags:           Vec<String>,
+    pinned:         bool,
 }
 
 impl Index {
@@ -119,6 +124,7 @@ impl Index {
 
         let posts: Vec<_> = threads
             .filter(tags.contains(viewed_tags.clone().into_id_vec()))
+            .order(pinned.desc())
             .order(last_post.desc())
             .limit(THREADS_PER_PAGE)
             .load::<Thread>(&conn)
@@ -198,6 +204,7 @@ impl Index {
                         .filter_map(|tid| Tag::fetch_from_id(&conn, tid))
                         .map(|t| t.name)
                         .collect(),
+                    pinned: thread.pinned,
                 }
             })
             .collect();
@@ -211,13 +218,53 @@ impl Index {
     }
 }
 
+#[derive(Deserialize)]
+pub struct SetPinned {
+    thread: i32,
+    pinned: bool,
+}
+
+#[derive(Serialize)]
+pub enum SetPinnedError {
+    NotPermitted,
+    DbError,
+}
+
+impl SetPinned {
+    pub async fn set_pinned(
+        user: User,
+        Query(SetPinned {
+            thread,
+            pinned: set_pinned,
+        }): Query<Self>,
+    ) -> Json<Result<(), SetPinnedError>> {
+        use self::threads::dsl::*;
+
+        if user.role < Role::Moderator {
+            return Json(Result::Err(SetPinnedError::NotPermitted));
+        }
+
+        let conn = crate::establish_db_connection();
+        Json(
+            diesel::update(threads)
+                .filter(id.eq(thread))
+                .set(pinned.eq(dbg!(set_pinned)))
+                .get_result(&conn)
+                .map(|_: Thread| ())
+                .map_err(|_| SetPinnedError::DbError),
+        )
+    }
+}
+
 #[derive(Template)]
 #[template(path = "thread.html")]
 pub struct ThreadPage {
-    id:     i32,
-    title:  String,
-    posts:  Vec<Post>,
-    offers: i64,
+    id:          i32,
+    title:       String,
+    posts:       Vec<Post>,
+    offers:      i64,
+    pinned:      bool,
+    viewer_role: Role,
 }
 
 #[derive(Serialize)]
@@ -297,7 +344,9 @@ impl ThreadPage {
             id: thread_id,
             title: thread.title.clone(), // I feel like I should be able to move this
             posts,
+            pinned: thread.pinned,
             offers: IncomingOffer::count(&conn, &user),
+            viewer_role: user.role,
         })
     }
 }
@@ -377,6 +426,7 @@ impl ThreadForm {
                     last_post: first_post.id,
                     title: &thread.title,
                     tags,
+                    pinned: false,
                 })
                 .get_result(&conn)
                 .map_err(|_| RollbackTransaction)

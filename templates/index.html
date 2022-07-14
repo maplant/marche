@@ -27,7 +27,9 @@
         {{post.title}}
         <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">
           └{{post.replies}}
-          | last activity {% if post.emphasize_date %}<b>{{post.date}}</b>{% else %}{{post.date}}{% endif %}{% if !post.read %} 📨{% endif %}
+          | last activity {% if post.emphasize_date %}<b>{{post.date}}</b>{% else %}{{post.date}}{% endif %}
+          {% if post.pinned %} 📌{% endif %}
+          {% if !post.read %} 📨{% endif %}
         </div>
       </div>
       <div class="cell" style="width: 40%; text-align: right">

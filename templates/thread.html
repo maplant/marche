@@ -4,7 +4,12 @@
 
 {% block content %}
 <script src="/static/thread.js" async></script>
-<li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">{{title}}
+<li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
+  {{title}}
+  {% if viewer_role >= Role::User %}
+  <input type="button" id="toggle_pinned_button" value="📌" onclick="toggle_pinned()"
+         style={% if pinned %}"border-style: inset;"{% else %}"border-style: outset"{% endif %}>
+  {% endif %}
 </li>
 {% for post in posts %}
 <li class="menu-item">
@@ -93,8 +98,20 @@
       </label>
       <div id="error" style="margin-top: 15px"></div>
     </div>
-    <script>
-      $(document).ready(function () {       
+    <script type="text/javascript">
+      {% if viewer_role >= Role::User %}
+      function toggle_pinned() {
+          var set_pinned = !{{pinned}};
+          $.ajax({
+              url: `/set_pinned?thread={{id}}&pinned=${set_pinned}`,
+              type: 'post',
+              complete: function(_, _) {
+                  location.href = `/thread/{{id}}`;
+              }
+          });
+      }
+      {% endif %}
+      $(document).ready(function () {
           $("form").ajaxForm({
               url: '/thread/{{id}}',
               type: 'post',

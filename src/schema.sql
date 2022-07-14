@@ -36,7 +36,8 @@ CREATE TABLE threads (
   id SERIAL PRIMARY KEY,
   last_post INTEGER NOT NULL,
   title TEXT NOT NULL,
-  tags INTEGER[] NOT NULL
+  tags INTEGER[] NOT NULL,
+  pinned BOOLEAN NOT NULL
 );
 
 CREATE TABLE replies (

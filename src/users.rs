@@ -316,18 +316,18 @@ impl User {
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct ProfilePage {
-    id:             i32,
-    name:           String,
-    picture:        Option<String>,
-    bio:            String,
-    level:          LevelInfo,
-    equipped:       Vec<ItemThumbnail>,
-    inventory:      Vec<ItemThumbnail>,
-    badges:         Vec<String>,
-    background:     String,
-    is_curr_user:   bool,
-    can_viewer_ban: bool,
-    offers:         i64,
+    id:           i32,
+    name:         String,
+    picture:      Option<String>,
+    bio:          String,
+    level:        LevelInfo,
+    equipped:     Vec<ItemThumbnail>,
+    inventory:    Vec<ItemThumbnail>,
+    badges:       Vec<String>,
+    background:   String,
+    is_curr_user: bool,
+    viewer_role:  Role,
+    offers:       i64,
 }
 
 impl ProfilePage {
@@ -384,7 +384,7 @@ impl ProfilePage {
             equipped,
             inventory,
             is_curr_user: user.id == curr_user.id,
-            can_viewer_ban: false,
+            viewer_role: Role::User,
         })
     }
 }
@@ -393,11 +393,11 @@ pub async fn show_current_user(curr_user: User) -> Redirect {
     Redirect::to(format!("/profile/{}", curr_user.id).parse().unwrap())
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord)]
 pub enum Role {
-    Admin,
-    Moderator,
     User,
+    Moderator,
+    Admin,
 }
 
 /// Displayable user profile
