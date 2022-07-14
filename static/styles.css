@@ -240,7 +240,7 @@ div.item-overlay-row {
 
 .response-overlay,
 .reply-overlay {
-    max-width: 855;
+    max-width: 855px;
     position: absolute;
     border-radius: 5px;
     pointer-events: none;
@@ -299,6 +299,7 @@ div.item-overlay-row {
     border: 1px solid black;
     border-radius: 5px;
     cursor: pointer;
+    text-decoration: none;
     transition: all 300ms ease-in-out;
     -o-transition: all 300ms ease-in-out;
     -ms-transition: all 300ms ease-in-out;
