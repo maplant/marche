@@ -101,6 +101,7 @@ button {
 
 .item-common {
     text-align: center;
+    text-decoration: none;
     vertical-align: middle;
     margin: 5px;
     color: #006daa;
@@ -125,6 +126,7 @@ button {
 
 .item-uncommon {
     display: inline-block;
+    text-decoration: none;
     text-align: center;
     vertical-align: middle;
     margin: 5px;
@@ -149,6 +151,7 @@ button {
 
 .item-rare {
     display: inline-block;
+    text-decoration: none;
     text-align: center;
     vertical-align: middle;
     margin: 5px;
@@ -173,6 +176,7 @@ button {
 
 .item-ultra-rare {
     display: inline-block;
+    text-decoration: none;
     vertical-align: middle;
     margin: 5px;
     text-align: center;
@@ -197,6 +201,7 @@ button {
 
 .item-legendary {
     display: inline-block;
+    text-decoration: none;
     vertical-align: middle;
     margin: 5px;
     text-align: center;
