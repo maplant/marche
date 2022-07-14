@@ -16,7 +16,7 @@
   <div style="display: table" class="reply" id={{post.id}} author={{post.author.name}}>
     <div style="display: table-row">
       <div class="profile" style="{{post.author.background}}">
-        <p><a href="/profile/{{post.author.id}}" style="color: white">{{post.author.name}}</a></p>
+        <p><a href="/profile/{{post.author.id}}" style="color: white; text-decoration: none">{{post.author.name}}</a></p>
         {% let picture = post.author.picture.as_ref() %}
         {% include "profile-pic.html" %}
         <div class="badge-grid">

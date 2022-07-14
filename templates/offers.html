@@ -35,7 +35,7 @@
     </div>
     <div class="row">
       <div class="profile" style="{{offer.sender.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{offer.sender.id}}" style="color: white">{{offer.sender.name}}</a></p>
+        <p><a href="/profile/{{offer.sender.id}}" style="color: white; text-decoration: none">{{offer.sender.name}}</a></p>
         {% let picture = offer.sender.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
@@ -45,7 +45,7 @@
         {% endfor %}
       </div>
       <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{user.id}}" style="color: white">{{user.name}}</a></p>
+        <p><a href="/profile/{{user.id}}" style="color: white; text-decoration: none">{{user.name}}</a></p>
         {% let picture = user.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
@@ -104,7 +104,7 @@
     </div>
     <div class="row">
       <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{user.id}}" style="color: white">{{user.name}}</a></p>
+        <p><a href="/profile/{{user.id}}" style="color: white; text-decoration: none">{{user.name}}</a></p>
         {% let picture = user.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>
@@ -114,7 +114,7 @@
         {% endfor %}
       </div>
       <div class="profile" style="{{offer.receiver.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{offer.receiver.id}}" style="color: white">{{offer.receiver.name}}</a></p>
+        <p><a href="/profile/{{offer.receiver.id}}" style="color: white; text-decoration: none">{{offer.receiver.name}}</a></p>
         {% let picture = offer.receiver.picture.as_ref() %}
         {% include "profile-pic.html" %}
       </div>

@@ -12,7 +12,7 @@
       </div>
       <div class="row">
         <div class="profile" style="{{sender.background}}">
-          <p><a href="/profile/{{sender.id}}" style="color: white">{{sender.name}}</a></p>
+          <p><a href="/profile/{{sender.id}}" style="color: white; text-decoration: none">{{sender.name}}</a></p>
           {% let picture = sender.picture.as_ref() %}
           {% include "profile-pic.html" %}
           <div class="badge-grid">
@@ -46,7 +46,7 @@
       </div>
       <div class="row">
         <div class="profile" style="{{receiver.background}}">
-          <p><a href="/profile/{{receiver.id}}" style="color: white">{{receiver.name}}</a></p>
+          <p><a href="/profile/{{receiver.id}}" style="color: white; text-decoration: none">{{receiver.name}}</a></p>
           {% let picture = receiver.picture.as_ref() %}
           {% include "profile-pic.html" %}
           <div class="badge-grid">
