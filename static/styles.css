@@ -240,7 +240,7 @@ div.item-overlay-row {
 
 .response-overlay,
 .reply-overlay {
-    width: auto;
+    max-width: 855;
     position: absolute;
     border-radius: 5px;
     pointer-events: none;
@@ -323,10 +323,6 @@ div.item-overlay-row {
     margin-left: auto;
     margin-right: auto;
     border-radius: 50%;
-}
-
-a {
-    text-decoration: none;
 }
 
 div.profile {
