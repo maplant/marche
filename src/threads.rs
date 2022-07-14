@@ -124,8 +124,7 @@ impl Index {
 
         let posts: Vec<_> = threads
             .filter(tags.contains(viewed_tags.clone().into_id_vec()))
-            .order(pinned.desc())
-            .order(last_post.desc())
+            .order((pinned.desc(), last_post.desc()))
             .limit(THREADS_PER_PAGE)
             .load::<Thread>(&conn)
             .ok()
