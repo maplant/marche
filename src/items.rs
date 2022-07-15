@@ -2,7 +2,8 @@ use std::{cmp::PartialEq, collections::HashMap};
 
 use askama::Template;
 use axum::{
-    extract::{Form, Path},
+    Json,
+    extract::{Form, Path, Query},
     response::Redirect,
 };
 use chrono::{Duration, Utc};
@@ -841,7 +842,7 @@ pub struct TradeRequest {
 }
 
 impl TradeRequest {
-    pub fn fetch(conn: &PgConnection, req_id: i32) -> Self {
+    pub fn fetch(conn: &PgConnection, req_id: i32) -> Result<Self, &'static str> {
         use self::trade_requests::dsl::*;
 
         trade_requests
@@ -849,7 +850,7 @@ impl TradeRequest {
             .load::<Self>(conn)
             .ok()
             .and_then(|v| v.into_iter().next())
-            .unwrap()
+            .ok_or("No such trade request")
     }
 
     pub fn accept(&self, conn: &PgConnection) -> Result<(), &'static str> {
@@ -899,25 +900,26 @@ impl TradeRequest {
                 }
             }
             // delete the transaction
-            self.decline(&conn);
+            let _ = self.decline(&conn);
             Ok(())
         });
 
         // Decline the request if we got an error
         if res.is_err() {
-            self.decline(&conn);
+            let _ = self.decline(&conn);
             Err("Unable to accept transaction")
         } else {
             Ok(())
         }
     }
 
-    pub fn decline(&self, conn: &PgConnection) {
+    pub fn decline(&self, conn: &PgConnection) -> Result<(), &'static str> {
         use self::trade_requests::dsl::*;
 
         diesel::delete(trade_requests.filter(id.eq(self.id)))
             .execute(conn)
-            .unwrap();
+            .map(|_| ())
+            .map_err(|_| "Unable to decline transaction")
     }
 }
 
@@ -996,24 +998,30 @@ pub async fn make_offer(
     Redirect::to("/offers".parse().unwrap())
 }
 
-pub async fn decline_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
+pub async fn decline_offer(user: User, Path(trade_id): Path<i32>) -> Json<Result<(), &'static str>> {
     let conn = crate::establish_db_connection();
-    let req = TradeRequest::fetch(&conn, trade_id);
-    if req.sender_id == user.id || req.receiver_id == user.id {
-        req.decline(&conn);
-    }
-
-    Redirect::to("/offers".parse().unwrap())
+    let req = match TradeRequest::fetch(&conn, trade_id) {
+        Ok(req) => req,
+        Err(err) => return Json(Ok(())),
+    };
+    Json(if req.sender_id == user.id || req.receiver_id == user.id {
+        req.decline(&conn)
+    } else {
+        Err("You are not a participant in this transaction")
+    })
 }
 
-pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Redirect {
+pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Json<Result<(), &'static str>> {
     let conn = crate::establish_db_connection();
-    let req = TradeRequest::fetch(&conn, trade_id);
-    if req.receiver_id == user.id {
-        let _ = req.accept(&conn);
-    }
-
-    Redirect::to("/offers".parse().unwrap())
+    let req = match TradeRequest::fetch(&conn, trade_id) {
+        Ok(req) => req,
+        Err(err) => return Json(Err(err)),
+    };
+    Json(if req.receiver_id == user.id {
+        req.accept(&conn)
+    } else {
+        Err("You are not a participant in this transaction")
+    })
 }
 
 #[derive(Template)]
@@ -1023,11 +1031,10 @@ pub struct OffersPage {
     incoming_offers: Vec<IncomingOffer>,
     outgoing_offers: Vec<OutgoingOffer>,
     offers:          i64,
-    error:           Option<String>,
 }
 
 impl OffersPage {
-    pub async fn show(user: User, Path(ErrorMessage { error }): Path<ErrorMessage>) -> Self {
+    pub async fn show(user: User) -> Self {
         let conn = crate::establish_db_connection();
         let mut user_cache = UserCache::new(&conn);
         // TODO: filter out trade requests that are no longer valid.
@@ -1039,7 +1046,6 @@ impl OffersPage {
             offers: incoming_offers.len() as i64,
             incoming_offers,
             outgoing_offers,
-            error,
         }
     }
 }

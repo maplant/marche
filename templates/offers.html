@@ -3,15 +3,6 @@
 {% block title %}Trade Offers{% endblock %}
 
 {% block content %}
-{% match error %}
-{% when Some(error) %}
-<li>
-  <div class="error">
-    {{error}}
-  </div>
-</li>
-{% when None %}
-{% endmatch %}
 {% if incoming_offers.is_empty() %}
 <li class="menu-item">
   <div class="post" style="padding-left: 150px">
@@ -25,7 +16,7 @@
   </div>
 </li>
 {% for offer in incoming_offers %}
-<li class="menu-item">
+<li class="menu-item" id="offer-{{offer.id}}">
   <div class="table" style="width: 100%">
     <div class="row">
       <div class="cell"></div>
@@ -59,17 +50,10 @@
       <div class="cell">
       </div>
       <div class="cell">
-        <div style="display: table-row">
-          <div style="display: table-cell; padding: 10px">
-            <form action="/accept/{{offer.id}}">
-              <button type="submit">Accept</button>
-            </form>
-          </div>
-          <div style="display: table-cell; padding: 10px">
-            <form action="/decline/{{offer.id}}">
-              <button type="submit">Decline</button>
-            </form>
-          </div>
+        <div>
+          <button id="accept-{{offer.id}}" type="submit" onclick="accept({{offer.id}})">Accept</button>
+          <button id="decline-{{offer.id}}" type="submit" onclick="decline({{offer.id}})">Decline</button>
+          <div id="error-{{offer.id}}" style="position: absolute; z-index: 10; transform: translatey(-100%) translatex(140px);"></div>
         </div>
       </div>
       <div class="cell"></div>
@@ -94,7 +78,7 @@
   </div>
 </li>
 {% for offer in outgoing_offers %}
-<li class="menu-item">
+<li class="menu-item" id="offer-{{offer.id}}">
   <div class="table" style="width: 100%">
     <div class="row">
       <div class="cell"></div>
@@ -129,9 +113,8 @@
       </div>
       <div class="cell">
         <div style="display: table-cell; padding: 10px">
-          <form action="/decline/{{offer.id}}">
-            <button type="submit">Rescind</button>
-          </form>
+          <button id="rescind-{{offer.id}}" type="submit" onclick="rescind({{offer.id}})">Rescind</button>
+          <div id="error-{{offer.id}}" style="position: absolute; z-index: 10; transform: translatey(-100%) translatex(140px);"></div>
         </div>
       </div>
       <div class="cell"></div>
@@ -140,4 +123,76 @@
 </li>
 {% endfor %}
 {% endif %}
+<script type="text/javascript">
+  function accept(offer_id) {
+      $(`#accept-${offer_id}`).prop("disabled", true);
+      $(`#decline-${offer_id}`).prop("disabled", true);
+      $(`#error-${offer_id}`).html("");
+      $.ajax({
+          url: `accept/${offer_id}`,
+          type: 'post',
+          success: function(response, _, _, _) {
+              console.log(response);
+              if (response.Err !== undefined) {
+                  $(`#error-${offer_id}`).html(`<div class="error">${response.Err}</div>`);
+                  $(`#accept-${offer_id}`).prop("disabled", false);
+                  $(`#decline-${offer_id}`).prop("disabled", false);
+              } else {
+                  $(`#accept-${offer_id}`).html("✔️ Accepted!");
+                  $(`#offer-${offer_id}`).slideToggle();
+              }
+          },
+          error: function(_, _, _) {
+              $(`#error-${offer_id}`).html(`<div class="error">Unable to decline offer</div>`);
+              $(`#accept-${offer_id}`).prop("disabled", false);
+              $(`#decline-${offer_id}`).prop("disabled", false);
+          }
+      });
+  }
+  function decline(offer_id) {
+      $(`#accept-${offer_id}`).prop("disabled", true);
+      $(`#decline-${offer_id}`).prop("disabled", true);
+      $(`#error-${offer_id}`).html("");
+      $.ajax({
+          url: `decline/${offer_id}`,
+          type: 'post',
+          success: function(response, _, _, _) {
+              if (response.Err !== undefined) {
+                  $(`#error-${offer_id}`).html(`<div class="error">${response.Err}</div>`);
+                  $(`#accept-${offer_id}`).prop("disabled", false);
+                  $(`#decline-${offer_id}`).prop("disabled", false);
+              } else {
+                  $(`#decline-${offer_id}`).html("❌ Declined");
+                  $(`#offer-${offer_id}`).slideToggle();
+              }
+          },
+          error: function(_, status, error) {
+              $(`#error-${offer_id}`).html(`<div class="error">Unable to decline offer, status: ${status}, error: ${error}</div>`);
+              $(`#accept-${offer_id}`).prop("disabled", false);
+              $(`#decline-${offer_id}`).prop("disabled", false);
+          }
+      });
+  }
+  function rescind(offer_id) {
+      $(`#rescind-${offer_id}`).prop("disabled", true);
+      $(`#error-${offer_id}`).html("");
+      $.ajax({
+          url: `decline/${offer_id}`,
+          type: 'post',
+          success: function(response, _, _, _) {
+              if (response.Err !== undefined) {
+                  $(`#error-${offer_id}`).html(`<div class="error">${response.Err}</div>`);
+                  $(`#rescind-${offer_id}`).prop("disabled", false);
+              } else {
+                  $(`#rescind-${offer_id}`).html("❌ Rescinded");
+                  $(`#offer-${offer_id}`).slideToggle();
+              }
+          },
+          error: function(_, status, error) {
+              $(`#error-${offer_id}`).html(`<div class="error">Unable to decline offer, status: ${status}, error: ${error}</div>`);
+              $(`#rescind-${offer_id}`).prop("disabled", false);
+          }
+      });
+  }
+</script>
 {% endblock %}
