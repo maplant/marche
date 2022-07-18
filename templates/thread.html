@@ -111,8 +111,9 @@
           });
       }
       {% endif %}
+      // posting replies
       $(document).ready(function () {
-          $("form").ajaxForm({
+          $("form#reply").ajaxForm({
               url: '/thread/{{id}}',
               type: 'post',
               success: function(response, _, _, _) {

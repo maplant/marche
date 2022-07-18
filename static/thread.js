@@ -5,6 +5,7 @@ $(document).ready(function() {
         $(`.parsed-${id}`).slideToggle();
     });
 
+    // editing replies
     $(".edit-post-form").each(function() {
         const id = $(this).attr("postid");
         $(this).ajaxForm({

@@ -20,7 +20,7 @@
   </li>
 </form>
 {% for post in posts %}
-<li class="menu-item" style="display: grid">
+<li class="menu-item thread-menu-item" style="display: grid">
   <div class="table">
     <div class="thread-row row" onclick="window.location='/thread/{{post.id}}?jump_to={{post.jump_to}}'">
       <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
