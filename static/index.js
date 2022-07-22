@@ -29,3 +29,21 @@ function darkenRGBString(rgb, factor)
     rgb = rgb.replace(/\).*/g, '').replace(/[^\d,.]/g, '').split(',');
     return `rgb(${rgb[0]*factor}, ${rgb[1]*factor}, ${rgb[2]*factor})`
 }
+
+function add_tag() {
+    var val = $('#add-tag').val();
+    location.pathname = location.pathname + "/" + val;
+}
+
+function remove_tag(tag) {
+    var tags = location.pathname.split('/').slice(2);
+    console.log(tags);
+    var result = '/t';
+    tags.forEach(function (item, _) {
+        if (item !== tag) {
+            result = result + '/' + item;
+        }
+    });
+    console.log(result);
+    location.pathname = result;
+}

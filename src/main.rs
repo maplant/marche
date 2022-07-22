@@ -9,8 +9,7 @@ use axum::{
 use marche_server::{
     items::{self, ItemPage, OfferPage, OffersPage, ReactPage},
     threads::{
-        self, AuthorPage, EditPostForm, Index, ReplyForm, SetLocked, SetPinned, ThreadForm,
-        ThreadPage,
+        AuthorPage, EditPostForm, Index, ReplyForm, SetLocked, SetPinned, ThreadForm, ThreadPage,
     },
     users::{self, LeaderboardPage, LoginPage, ProfilePage, UpdateBioPage},
 };
@@ -43,8 +42,6 @@ async fn main() {
         .route("/set_pinned", post(SetPinned::set_pinned))
         .route("/set_locked", post(SetLocked::set_locked))
         .route("/edit/:post_id", post(EditPostForm::submit))
-        .route("/remove-tag/:name", post(threads::remove_tag))
-        .route("/add-tag", post(threads::add_tag))
         .route("/login", get(LoginPage::show).post(LoginPage::attempt))
         .route("/author", get(AuthorPage::show).post(ThreadForm::submit))
         .route("/profile/:user_id", get(ProfilePage::show))

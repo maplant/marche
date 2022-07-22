@@ -89,30 +89,6 @@ const THREADS_PER_PAGE: i64 = 25;
 const DATE_FMT: &str = "%B %-d at %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
-// TODO: These next two functions absolutely should be done client side.
-pub async fn remove_tag(
-    _user: User,
-    Path(name): Path<String>,
-    Form(mut tags): Form<HashMap<String, String>>,
-) -> Redirect {
-    let _ = tags.remove("add-tag");
-    let tags = tags
-        .iter()
-        .filter_map(|(tname, _)| (tname != &name).then(|| tname))
-        .fold(String::new(), |prefix, suffix| {
-            prefix + &*urlencoding::encode(suffix.trim()) + "/"
-        });
-    Redirect::to(format!("/t/{}", tags).parse().unwrap())
-}
-
-pub async fn add_tag(_user: User, Form(mut tags): Form<HashMap<String, String>>) -> Redirect {
-    let add_tag = clean_tag_name(&tags.remove("add-tag").unwrap_or_else(String::new));
-    let tags = tags.iter().fold(String::new(), |prefix, suffix| {
-        prefix + &*urlencoding::encode(suffix.0.trim()) + "/"
-    });
-    Redirect::to(format!("/t/{}/{}", add_tag, tags).parse().unwrap())
-}
-
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
@@ -138,14 +114,24 @@ struct ThreadLink {
 }
 
 impl Index {
-    pub async fn show(user: User) -> Self {
-        Self::show_with_tags(user, Path(String::from("en"))).await
+    pub async fn show(_user: User) -> Redirect {
+        Redirect::to("/t/en".parse().unwrap())
     }
 
-    pub async fn show_with_tags(user: User, Path(viewed_tags): Path<String>) -> Self {
+    pub async fn show_with_tags(
+        user: User,
+        Path(viewed_tags): Path<String>,
+    ) -> Result<Self, Redirect> {
         use self::threads::dsl::*;
 
         let viewed_tags = Tags::from(&*viewed_tags);
+
+        // If no tags are selected and the user is not privileged, force
+        // the user to redirect to /t/en
+        if viewed_tags.is_empty() && user.role < Role::Moderator {
+            return Err(Redirect::to("/t/en".parse().unwrap()));
+        }
+
         let conn = crate::establish_db_connection();
 
         let posts: Vec<_> = threads
@@ -224,12 +210,12 @@ impl Index {
             })
             .collect();
 
-        Self {
+        Ok(Self {
             curr_path: viewed_tags.fmt(),
             tags:      viewed_tags.tags,
             posts:     posts,
             offers:    IncomingOffer::count(&conn, &user),
-        }
+        })
     }
 }
 

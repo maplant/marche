@@ -4,21 +4,18 @@
 
 {% block content %}
 <script src="/static/index.js" async></script>
-<form action="/add-tag" method="post">
-  <li style="display: inline; vertical-align: middle">
-    <label class="selected-tag">
-      <input type="text" name="add-tag" placeholder="add a tag" style="width: 80px; border-radius: 5px; padding: 5px;">
-      <input type="submit" value="+">
-    </label>
-    {% for tag in  tags %}
-    <label class="selected-tag">
-      <input type="hidden" name="{{tag.name}}" value="{{tag.id}}">
-      {{tag.name|e}}
-      <input type="submit" value="−" style="color: red" formaction="/remove-tag/{{tag.name}}">
-    </label>
-    {% endfor %}
-  </li>
-</form>
+<li style="display: inline; vertical-align: middle">
+  <label class="selected-tag">
+    <input type="text" name="add-tag" placeholder="add a tag" id="add-tag" style="width: 80px; border-radius: 5px; padding: 5px;">
+    <button type="submit" onclick="add_tag()" style="padding: 5px">➕</button>
+  </label>
+  {% for tag in  tags %}
+  <label class="selected-tag">
+    {{tag.name|e}}
+    <button type="submit" style="color: red; padding: 5px" onclick="remove_tag('{{tag.name|e}}')">✖</button>
+  </label>
+  {% endfor %}
+</li>
 {% for post in posts %}
 <li class="menu-item thread-menu-item" style="display: grid">
   <div class="table">
