@@ -37,13 +37,21 @@
       <div id="error" style="display: inline"></div>
     </div>
     <script>
-      $(document).ready(function () {       
+      $(document).ready(function () {
+          const error_messages = {
+              TitleOrBodyIsEmpty: "Title or body cannot be empty",
+              UploadImageError: "There was an error uploading the image",
+              InternalDbError: "There was an internal error, please try again later",
+              MultipartFormError: "File is too large",
+          };
           $("form").ajaxForm({
               url: '/author',
               type: 'post',
               success: function(response, _, _, _) {
-                  if (response.error !== undefined) {
-                      $("#error").html(`<div class="error" id="error">${response.error}</div>`)
+                  if (response.Err !== undefined) {
+                      var error_message = error_messages[response.Err];
+                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                      $("#error").html(`<div class="error" id="error">${error_message}</div>`)
                   } else if (response.id !== undefined) {
                       location.href = `/thread/${response.id}`;
                   }

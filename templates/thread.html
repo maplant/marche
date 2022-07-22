@@ -133,12 +133,21 @@
       {% endif %}
       // posting replies
       $(document).ready(function () {
+          const error_messages = {
+              ReplyIsEmpty: "You cannot post an empty reply",
+              ThreadIsLocked: "Thread is locked",
+              UploadImageError: "There was an error uploading the image",
+              InternalDbError: "There was an internal error, please try again later",
+              FetchThreadError: "This thread has been deleted",
+          };
           $("form#reply").ajaxForm({
               url: '/thread/{{id}}',
               type: 'post',
               success: function(response, _, _, _) {
-                  if (response.error !== undefined) {
-                      $("#error").html(`<div class="error" id="error">${response.error}</div>`)
+                  if (response.Err !== undefined) {
+                      var error_message = error_messages[response.Err];
+                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                      $("#error").html(`<div class="error" id="error">${error_message}</div>`)
                   } else if (response.id !== undefined) {
                       location.href = `/thread/{{id}}?jump_to=${response.id}`;
                   }

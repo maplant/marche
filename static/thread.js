@@ -7,14 +7,21 @@ $(document).ready(function() {
 
     // editing replies
     $(".edit-post-form").each(function() {
+        const error_messages = {
+            DoesNotOwnPost: "You do not own this post",
+            CannotMakeEmpty: "You cannot make a post empty",
+            InternalDbError: "There was an internal error, please try again later",
+        };
         const id = $(this).attr("postid");
         $(this).ajaxForm({
             url: `/edit/${id}`,
             type: 'post',
             success: function(response, _, _, _) {
                 console.log(response);
-                if (response.error !== undefined) {
-                    $(`.error-${id}`).html(`<div class="error">${response.error}</div>`)
+                if (response.Err !== undefined) {
+                    var error_message = error_messages[response.Err];
+                    var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                    $(`.error-${id}`).html(`<div class="error">${error_message}</div>`)
                 } else {
                     // TODO: Do this properly
                     location.href = `/thread/${response.thread_id}?jump_to=${response.id}`;

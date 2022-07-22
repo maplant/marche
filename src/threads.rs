@@ -436,7 +436,6 @@ pub struct ThreadForm {
 #[derive(Serialize, From)]
 pub enum SubmitThreadError {
     TitleOrBodyIsEmpty,
-    ThreadIsLocked,
     UploadImageError(
         #[serde(skip)]
         UploadImageError
@@ -445,7 +444,6 @@ pub enum SubmitThreadError {
         #[serde(skip)]
         diesel::result::Error
     ),
-    FetchThreadError(FetchThreadError),
     MultipartFormError(MultipartFormError),
 }
 
@@ -732,7 +730,6 @@ pub enum ReplyError {
     ReplyIsEmpty,
     ThreadIsLocked,
     UploadImageError(
-        #[serde(skip)]
         UploadImageError
     ),
     InternalDbError(
