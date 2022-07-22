@@ -7,17 +7,17 @@ pub mod users;
 
 use std::{collections::HashMap, env, error::Error as StdError};
 
-use anyhow::Error;
 use askama::Template;
 use axum::{
     async_trait,
     body::Bytes,
-    extract::{ContentLengthLimit, FromRequest, Multipart, RequestParts},
+    extract::{ContentLengthLimit, FromRequest, Multipart, RequestParts, multipart::MultipartError},
     response::{IntoResponse, Response},
-    Json,
+    http::StatusCode,
 };
 use diesel::{pg::PgConnection, Connection};
 use serde::{de::DeserializeOwned, Serialize};
+use derive_more::From;
 
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be
@@ -33,57 +33,17 @@ pub struct File {
     pub bytes: Bytes,
 }
 
-#[derive(Serialize, Debug)]
-pub struct JsonError {
-    error: String,
+#[derive(Serialize, From)]
+pub enum MultipartFormError {
+    InvalidContentLength,
+    InvalidField,
+    MultipartError(#[serde(skip)]MultipartError),
 }
 
-impl JsonError {
-    pub fn new(error: String) -> Self {
-        Self { error }
-    }
-}
 
-#[macro_export]
-macro_rules! bail {
-    ($msg:literal $(,)?) => {
-        return Err(JsonError::new(format!($msg)))
-    };
-    ($err:expr $(,)?) => {
-        return Err(JsonError::new(format!($err)))
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        return Err(JsonError::new(format!($fmt, $($arg)*)))
-    };
-}
-
-#[macro_export]
-macro_rules! error {
-    ($msg:literal $(,)?) => {
-        JsonError::new(format!($msg))
-    };
-    ($err:expr $(,)?) => {
-        JsonError::new(format!($err))
-    };
-    ($fmt:expr, $($arg:tt)*) => {
-        JsonError::new(format!($fmt, $($arg)*))
-    };
-}
-
-impl<E> From<E> for JsonError
-where
-    E: StdError + Send + Sync + 'static,
-{
-    fn from(e: E) -> Self {
-        JsonError {
-            error: format!("{}", Error::from(e)),
-        }
-    }
-}
-
-impl IntoResponse for JsonError {
+impl IntoResponse for MultipartFormError {
     fn into_response(self) -> Response {
-        Json(self).into_response()
+        (StatusCode::INTERNAL_SERVER_ERROR, "internal service error").into_response()
     }
 }
 
@@ -97,15 +57,16 @@ where
     <ContentLengthLimit<Multipart, CLL> as FromRequest<B>>::Rejection:
         StdError + Send + Sync + 'static,
 {
-    type Rejection = JsonError;
+    type Rejection = MultipartFormError;
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
+    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, MultipartFormError> {
         let ContentLengthLimit(mut multipart) =
-            ContentLengthLimit::<Multipart, CLL>::from_request(req).await?;
+            ContentLengthLimit::<Multipart, CLL>::from_request(req).await
+                .map_err(|_|MultipartFormError::InvalidContentLength)?;
         let mut form = HashMap::new();
         let mut file = None;
 
-        while let Some(field) = multipart.next_field().await? {
+        while let Some(field) = multipart.next_field().await.map_err(|_|MultipartFormError::InvalidField)? {
             let name = if let Some(name) = field.name() {
                 name
             } else {
@@ -124,7 +85,7 @@ where
         }
 
         // Yes, this is silly, but it's convenient!
-        let form: F = serde_json::from_value(serde_json::to_value(form).unwrap())?;
+        let form: F = serde_json::from_value(serde_json::to_value(form).unwrap()).unwrap();
 
         Ok(Self { form, file })
     }

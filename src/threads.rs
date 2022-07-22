@@ -1,5 +1,6 @@
 //! Display threads
 use std::collections::{HashMap, HashSet};
+use derive_more::From;
 
 use askama::Template;
 use axum::{
@@ -13,12 +14,12 @@ use diesel::prelude::*;
 use lazy_static::lazy_static;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
+use marche_proc_macros::json_result;
 
 use crate::{
-    bail, error,
     items::{IncomingOffer, ItemDrop, ItemThumbnail},
     users::{ProfileStub, Role, User, UserCache},
-    File, JsonError, MultipartForm, NotFound,
+    File, MultipartFormError, MultipartForm, NotFound,
 };
 
 table! {
@@ -28,6 +29,7 @@ table! {
         title -> Text,
         tags -> Array<Integer>,
         pinned -> Bool,
+        locked -> Bool,
     }
 }
 
@@ -48,6 +50,23 @@ pub struct Thread {
     pub tags:      Vec<i32>,
     /// Whether or not the thread is pinned
     pub pinned:    bool,
+    /// Whether or not the thread is locked
+    pub locked:    bool,
+}
+
+impl Thread {
+    pub fn fetch(conn: &PgConnection, thread_id: i32) -> Result<Self, FetchThreadError> {
+        use self::threads::dsl::*;
+
+        threads.filter(id.eq(thread_id))
+            .first::<Self>(conn)
+            .map_err(|_|FetchThreadError::NoSuchThread)
+    }
+}
+
+#[derive(Serialize)]
+pub enum FetchThreadError {
+    NoSuchThread,
 }
 
 #[derive(Insertable)]
@@ -58,6 +77,7 @@ pub struct NewThread<'t> {
     tags:      Vec<i32>,
     last_post: i32,
     pinned:    bool,
+    locked:    bool,
 }
 
 const THREADS_PER_PAGE: i64 = 25;
@@ -109,6 +129,7 @@ struct ThreadLink {
     replies:        String,
     tags:           Vec<String>,
     pinned:         bool,
+    locked:         bool,
 }
 
 impl Index {
@@ -204,6 +225,7 @@ impl Index {
                         .map(|t| t.name)
                         .collect(),
                     pinned: thread.pinned,
+                    locked: thread.locked,
                 }
             })
             .collect();
@@ -247,10 +269,48 @@ impl SetPinned {
         Json(
             diesel::update(threads)
                 .filter(id.eq(thread))
-                .set(pinned.eq(dbg!(set_pinned)))
+                .set(pinned.eq(set_pinned))
                 .get_result(&conn)
                 .map(|_: Thread| ())
                 .map_err(|_| SetPinnedError::DbError),
+        )
+    }
+}
+
+#[derive(Deserialize)]
+pub struct SetLocked {
+    thread: i32,
+    locked: bool,
+}
+
+#[derive(Serialize)]
+pub enum SetLockedError {
+    NotPermitted,
+    DbError,
+}
+
+impl SetLocked {
+    pub async fn set_locked(
+        user: User,
+        Query(Self {
+            thread,
+            locked: set_locked,
+        }): Query<Self>,
+    ) -> Json<Result<(), SetLockedError>> {
+        use self::threads::dsl::*;
+
+        if user.role < Role::Moderator {
+            return Json(Result::Err(SetLockedError::NotPermitted));
+        }
+
+        let conn = crate::establish_db_connection();
+        Json(
+            diesel::update(threads)
+                .filter(id.eq(thread))
+                .set(locked.eq(set_locked))
+                .get_result(&conn)
+                .map(|_: Thread| ())
+                .map_err(|_| SetLockedError::DbError),
         )
     }
 }
@@ -263,6 +323,7 @@ pub struct ThreadPage {
     posts:       Vec<Post>,
     offers:      i64,
     pinned:      bool,
+    locked:      bool,
     viewer_role: Role,
 }
 
@@ -344,6 +405,7 @@ impl ThreadPage {
             title: thread.title.clone(), // I feel like I should be able to move this
             posts,
             pinned: thread.pinned,
+            locked: thread.locked,
             offers: IncomingOffer::count(&conn, &user),
             viewer_role: user.role,
         })
@@ -371,15 +433,32 @@ pub struct ThreadForm {
     body:  String,
 }
 
+#[derive(Serialize, From)]
+pub enum SubmitThreadError {
+    TitleOrBodyIsEmpty,
+    ThreadIsLocked,
+    UploadImageError(
+        #[serde(skip)]
+        UploadImageError
+    ),
+    InternalDbError(
+        #[serde(skip)]
+        diesel::result::Error
+    ),
+    FetchThreadError(FetchThreadError),
+    MultipartFormError(MultipartFormError),
+}
+
 impl ThreadForm {
+    #[json_result]
     pub async fn submit(
         user: User,
-        form: Result<MultipartForm<Self, MAXIMUM_FILE_SIZE>, JsonError>,
-    ) -> Result<Json<Thread>, JsonError> {
+        form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
+    ) -> Json<Result<Thread, SubmitThreadError>> {
         let MultipartForm { file, form: thread } = form?;
 
         if thread.title.is_empty() || (thread.body.is_empty() && file.is_none()) {
-            bail!("Thread title or body cannot be empty");
+            return Err(SubmitThreadError::TitleOrBodyIsEmpty);
         }
 
         let post_date = Utc::now().naive_utc();
@@ -426,12 +505,12 @@ impl ThreadForm {
                     title: &thread.title,
                     tags,
                     pinned: false,
+                    locked: false,
                 })
                 .get_result(&conn)
                 .map_err(|_| RollbackTransaction)
         })
-        .map_err(|_| error!("Unable to post thread. Try again later"))
-        .map(Json)
+        .map_err(SubmitThreadError::InternalDbError)
     }
 }
 
@@ -648,24 +727,45 @@ pub struct ReplyForm {
     reply: String,
 }
 
+#[derive(Serialize, From)]
+pub enum ReplyError {
+    ReplyIsEmpty,
+    ThreadIsLocked,
+    UploadImageError(
+        #[serde(skip)]
+        UploadImageError
+    ),
+    InternalDbError(
+        #[serde(skip)]
+        diesel::result::Error
+    ),
+    FetchThreadError(FetchThreadError),
+}
+
 impl ReplyForm {
+    #[json_result]
     pub async fn submit(
         user: User,
         Path(thread_id): Path<i32>,
         MultipartForm {
             file,
             form: ReplyForm { reply },
-        }: MultipartForm<Self, MAXIMUM_FILE_SIZE>,
-    ) -> Result<Json<Reply>, JsonError> {
+        }: MultipartForm<ReplyForm, MAXIMUM_FILE_SIZE>,
+    ) -> Json<Result<Reply, ReplyError>> {
         let reply = reply.trim();
         if reply.is_empty() && file.is_none() {
-            bail!("Reply cannot be empty");
+            return Err(ReplyError::ReplyIsEmpty);
+        }
+
+        let conn = crate::establish_db_connection();
+
+        if Thread::fetch(&conn, thread_id)?.locked {
+            return Err(ReplyError::ThreadIsLocked);
         }
 
         let post_date = Utc::now().naive_utc();
         let (image, thumbnail, filename) = upload_image(file).await?;
 
-        let conn = crate::establish_db_connection();
         let html_output = parse_post(&conn, reply, thread_id);
 
         let reply: Reply = diesel::insert_into(replies::table)
@@ -688,7 +788,7 @@ impl ReplyForm {
             .set(threads::dsl::last_post.eq(reply.id))
             .get_result(&conn)?;
 
-        Ok(Json(reply))
+        Ok(reply)
     }
 }
 
@@ -698,23 +798,34 @@ pub struct EditPostForm {
     body: String,
 }
 
+#[derive(Serialize, From)]
+pub enum EditPostError {
+    DoesNotOwnPost,
+    CannotMakeEmpty,
+    InternalDbError(
+        #[serde(skip)]
+        diesel::result::Error
+    ),
+}
+
 impl EditPostForm {
+    #[json_result]
     pub async fn submit(
         user: User,
         Path(post_id): Path<i32>,
         Form(EditPostForm { body }): Form<EditPostForm>,
-    ) -> Result<Json<Reply>, JsonError> {
+    ) -> Json<Result<Reply, EditPostError>> {
         let body = body.trim();
 
         let conn = crate::establish_db_connection();
         let post = Reply::fetch(&conn, post_id)?;
 
         if post.author_id != user.id {
-            bail!("Cannot edit post you do not own");
+            return Err(EditPostError::DoesNotOwnPost);
         }
 
         if post.image.is_none() && body.is_empty() {
-            bail!("Cannot edit a post to make it empty");
+            return Err(EditPostError::CannotMakeEmpty);
         }
 
         // TODO: check if time period to edit has expired.
@@ -724,14 +835,14 @@ impl EditPostForm {
                 Utc::now().naive_utc().format(DATE_FMT)
             );
 
-        Ok(diesel::update(replies::table)
+        diesel::update(replies::table)
             .filter(replies::dsl::id.eq(post_id))
             .set((
                 replies::dsl::body.eq(body),
                 replies::dsl::body_html.eq(html_output),
             ))
             .get_result(&conn)
-            .map(Json)?)
+            .map_err(EditPostError::InternalDbError)
     }
 }
 
@@ -868,10 +979,33 @@ async fn put_image(
         .await
 }
 
+/*
+pub struct ImageUploadResult {
+    
+}
+*/
+
+#[derive(Debug, Serialize, From)]
+pub enum UploadImageError {
+    InvalidExtension,
+    ImageError(
+        #[serde(skip)]
+        image::ImageError
+    ),
+    InternalServerError(
+        #[serde(skip)]
+        tokio::task::JoinError
+    ),
+    InternalBlockStorageError(
+        #[serde(skip)]
+        SdkError<PutObjectError>
+    ),
+}
+
 // TODO: move return type to struct
 async fn upload_image(
     file: Option<File>,
-) -> Result<(Option<String>, Option<String>, String), JsonError> {
+) -> Result<(Option<String>, Option<String>, String), UploadImageError> {
     match file {
         Some(file) => {
             let Image {
@@ -885,7 +1019,7 @@ async fn upload_image(
 }
 
 /// Upload image to object storage
-async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
+async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     /// Maximum width/height of an image.
     const MAX_WH: u32 = 400;
 
@@ -895,7 +1029,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, JsonError> {
         ImageFormat::Jpeg => "jpeg",
         ImageFormat::Gif => "gif",
         ImageFormat::WebP => "webp",
-        _ => bail!("Invalid extension"),
+        _ => return Err(UploadImageError::InvalidExtension),
     };
 
     let (bytes, hash) = task::spawn_blocking(move || {

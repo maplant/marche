@@ -3,7 +3,7 @@ use std::{cmp::PartialEq, collections::HashMap};
 use askama::Template;
 use axum::{
     Json,
-    extract::{Form, Path, Query},
+    extract::{Form, Path},
     response::Redirect,
 };
 use chrono::{Duration, Utc};
@@ -27,7 +27,6 @@ use serde::{Deserialize, Serialize};
 use crate::{
     threads::Reply,
     users::{ProfileStub, User, UserCache},
-    ErrorMessage,
 };
 
 /// Rarity of an item.

@@ -29,6 +29,7 @@
           └{{post.replies}}
           | last activity {% if post.emphasize_date %}<b>{{post.date}}</b>{% else %}{{post.date}}{% endif %}
           {% if post.pinned %} 📌{% endif %}
+          {% if post.locked %} 🔒{% endif %}
           {% if !post.read %} 📨{% endif %}
         </div>
       </div>

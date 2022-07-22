@@ -9,6 +9,8 @@
   {% if viewer_role > Role::User %}
   <input type="button" id="toggle_pinned_button" value="📌" onclick="toggle_pinned()"
          style={% if pinned %}"border-style: inset;"{% else %}"border-style: outset"{% endif %}>
+  <input type="button" id="toggle_locked_button" value="🔒" onclick="toggle_locked()"
+         style={% if locked %}"border-style: inset;"{% else %}"border-style: outset"{% endif %}>
   {% endif %}
 </li>
 {% for post in posts %}
@@ -88,6 +90,13 @@
 {% endfor %}
 <form action="/thread/{{id}}" method="post" id="reply" enctype="multipart/form-data">
   <li class="menu-item" style="padding: 25px">
+    {% if locked %}
+    <div style="display: flow-root">
+      <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px" disabled></textarea></div>
+      <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;" disabled>+ Reply!</button>
+      <div id="error" style="margin-top: 15px">Post is locked</div>
+    </div>
+    {% else %}
     <div style="display: flow-root">
       <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
       <span id="attached-filename-text-container"></span>
@@ -98,6 +107,7 @@
       </label>
       <div id="error" style="margin-top: 15px"></div>
     </div>
+    {% endif %}
     <script type="text/javascript">
       {% if viewer_role >= Role::User %}
       function toggle_pinned() {
@@ -110,6 +120,16 @@
               }
           });
       }
+      function toggle_locked() {
+          var set_locked = !{{locked}};
+          $.ajax({
+              url: `/set_locked?thread={{id}}&locked=${set_locked}`,
+              type: 'post',
+              complete: function(_, _) {
+                  location.href = `/thread/{{id}}`;
+              }
+          });
+      }       
       {% endif %}
       $(document).ready(function () {
           $("form").ajaxForm({
