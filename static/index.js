@@ -31,16 +31,16 @@ function darkenRGBString(rgb, factor)
 }
 
 function add_tag() {
-    var val = $('#add-tag').val().toLowerCase();
+    var val = $('#add-tag').val().toLowerCase().trim();
     location.pathname = location.pathname + "/" + val;
 }
 
 function remove_tag(tag) {
-    var tag = tag.toLowerCase();
+    var tag = tag.toLowerCase().trim();
     var tags = location.pathname.split('/').slice(2);
     var result = '/t';
     tags.forEach(function (item, _) {
-        var item = item.toLowerCase();
+        var item = item.toLowerCase().trim();
         if (item !== tag) {
             result = result + '/' + item;
         }
