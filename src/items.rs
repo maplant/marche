@@ -2,9 +2,9 @@ use std::{cmp::PartialEq, collections::HashMap};
 
 use askama::Template;
 use axum::{
-    Json,
     extract::{Form, Path},
     response::Redirect,
+    Json,
 };
 use chrono::{Duration, Utc};
 use diesel::{
@@ -997,11 +997,14 @@ pub async fn make_offer(
     Redirect::to("/offers".parse().unwrap())
 }
 
-pub async fn decline_offer(user: User, Path(trade_id): Path<i32>) -> Json<Result<(), &'static str>> {
+pub async fn decline_offer(
+    user: User,
+    Path(trade_id): Path<i32>,
+) -> Json<Result<(), &'static str>> {
     let conn = crate::establish_db_connection();
     let req = match TradeRequest::fetch(&conn, trade_id) {
         Ok(req) => req,
-        Err(err) => return Json(Ok(())),
+        Err(_err) => return Json(Ok(())),
     };
     Json(if req.sender_id == user.id || req.receiver_id == user.id {
         req.decline(&conn)

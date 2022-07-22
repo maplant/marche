@@ -11,13 +11,15 @@ use askama::Template;
 use axum::{
     async_trait,
     body::Bytes,
-    extract::{ContentLengthLimit, FromRequest, Multipart, RequestParts, multipart::MultipartError},
-    response::{IntoResponse, Response},
+    extract::{
+        multipart::MultipartError, ContentLengthLimit, FromRequest, Multipart, RequestParts,
+    },
     http::StatusCode,
+    response::{IntoResponse, Response},
 };
+use derive_more::From;
 use diesel::{pg::PgConnection, Connection};
 use serde::{de::DeserializeOwned, Serialize};
-use derive_more::From;
 
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be
@@ -37,9 +39,8 @@ pub struct File {
 pub enum MultipartFormError {
     InvalidContentLength,
     InvalidField,
-    MultipartError(#[serde(skip)]MultipartError),
+    MultipartError(#[serde(skip)] MultipartError),
 }
-
 
 impl IntoResponse for MultipartFormError {
     fn into_response(self) -> Response {
@@ -61,12 +62,17 @@ where
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, MultipartFormError> {
         let ContentLengthLimit(mut multipart) =
-            ContentLengthLimit::<Multipart, CLL>::from_request(req).await
-                .map_err(|_|MultipartFormError::InvalidContentLength)?;
+            ContentLengthLimit::<Multipart, CLL>::from_request(req)
+                .await
+                .map_err(|_| MultipartFormError::InvalidContentLength)?;
         let mut form = HashMap::new();
         let mut file = None;
 
-        while let Some(field) = multipart.next_field().await.map_err(|_|MultipartFormError::InvalidField)? {
+        while let Some(field) = multipart
+            .next_field()
+            .await
+            .map_err(|_| MultipartFormError::InvalidField)?
+        {
             let name = if let Some(name) = field.name() {
                 name
             } else {
@@ -89,11 +95,6 @@ where
 
         Ok(Self { form, file })
     }
-}
-
-#[derive(serde::Deserialize)]
-pub struct ErrorMessage {
-    error: Option<String>,
 }
 
 pub fn establish_db_connection() -> PgConnection {

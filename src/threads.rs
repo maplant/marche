@@ -1,6 +1,5 @@
 //! Display threads
 use std::collections::{HashMap, HashSet};
-use derive_more::From;
 
 use askama::Template;
 use axum::{
@@ -10,16 +9,17 @@ use axum::{
     Json,
 };
 use chrono::{prelude::*, NaiveDateTime};
+use derive_more::From;
 use diesel::prelude::*;
 use lazy_static::lazy_static;
+use marche_proc_macros::json_result;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use marche_proc_macros::json_result;
 
 use crate::{
     items::{IncomingOffer, ItemDrop, ItemThumbnail},
     users::{ProfileStub, Role, User, UserCache},
-    File, MultipartFormError, MultipartForm, NotFound,
+    File, MultipartForm, MultipartFormError, NotFound,
 };
 
 table! {
@@ -28,6 +28,7 @@ table! {
         last_post -> Integer,
         title -> Text,
         tags -> Array<Integer>,
+        num_replies -> Integer,
         pinned -> Bool,
         locked -> Bool,
     }
@@ -41,26 +42,29 @@ sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
 #[derive(Queryable, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id:        i32,
+    pub id:          i32,
     /// Id of the last post
-    pub last_post: i32,
+    pub last_post:   i32,
     /// Title of the thread
-    pub title:     String,
+    pub title:       String,
     /// Tags given to this thread
-    pub tags:      Vec<i32>,
+    pub tags:        Vec<i32>,
+    /// Number of replies to this thread, not including the first.
+    pub num_replies: i32,
     /// Whether or not the thread is pinned
-    pub pinned:    bool,
+    pub pinned:      bool,
     /// Whether or not the thread is locked
-    pub locked:    bool,
+    pub locked:      bool,
 }
 
 impl Thread {
     pub fn fetch(conn: &PgConnection, thread_id: i32) -> Result<Self, FetchThreadError> {
         use self::threads::dsl::*;
 
-        threads.filter(id.eq(thread_id))
+        threads
+            .filter(id.eq(thread_id))
             .first::<Self>(conn)
-            .map_err(|_|FetchThreadError::NoSuchThread)
+            .map_err(|_| FetchThreadError::NoSuchThread)
     }
 }
 
@@ -72,12 +76,13 @@ pub enum FetchThreadError {
 #[derive(Insertable)]
 #[table_name = "threads"]
 pub struct NewThread<'t> {
-    id:        i32,
-    title:     &'t str,
-    tags:      Vec<i32>,
-    last_post: i32,
-    pinned:    bool,
-    locked:    bool,
+    id:          i32,
+    title:       &'t str,
+    tags:        Vec<i32>,
+    last_post:   i32,
+    num_replies: i32,
+    pinned:      bool,
+    locked:      bool,
 }
 
 const THREADS_PER_PAGE: i64 = 25;
@@ -189,20 +194,9 @@ impl Index {
                     String::from("just now!")
                 };
 
-                // Count the number of replies:
-                let num_replies = {
-                    use self::replies::dsl::*;
-
-                    replies
-                        .filter(thread_id.eq(thread.id))
-                        .count()
-                        .get_result(&conn)
-                        .unwrap_or(0)
-                };
-
-                let replies = match num_replies {
-                    0 | 1 => format!("No replies"),
-                    2 => format!("1 reply"),
+                let replies = match thread.num_replies {
+                    0 => format!("No replies"),
+                    1 => format!("1 reply"),
                     x => format!("{} replies", x - 1),
                 };
 
@@ -436,14 +430,8 @@ pub struct ThreadForm {
 #[derive(Serialize, From)]
 pub enum SubmitThreadError {
     TitleOrBodyIsEmpty,
-    UploadImageError(
-        #[serde(skip)]
-        UploadImageError
-    ),
-    InternalDbError(
-        #[serde(skip)]
-        diesel::result::Error
-    ),
+    UploadImageError(#[serde(skip)] UploadImageError),
+    InternalDbError(#[serde(skip)] diesel::result::Error),
     MultipartFormError(MultipartFormError),
 }
 
@@ -502,6 +490,7 @@ impl ThreadForm {
                     last_post: first_post.id,
                     title: &thread.title,
                     tags,
+                    num_replies: 0,
                     pinned: false,
                     locked: false,
                 })
@@ -729,13 +718,8 @@ pub struct ReplyForm {
 pub enum ReplyError {
     ReplyIsEmpty,
     ThreadIsLocked,
-    UploadImageError(
-        UploadImageError
-    ),
-    InternalDbError(
-        #[serde(skip)]
-        diesel::result::Error
-    ),
+    UploadImageError(UploadImageError),
+    InternalDbError(#[serde(skip)] diesel::result::Error),
     FetchThreadError(FetchThreadError),
 }
 
@@ -764,6 +748,14 @@ impl ReplyForm {
         let (image, thumbnail, filename) = upload_image(file).await?;
 
         let html_output = parse_post(&conn, reply, thread_id);
+
+        {
+            use self::threads::dsl::*;
+            let _: Thread = diesel::update(threads)
+                .filter(id.eq(thread_id))
+                .set(num_replies.eq(num_replies + 1))
+                .get_result(&conn)?;
+        }
 
         let reply: Reply = diesel::insert_into(replies::table)
             .values(&NewReply {
@@ -799,10 +791,7 @@ pub struct EditPostForm {
 pub enum EditPostError {
     DoesNotOwnPost,
     CannotMakeEmpty,
-    InternalDbError(
-        #[serde(skip)]
-        diesel::result::Error
-    ),
+    InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
 impl EditPostForm {
@@ -978,25 +967,16 @@ async fn put_image(
 
 /*
 pub struct ImageUploadResult {
-    
+
 }
 */
 
 #[derive(Debug, Serialize, From)]
 pub enum UploadImageError {
     InvalidExtension,
-    ImageError(
-        #[serde(skip)]
-        image::ImageError
-    ),
-    InternalServerError(
-        #[serde(skip)]
-        tokio::task::JoinError
-    ),
-    InternalBlockStorageError(
-        #[serde(skip)]
-        SdkError<PutObjectError>
-    ),
+    ImageError(#[serde(skip)] image::ImageError),
+    InternalServerError(#[serde(skip)] tokio::task::JoinError),
+    InternalBlockStorageError(#[serde(skip)] SdkError<PutObjectError>),
 }
 
 // TODO: move return type to struct

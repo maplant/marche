@@ -52,8 +52,8 @@
                       var error_message = error_messages[response.Err];
                       var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
                       $("#error").html(`<div class="error" id="error">${error_message}</div>`)
-                  } else if (response.id !== undefined) {
-                      location.href = `/thread/${response.id}`;
+                  } else {
+                      location.href = `/thread/${response.Ok.id}`;
                   }
               },
               error: function(_, status, error) {

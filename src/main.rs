@@ -9,7 +9,8 @@ use axum::{
 use marche_server::{
     items::{self, ItemPage, OfferPage, OffersPage, ReactPage},
     threads::{
-        self, AuthorPage, EditPostForm, Index, ReplyForm, SetPinned, SetLocked, ThreadForm, ThreadPage,
+        self, AuthorPage, EditPostForm, Index, ReplyForm, SetLocked, SetPinned, ThreadForm,
+        ThreadPage,
     },
     users::{self, LeaderboardPage, LoginPage, ProfilePage, UpdateBioPage},
 };
