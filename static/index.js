@@ -31,19 +31,19 @@ function darkenRGBString(rgb, factor)
 }
 
 function add_tag() {
-    var val = $('#add-tag').val();
+    var val = $('#add-tag').val().toLowerCase();
     location.pathname = location.pathname + "/" + val;
 }
 
 function remove_tag(tag) {
+    var tag = tag.toLowerCase();
     var tags = location.pathname.split('/').slice(2);
-    console.log(tags);
     var result = '/t';
     tags.forEach(function (item, _) {
+        var item = item.toLowerCase();
         if (item !== tag) {
             result = result + '/' + item;
         }
     });
-    console.log(result);
     location.pathname = result;
 }
