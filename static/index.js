@@ -16,6 +16,15 @@ $(document).ready(function() {
         $(this).css({ 'background-color' : ''});
         $(this).parents("li.thread-menu-item").css({ 'background-color' : threadHLcolor});
     });
+    $(".tag").click(function(e) {
+        e.stopPropagation();
+        var result = location.pathname;
+        if (result.substr(-1) !== "/") {
+            result += '/';
+        }
+        result += $(this).attr('name');
+        location.pathname = result;
+    });
     $("li.thread-menu-item").hover(function() {
         $(this).parents("li.thread-menu-item").css({ 'background-color' : ''});
         $(this).css({ 'background-color' : threadHLcolor});
@@ -32,7 +41,12 @@ function darkenRGBString(rgb, factor)
 
 function add_tag() {
     var val = $('#add-tag').val().toLowerCase().trim();
-    location.pathname = location.pathname + "/" + val;
+    var result = location.pathname;
+    if (result.substr(-1) !== "/") {
+        result += '/';
+    }
+    result += val;
+    location.pathname = result;
 }
 
 function remove_tag(tag) {

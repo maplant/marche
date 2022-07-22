@@ -94,7 +94,6 @@ const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 pub struct Index {
     tags:      Vec<Tag>,
     posts:     Vec<ThreadLink>,
-    curr_path: String,
     offers:    i64,
 }
 
@@ -211,7 +210,6 @@ impl Index {
             .collect();
 
         Ok(Self {
-            curr_path: viewed_tags.fmt(),
             tags:      viewed_tags.tags,
             posts:     posts,
             offers:    IncomingOffer::count(&conn, &user),
