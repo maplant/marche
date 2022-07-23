@@ -437,10 +437,7 @@ where
         let signed = cookies.private(&private_key);
         let session_id = signed.get(USER_SESSION_ID_COOKIE).ok_or(Unauthorized)?;
         let conn = crate::establish_db_connection();
-        let ClientIp(ip) = ClientIp::from_request(req)
-            .await
-            .map_err(|_| Unauthorized)?;
-        let session = LoginSession::fetch(&conn, session_id.value(), IpNetwork::from(ip))
+        let session = LoginSession::fetch(&conn, session_id.value())
             .map_err(|_| Unauthorized)?;
         User::from_session(&conn, &session).map_err(|_| Unauthorized)
     }
@@ -560,7 +557,7 @@ pub enum LoginFailure {
 
 impl LoginSession {
     /// Fetch the login session.
-    pub fn fetch(conn: &PgConnection, sess_id: &str, ip: IpNetwork) -> Result<Self, ()> {
+    pub fn fetch(conn: &PgConnection, sess_id: &str) -> Result<Self, ()> {
         use self::login_sessions::dsl::*;
 
         let curr_session = login_sessions
