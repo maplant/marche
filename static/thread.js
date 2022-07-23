@@ -24,7 +24,7 @@ $(document).ready(function() {
                     $(`.error-${id}`).html(`<div class="error">${error_message}</div>`)
                 } else {
                     // TODO: Do this properly
-                    location.href = `/thread/${response.thread_id}?jump_to=${response.id}`;
+                    location.href = `/thread/${response.Ok.thread_id}?jump_to=${response.Ok.id}`;
                 }
             },
             error: function(_, status, error) {
