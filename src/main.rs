@@ -7,7 +7,7 @@ use axum::{
     Router,
 };
 use marche_server::{
-    items::{self, ItemPage, OfferPage, OffersPage, ReactPage},
+    items::{self, ItemPage, ReactPage, TradeRequestForm, TradeRequestPage, TradeRequestsPage},
     threads::{
         AuthorPage, EditPostForm, Index, ReplyForm, SetLocked, SetPinned, ThreadForm, ThreadPage,
     },
@@ -54,11 +54,11 @@ async fn main() {
         .route("/item/:item_id", get(ItemPage::show))
         .route("/equip/:item_id", get(items::equip))
         .route("/unequip/:item_id", get(items::unequip))
-        .route("/offer/:receiver_id", post(items::make_offer))
+        .route("/offer/:receiver_id", post(TradeRequestForm::submit))
         .route("/accept/:trade_id", post(items::accept_offer))
         .route("/decline/:trade_id", post(items::decline_offer))
-        .route("/offer/:receiver_id", get(OfferPage::show))
-        .route("/offers", get(OffersPage::show))
+        .route("/offer/:receiver_id", get(TradeRequestPage::show))
+        .route("/offers", get(TradeRequestsPage::show))
         .route("/:catch/*catch", get(marche_server::NotFound::show))
         .nest(
             "/static",

@@ -71,13 +71,58 @@
         </div>
       </div>
       <div class="row">
+        <div class="cell"></div>
+        <div class="cell">
+          <b>
+            Note (optional):
+          </b>
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell"></div>
+        <div class="cell">
+          <textarea name="note" id="note" rows="10" cols="100" style="width: 99%; resize: none; box-sizing: border-box; padding: 5px" placeholder="Add a note to your trade request (maximum 150 characters)"></textarea>
+        </div>
+      </div>
+      <div class="row">
         <div class="cell">
         </div>
         <div class="cell">
-          <button type="submit">Submit trade offer</button>
+          <div style="display: flex">
+            <button type="submit">Submit trade offer</button>
+            <div id="error" style="margin-left: 10px"></div>
+          </div>
         </div>
       </div>
     </div>
+    <script type="text/javascript">
+      $(document).ready(function () {
+          const error_messages = {
+              CannotTradeWithSelf: "You cannot submit a trade offer with yourself",
+              ItemNoLongerOwned: "One or more items selected are no longer owned by their original owner; try refreshing",
+              InvalidTrade: "A trade of this type is not valid",
+              NoteTooLong: "Note cannot exceed 150 characters",
+              TradeIsEmpty: "Trade cannot be empty",
+              InternalDbError: "There was an internal error, please try again later",
+          };
+          $("form").ajaxForm({
+              url: '/offer/{{receiver.id}}',
+              type: 'post',
+              success: function(response, _, _, _) {
+                  if (response.Err !== undefined) {
+                      var error_message = error_messages[response.Err];
+                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                      $("#error").html(`<div class="error">${error_message}</div>`)
+                  } else {
+                      location.href = `/offers?jump_to=${response.Ok.id}`
+                  }
+              },
+              error: function(_, status, error) {
+                  $("#error").html(`<div class="error">An unknown error occurred</div>`);
+              }
+          });
+      });
+    </script>
   </form>
 </li>
 {% endblock %}

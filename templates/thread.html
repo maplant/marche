@@ -147,13 +147,13 @@
                   if (response.Err !== undefined) {
                       var error_message = error_messages[response.Err];
                       var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
-                      $("#error").html(`<div class="error" id="error">${error_message}</div>`)
+                      $("#error").html(`<div class="error">${error_message}</div>`)
                   } else {
                       location.href = `/thread/{{id}}?jump_to=${response.Ok.id}`;
                   }
               },
               error: function(_, status, error) {
-                  $("#error").html(`<div class="error" id="error">Unable to upload image</div>`)
+                  $("#error").html(`<div class="error">Unable to upload image</div>`);
               }
           });
       });

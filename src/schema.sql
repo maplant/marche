@@ -92,5 +92,6 @@ CREATE TABLE trade_requests (
   sender_id INTEGER NOT NULL,
   sender_items INTEGER[] NOT NULL,
   receiver_id INTEGER NOT NULL,
-  receiver_items INTEGER[] NOT NULL
+  receiver_items INTEGER[] NOT NULL,
+  note TEXT
 );

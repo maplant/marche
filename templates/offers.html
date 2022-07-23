@@ -34,6 +34,16 @@
         {% for item in offer.sender_items %}
         {% include "item-thumbnail.html" %}
         {% endfor %}
+        {% match offer.note %}
+        {% when Some with (note) %}
+        <p>
+          <div>
+            <p style="text-align: center">“ {{note}} ”</p>
+            <p style="text-align: right">— {{offer.sender.name}}</p>
+          </div>
+        </p>
+        {% when None %}
+        {% endmatch %}
       </div>
       <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
         <p><a href="/profile/{{user.id}}" style="color: white; text-decoration: none">{{user.name}}</a></p>
@@ -96,6 +106,16 @@
         {% for item in offer.sender_items %}
         {% include "item-thumbnail.html" %}
         {% endfor %}
+        {% match offer.note %}
+        {% when Some with (note) %}
+        <p>
+          <div class="trade-note">
+            <p style="text-align: center">“ {{note}} ”</p>
+            <p style="text-align: right">— {{user.name}}</p>
+          </div>
+        </p>
+        {% when None %}
+        {% endmatch %}
       </div>
       <div class="profile" style="{{offer.receiver.background}} text-align: center; vertical-align: top; min-width: 180px">
         <p><a href="/profile/{{offer.receiver.id}}" style="color: white; text-decoration: none">{{offer.receiver.name}}</a></p>
@@ -193,6 +213,11 @@
               $(`#rescind-${offer_id}`).prop("disabled", false);
           }
       });
+  }
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.has('jump_to')) {
+      const jump_to = urlParams.get('jump_to');
+      $(`#offer-${jump_to}`)[0].scrollIntoView({ block: "center" });
   }
 </script>
 {% endblock %}

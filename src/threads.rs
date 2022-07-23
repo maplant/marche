@@ -92,9 +92,9 @@ const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
-    tags:      Vec<Tag>,
-    posts:     Vec<ThreadLink>,
-    offers:    i64,
+    tags:   Vec<Tag>,
+    posts:  Vec<ThreadLink>,
+    offers: i64,
 }
 
 #[derive(Serialize)]
@@ -210,9 +210,9 @@ impl Index {
             .collect();
 
         Ok(Self {
-            tags:      viewed_tags.tags,
-            posts:     posts,
-            offers:    IncomingOffer::count(&conn, &user),
+            tags:   viewed_tags.tags,
+            posts:  posts,
+            offers: IncomingOffer::count(&conn, &user),
         })
     }
 }
@@ -414,7 +414,7 @@ pub struct ThreadForm {
 #[derive(Serialize, From)]
 pub enum SubmitThreadError {
     TitleOrBodyIsEmpty,
-    UploadImageError(#[serde(skip)] UploadImageError),
+    UploadImageError(UploadImageError),
     InternalDbError(#[serde(skip)] diesel::result::Error),
     MultipartFormError(MultipartFormError),
 }

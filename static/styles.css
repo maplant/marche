@@ -85,6 +85,15 @@ div.reward {
     display: inline-block;
 }
 
+.trade-note {
+    background: #cfcfcf;
+    padding: 15px;
+    border-radius: 5px;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    color: #4d4b4b;
+}
+
 button {
     padding: 10px;
 }

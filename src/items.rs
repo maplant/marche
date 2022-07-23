@@ -7,6 +7,7 @@ use axum::{
     Json,
 };
 use chrono::{Duration, Utc};
+use derive_more::From;
 use diesel::{
     pg::Pg,
     prelude::*,
@@ -17,6 +18,7 @@ use diesel::{
 use diesel_derive_enum::DbEnum;
 use lazy_static::lazy_static;
 use maplit::hashmap;
+use marche_proc_macros::json_result;
 use rand::{
     prelude::{thread_rng, IteratorRandom},
     Rng, SeedableRng,
@@ -822,22 +824,25 @@ table! {
         sender_items -> Array<Integer>,
         receiver_id -> Integer,
         receiver_items -> Array<Integer>,
+        note -> Nullable<Text>,
     }
 }
 
 /// A trade between two users.
-#[derive(Queryable)]
+#[derive(Serialize, Queryable)]
 pub struct TradeRequest {
-    /// Id of the trade.
+    /// Id of the trade
     pub id:             i32,
-    /// UserId of the sender.
+    /// UserId of the sender
     pub sender_id:      i32,
-    /// Items offered for trade (expressed as a vec of OwnedItemIds).
+    /// Items offered for trade (expressed as a vec of OwnedItemIds)
     pub sender_items:   Vec<i32>,
-    /// UserId of the receiver.
+    /// UserId of the receiver
     pub receiver_id:    i32,
     /// Items requested for trade
     pub receiver_items: Vec<i32>,
+    /// Any note attached to this request
+    pub note:           Option<String>,
 }
 
 impl TradeRequest {
@@ -929,11 +934,12 @@ pub struct NewTradeRequest {
     sender_items:   Vec<i32>,
     receiver_id:    i32,
     receiver_items: Vec<i32>,
+    note:           Option<String>,
 }
 
 #[derive(Template)]
 #[template(path = "offer.html")]
-pub struct OfferPage {
+pub struct TradeRequestPage {
     sender:             ProfileStub,
     sender_inventory:   Vec<ItemThumbnail>,
     receiver:           ProfileStub,
@@ -941,7 +947,7 @@ pub struct OfferPage {
     offers:             i64,
 }
 
-impl OfferPage {
+impl TradeRequestPage {
     pub async fn show(sender: User, Path(receiver_id): Path<i32>) -> Self {
         let conn = crate::establish_db_connection();
         let receiver = User::fetch(&conn, receiver_id).unwrap();
@@ -963,38 +969,86 @@ impl OfferPage {
     }
 }
 
-pub async fn make_offer(
-    sender: User,
-    Path(receiver_id): Path<i32>,
-    Form(trade): Form<HashMap<i32, i32>>,
-) -> Redirect {
-    let mut sender_items = Vec::new();
-    let mut receiver_items = Vec::new();
+#[derive(Debug, Deserialize)]
+pub struct TradeRequestForm {
+    note:  Option<String>,
+    #[serde(flatten)]
+    trade: HashMap<String, String>,
+}
 
-    let conn = crate::establish_db_connection();
+#[derive(Serialize, From)]
+pub enum SubmitOfferError {
+    CannotTradeWithSelf,
+    ItemNoLongerOwned,
+    InvalidTrade,
+    NoteTooLong,
+    TradeIsEmpty,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InvalidForm(#[serde(skip)] std::num::ParseIntError),
+}
 
-    for (&item, &trader) in trade.iter() {
-        let drop = ItemDrop::fetch(&conn, item);
-        if trader != drop.owner_id {
-            return Redirect::to("/".parse().unwrap());
+const MAX_NOTE_LENGTH: usize = 150;
+
+impl TradeRequestForm {
+    #[json_result]
+    pub async fn submit(
+        sender: User,
+        Path(receiver_id): Path<i32>,
+        Form(TradeRequestForm { note, trade }): Form<TradeRequestForm>,
+    ) -> Json<Result<TradeRequest, SubmitOfferError>> {
+        let mut sender_items = Vec::new();
+        let mut receiver_items = Vec::new();
+
+        if sender.id == receiver_id {
+            return Err(SubmitOfferError::CannotTradeWithSelf);
         }
-        if trader == sender.id {
-            sender_items.push(drop.id);
-        } else {
-            receiver_items.push(drop.id);
+
+        let conn = crate::establish_db_connection();
+
+        for (item, trader) in trade.into_iter() {
+            let item: i32 = item.parse()?;
+            let trader: i32 = trader.parse()?;
+
+            let drop = ItemDrop::fetch(&conn, item);
+            if trader != drop.owner_id {
+                return Err(SubmitOfferError::ItemNoLongerOwned);
+            }
+            if trader == sender.id {
+                sender_items.push(drop.id);
+            } else if trader == receiver_id {
+                receiver_items.push(drop.id);
+            } else {
+                return Err(SubmitOfferError::InvalidTrade);
+            }
         }
+
+        if sender_items.is_empty() && receiver_items.is_empty() {
+            return Err(SubmitOfferError::TradeIsEmpty);
+        }
+
+        let note = note
+            .and_then(|note| {
+                let trimmed = note.trim();
+                (!trimmed.is_empty()).then(|| {
+                    if trimmed.len() > MAX_NOTE_LENGTH {
+                        Err(SubmitOfferError::NoteTooLong)
+                    } else {
+                        Ok(trimmed.to_string())
+                    }
+                })
+            })
+            .transpose()?;
+
+        Ok(diesel::insert_into(trade_requests::table)
+            .values(&NewTradeRequest {
+                sender_id: sender.id,
+                sender_items,
+                receiver_id,
+                receiver_items,
+                note,
+            })
+            .get_result::<TradeRequest>(&conn)?)
     }
-
-    let _ = diesel::insert_into(trade_requests::table)
-        .values(&NewTradeRequest {
-            sender_id: sender.id,
-            sender_items,
-            receiver_id,
-            receiver_items,
-        })
-        .get_result::<TradeRequest>(&conn);
-
-    Redirect::to("/offers".parse().unwrap())
 }
 
 pub async fn decline_offer(
@@ -1028,14 +1082,14 @@ pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Json<Result<
 
 #[derive(Template)]
 #[template(path = "offers.html")]
-pub struct OffersPage {
+pub struct TradeRequestsPage {
     user:            ProfileStub,
     incoming_offers: Vec<IncomingOffer>,
     outgoing_offers: Vec<OutgoingOffer>,
     offers:          i64,
 }
 
-impl OffersPage {
+impl TradeRequestsPage {
     pub async fn show(user: User) -> Self {
         let conn = crate::establish_db_connection();
         let mut user_cache = UserCache::new(&conn);
@@ -1058,6 +1112,7 @@ pub struct IncomingOffer {
     sender:         ProfileStub,
     sender_items:   Vec<ItemThumbnail>,
     receiver_items: Vec<ItemThumbnail>,
+    note:           Option<String>,
 }
 
 impl IncomingOffer {
@@ -1087,6 +1142,7 @@ impl IncomingOffer {
                         .into_iter()
                         .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
                         .collect(),
+                    note:           trade.note,
                 }
             })
             .collect();
@@ -1108,6 +1164,7 @@ struct OutgoingOffer {
     sender_items:   Vec<ItemThumbnail>,
     receiver:       ProfileStub,
     receiver_items: Vec<ItemThumbnail>,
+    note:           Option<String>,
 }
 
 impl OutgoingOffer {
@@ -1137,6 +1194,7 @@ impl OutgoingOffer {
                         .into_iter()
                         .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
                         .collect(),
+                    note:           trade.note,
                 }
             })
             .collect();
