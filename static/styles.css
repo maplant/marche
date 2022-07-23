@@ -370,6 +370,11 @@ div.post {
     grid-gap: 10px;
     padding-top: 10px;
     padding-bottom: 10px;
+    text-shadow:
+        1px 0 white,
+        0 1px white,
+        -1px 0 white,
+        0 -1px white;
 }
 
 .respond-to-preview {

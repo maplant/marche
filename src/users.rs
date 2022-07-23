@@ -569,12 +569,6 @@ impl LoginSession {
             .ok()
             .ok_or(())?;
 
-        // TODO: if the session is valid but the ip does not match, we will want to
-        // destroy the session.
-        if curr_session.ip_addr != ip {
-            return Err(());
-        }
-
         // The session is automatically invalid if the session is longer than a month
         // old.
         if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
