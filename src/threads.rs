@@ -114,7 +114,7 @@ struct ThreadLink {
 
 impl Index {
     pub async fn show(_user: User) -> Redirect {
-        Redirect::to("/t/en".parse().unwrap())
+        Redirect::to("/t/en")
     }
 
     pub async fn show_with_tags(
@@ -128,7 +128,7 @@ impl Index {
         // If no tags are selected and the user is not privileged, force
         // the user to redirect to /t/en
         if viewed_tags.is_empty() && user.role < Role::Moderator {
-            return Err(Redirect::to("/t/en".parse().unwrap()));
+            return Err(Redirect::to("/t/en"));
         }
 
         let conn = crate::establish_db_connection();

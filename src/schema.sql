@@ -29,7 +29,8 @@ CREATE TABLE login_sessions (
   id SERIAL PRIMARY KEY,
   session_id VARCHAR NOT NULL,
   user_id INT NOT NULL,
-  session_start TIMESTAMP NOT NULL
+  session_start TIMESTAMP NOT NULL,
+  ip_addr CIDR NOT NULL
 );
 
 CREATE TABLE threads (

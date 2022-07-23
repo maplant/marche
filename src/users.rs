@@ -9,9 +9,11 @@ use axum::{
     extract::{Form, FromRequest, Path, RequestParts},
     response::{IntoResponse, Redirect, Response},
 };
+use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
+use ipnetwork::IpNetwork;
 use libpasta::verify_password;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -390,7 +392,7 @@ impl ProfilePage {
 }
 
 pub async fn show_current_user(curr_user: User) -> Redirect {
-    Redirect::to(format!("/profile/{}", curr_user.id).parse().unwrap())
+    Redirect::to(&format!("/profile/{}", curr_user.id))
 }
 
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord)]
@@ -435,7 +437,11 @@ where
         let signed = cookies.private(&private_key);
         let session_id = signed.get(USER_SESSION_ID_COOKIE).ok_or(Unauthorized)?;
         let conn = crate::establish_db_connection();
-        let session = LoginSession::fetch(&conn, session_id.value()).map_err(|_| Unauthorized)?;
+        let ClientIp(ip) = ClientIp::from_request(req)
+            .await
+            .map_err(|_| Unauthorized)?;
+        let session = LoginSession::fetch(&conn, session_id.value(), IpNetwork::from(ip))
+            .map_err(|_| Unauthorized)?;
         User::from_session(&conn, &session).map_err(|_| Unauthorized)
     }
 }
@@ -444,7 +450,7 @@ pub struct Unauthorized;
 
 impl IntoResponse for Unauthorized {
     fn into_response(self) -> Response {
-        Redirect::to("/login".parse().unwrap()).into_response()
+        Redirect::to("/login").into_response()
     }
 }
 
@@ -516,6 +522,7 @@ table! {
         session_id -> Varchar,
         user_id -> Integer,
         session_start -> Timestamp,
+        ip_addr -> Cidr,
     }
 }
 
@@ -532,6 +539,8 @@ pub struct LoginSession {
     pub user_id:       i32,
     /// When the session began
     pub session_start: NaiveDateTime,
+    /// The IP address of the connecting client
+    pub ip_addr:       IpNetwork,
 }
 
 #[derive(Insertable)]
@@ -540,6 +549,7 @@ pub struct NewSession {
     user_id:       i32,
     session_id:    String,
     session_start: NaiveDateTime,
+    ip_addr:       IpNetwork,
 }
 
 pub enum LoginFailure {
@@ -549,16 +559,22 @@ pub enum LoginFailure {
 }
 
 impl LoginSession {
-    /// Get session
-    pub fn fetch(conn: &PgConnection, sess_id: &str) -> Result<Self, ()> {
+    /// Fetch the login session.
+    pub fn fetch(conn: &PgConnection, sess_id: &str, ip: IpNetwork) -> Result<Self, ()> {
         use self::login_sessions::dsl::*;
 
-        // TODO: If there are more than two sessions with the same id, fail.
         let curr_session = login_sessions
             .filter(session_id.eq(sess_id))
             .first::<Self>(conn)
             .ok()
             .ok_or(())?;
+
+        // TODO: if the session is valid but the ip does not match, we will want to
+        // destroy the session.
+        if curr_session.ip_addr != ip {
+            return Err(());
+        }
+
         // The session is automatically invalid if the session is longer than a month
         // old.
         if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
@@ -573,9 +589,8 @@ impl LoginSession {
         conn: &PgConnection,
         user_name: &str,
         password: &str,
+        ip_addr: IpNetwork,
     ) -> Result<Self, LoginFailure> {
-        use self::login_sessions::dsl::user_id;
-
         let user_name = user_name.trim();
         let user = {
             use self::users::dsl::*;
@@ -591,9 +606,7 @@ impl LoginSession {
             return Err(LoginFailure::UserOrPasswordIncorrect);
         }
 
-        diesel::delete(login_sessions::table.filter(user_id.eq(user.id)))
-            .execute(conn)
-            .map_err(|_| LoginFailure::FailedToCreateSession)?;
+        // TODO: Add extra protections here?
 
         let mut key = [0u8; 16];
         OsRng.fill_bytes(&mut key);
@@ -604,6 +617,7 @@ impl LoginSession {
             user_id: user.id,
             session_id: i128::from_be_bytes(key).to_string(),
             session_start,
+            ip_addr,
         };
         diesel::insert_into(login_sessions::table)
             .values(&new_session)
@@ -633,15 +647,19 @@ impl LoginPage {
         }
     }
 
-    pub async fn attempt(jar: Cookies, login: Form<LoginForm>) -> Result<Redirect, Self> {
+    pub async fn attempt(
+        jar: Cookies,
+        ClientIp(ip): ClientIp,
+        login: Form<LoginForm>,
+    ) -> Result<Redirect, Self> {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
         let conn = crate::establish_db_connection();
-        LoginSession::login(&conn, &login.username, &login.password)
+        LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))
             .map(|LoginSession { session_id, .. }| {
                 private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
-                Redirect::to("/".parse().unwrap())
+                Redirect::to("/")
             })
             .map_err(|_e| Self {
                 error:  Some("Incorrect username or password"),
@@ -690,6 +708,6 @@ impl UpdateBioPage {
             .set(bio.eq(new_bio))
             .get_result::<User>(&conn);
 
-        Redirect::to(format!("/profile/{}", curr_user.id).parse().unwrap())
+        Redirect::to(&format!("/profile/{}", curr_user.id))
     }
 }

@@ -685,7 +685,7 @@ pub async fn equip(user: User, Path(drop_id): Path<i32>) -> Redirect {
     if drop.owner_id == user.id {
         drop.equip(&conn);
     }
-    Redirect::to(format!("/profile/{}", user.id).parse().unwrap())
+    Redirect::to(&format!("/profile/{}", user.id))
 }
 
 pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
@@ -694,7 +694,7 @@ pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
     if drop.owner_id == user.id {
         drop.unequip(&conn);
     }
-    Redirect::to(format!("/profile/{}", user.id).parse().unwrap())
+    Redirect::to(&format!("/profile/{}", user.id))
 }
 
 #[derive(Template)]
@@ -809,11 +809,9 @@ impl ReactPage {
                 )
             })?;
 
-        Ok(Redirect::to(
-            format!("/thread/{thread_id}?jump_to={post_id}")
-                .parse()
-                .unwrap(),
-        ))
+        Ok(Redirect::to(&format!(
+            "/thread/{thread_id}?jump_to={post_id}"
+        )))
     }
 }
 

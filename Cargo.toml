@@ -7,13 +7,15 @@ default-run = "marche-server"
 
 [dependencies]
 anyhow = "1.0"
+axum = { version = "0.5", features = ["multipart", "json"] }
+axum-client-ip = "0.2.0"
 base64ct = "1.5"
 thiserror = "1.0"
 aws-config = "0.10.1"
 aws-sdk-s3 = "0.10.1"
 rand = { version = "0.8" , features = ["getrandom"] }
 derive_more = "0.99"
-diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json"] }
+diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json", "network-address"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -25,18 +27,18 @@ diesel-derive-enum = { version = "1", features = ["postgres"] }
 rand_xorshift = "0.3.0"
 regex = "1"
 comrak = "0.12"
-askama = { version = "0.11", features = ["with-axum"] }
-askama_axum = "0.1.0"
-axum = { version = "0.4", features = ["multipart"] }
+askama = { version = "0.11", features = ["with-axum"], git = "https://github.com/djc/askama.git" }
+askama_axum = { version = "0.1", git = "https://github.com/djc/askama.git" }
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
-tower-http = { version = "0.2", features = ["fs", "trace"] }
-tower-cookies = { version = "0.5", features = ["private"] }
+tower-http = { version = "0.3", features = ["fs", "trace"] }
+tower-cookies = { version = "0.7", features = ["private"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
 http = "0.2"
 urlencoding = "2"
 image = "0.24"
+ipnetwork = "0.18"
 
 [dependencies.marche-proc-macros]
 path = "proc-macros"

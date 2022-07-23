@@ -28,7 +28,7 @@ async fn main() {
         .route("/", get(Index::show))
         .route(
             "/favicon.ico",
-            get(|| async { Redirect::permanent("/static/favicon.ico".parse().unwrap()) }),
+            get(|| async { Redirect::permanent("/static/favicon.ico") }),
         )
         .route("/t/*tags", get(Index::show_with_tags))
         .route(
@@ -75,7 +75,7 @@ async fn main() {
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     tracing::info!("Marche server launched, listening on {}", addr);
     axum::Server::bind(&addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
 }
