@@ -21,6 +21,8 @@ use derive_more::From;
 use diesel::{pg::PgConnection, Connection};
 use serde::{de::DeserializeOwned, Serialize};
 
+pub const DATE_FMT: &str = "%B %-d at %I:%M %P";
+
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be
 #[derive(Debug)]
@@ -121,5 +123,22 @@ impl NotFound {
         Self {
             offers: user.incoming_offers(&conn),
         }
+    }
+}
+
+use std::{fmt, str::FromStr};
+
+use serde::{de, Deserialize, Deserializer};
+
+fn empty_string_as_none<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    let opt = Option::<String>::deserialize(de)?;
+    match opt.as_deref() {
+        None | Some("") => Ok(None),
+        Some(s) => FromStr::from_str(s).map_err(de::Error::custom).map(Some),
     }
 }

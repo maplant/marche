@@ -86,7 +86,6 @@ pub struct NewThread<'t> {
 }
 
 const THREADS_PER_PAGE: i64 = 25;
-const DATE_FMT: &str = "%B %-d at %I:%M %P";
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 #[derive(Template)]
@@ -354,7 +353,7 @@ impl ThreadPage {
                 body:      t.body,
                 body_html: t.body_html,
                 // TODO: we need to add a user setting to format this to the local time.
-                date:      t.post_date.format(DATE_FMT).to_string(),
+                date:      t.post_date.format(crate::DATE_FMT).to_string(),
                 reactions: t
                     .reactions
                     .into_iter()
@@ -695,6 +694,7 @@ pub struct NewReply<'b, 'h> {
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
+    // TODO: Rename body
     reply: String,
 }
 
@@ -802,11 +802,10 @@ impl EditPostForm {
         let html_output = parse_post(&conn, body, post.thread_id)
             + &format!(
                 r#" <span style="font-size: 80%; color: grey">Edited on {}</span>"#,
-                Utc::now().naive_utc().format(DATE_FMT)
+                Utc::now().naive_utc().format(crate::DATE_FMT)
             );
 
-        diesel::update(replies::table)
-            .filter(replies::dsl::id.eq(post_id))
+        diesel::update(replies::table.find(post_id))
             .set((
                 replies::dsl::body.eq(body),
                 replies::dsl::body_html.eq(html_output),

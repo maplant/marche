@@ -7,10 +7,12 @@
 <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
   {{title}}
   {% if viewer_role > Role::User %}
-  <input type="button" id="toggle_pinned_button" value="📌" onclick="toggle_pinned()"
-         style={% if pinned %}"border-style: inset;"{% else %}"border-style: outset"{% endif %}>
-  <input type="button" id="toggle_locked_button" value="🔒" onclick="toggle_locked()"
-         style={% if locked %}"border-style: inset;"{% else %}"border-style: outset"{% endif %}>
+  <button id="toggle_pinned_button" onclick="toggle_pinned()"
+          {% if pinned %}style="filter: brightness(70%)"{% endif %}
+          >📌</button>
+  <button id="toggle_locked_button" onclick="toggle_locked()"
+          {% if locked %}style="filter: brightness(70%)"{% endif %}
+          >🔒</button>
   {% endif %}
 </li>
 {% for post in posts %}

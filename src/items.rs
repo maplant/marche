@@ -371,7 +371,6 @@ impl ItemDrop {
                 )
             }
             ItemType::Reaction { filename, .. } => format!(
-                // TODO(map): Add rotation
                 r#"
 <div style="animation: start, {div_animation};">
     <img src="/static/{filename}.png" 
@@ -387,7 +386,14 @@ impl ItemDrop {
                 animation = attrs.animation,
                 filter = attrs.filter,
             ),
-            ItemType::Badge { value } => format!(r#"<div style="font-size: 200%">{}</div>"#, value),
+            ItemType::Badge { value } => format!(
+                r#"<div style="font-size: 200%;
+                               text-shadow: 1px 0 white,
+                                            0 1px white,
+                                           -1px 0 white,
+                                            0 -1px white;
+                              ">{value}</div>"#
+            ),
         }
     }
 

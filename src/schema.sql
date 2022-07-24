@@ -14,7 +14,9 @@ CREATE TABLE users (
   last_reward TIMESTAMP NOT NULL,
   equip_slot_prof_pic INTEGER,
   equip_slot_background INTEGER,
-  equip_slot_badges INTEGER[] NOT NULL
+  equip_slot_badges INTEGER[] NOT NULL,
+  banned_until TIMESTAMP,
+  notes TEXT NOT NULL,
 );
 
 create TABLE reading_history (

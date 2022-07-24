@@ -6,15 +6,18 @@ use std::{
 use askama::Template;
 use axum::{
     async_trait,
-    extract::{Form, FromRequest, Path, RequestParts},
+    extract::{Form, FromRequest, Path, Query, RequestParts},
     response::{IntoResponse, Redirect, Response},
+    Json,
 };
 use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
+use derive_more::From;
 use diesel::prelude::*;
 use diesel_derive_enum::DbEnum;
 use ipnetwork::IpNetwork;
 use libpasta::verify_password;
+use marche_proc_macros::json_result;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use tower_cookies::{Cookie, Cookies, Key};
@@ -40,6 +43,8 @@ table! {
         equip_slot_prof_pic -> Nullable<Integer>,
         equip_slot_background -> Nullable<Integer>,
         equip_slot_badges -> Array<Integer>,
+        banned_until -> Nullable<Timestamp>,
+        notes -> Text,
     }
 }
 
@@ -76,6 +81,10 @@ pub struct User {
     pub equip_slot_background: Option<i32>,
     /// Badge equipment slots
     pub equip_slot_badges:     Vec<i32>,
+    /// If the user is banned, and for how long
+    pub banned_until:          Option<NaiveDateTime>,
+    /// Notes on the user by moderators or admins
+    pub notes:                 String,
 }
 
 pub const MAX_NUM_BADGES: usize = 10;
@@ -112,6 +121,15 @@ impl User {
         } else {
             63 - xp.leading_zeros()
         }
+    }
+
+    pub fn is_banned(&self) -> bool {
+        self.banned_until
+            .map(|until| {
+                let now = Utc::now().naive_utc();
+                now < until
+            })
+            .unwrap_or(false)
     }
 
     /// Returns a range of the current completion of the user's next level.
@@ -315,21 +333,100 @@ impl User {
     }
 }
 
+#[derive(Deserialize)]
+pub struct SetBan {
+    #[serde(default, deserialize_with = "crate::empty_string_as_none")]
+    ban_len: Option<u32>,
+}
+
+#[derive(Serialize, From)]
+pub enum BanUserError {
+    Unprivileged,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+impl SetBan {
+    #[json_result]
+    pub async fn submit(
+        curr_user: User,
+        Path(user_id): Path<i32>,
+        Query(SetBan { ban_len }): Query<SetBan>,
+    ) -> Json<Result<(), BanUserError>> {
+        use self::users::dsl::*;
+
+        println!("here?");
+
+        if curr_user.role < Role::Moderator {
+            return Err(BanUserError::Unprivileged);
+        }
+
+        let conn = crate::establish_db_connection();
+        let ban = ban_len.map(|days| (Utc::now() + Duration::days(days as i64)).naive_utc());
+        let _ = diesel::update(users.find(user_id))
+            .set(banned_until.eq(ban))
+            .get_result::<User>(&conn)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+pub struct AddNoteForm {
+    body: String,
+}
+
+#[derive(Serialize, From)]
+pub enum AddNoteError {
+    Unprivileged,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+impl AddNoteForm {
+    #[json_result]
+    pub async fn submit(
+        viewer: User,
+        Path(user_id): Path<i32>,
+        Form(AddNoteForm { body }): Form<AddNoteForm>,
+    ) -> Json<Result<(), AddNoteError>> {
+        use self::users::dsl::*;
+
+        if viewer.role < Role::Moderator {
+            return Err(AddNoteError::Unprivileged);
+        }
+
+        let conn = crate::establish_db_connection();
+        let viewer_name = viewer.name;
+
+        let new_note = format!("<p>“{body}” — {viewer_name}</p>");
+
+        let _: User = diesel::update(users)
+            .filter(id.eq(user_id))
+            .set(notes.eq(notes.concat(new_note)))
+            .get_result(&conn)?;
+
+        Ok(())
+    }
+}
+
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct ProfilePage {
-    id:           i32,
-    name:         String,
-    picture:      Option<String>,
-    bio:          String,
-    level:        LevelInfo,
-    equipped:     Vec<ItemThumbnail>,
-    inventory:    Vec<ItemThumbnail>,
-    badges:       Vec<String>,
-    background:   String,
-    is_curr_user: bool,
-    viewer_role:  Role,
-    offers:       i64,
+    id:            i32,
+    name:          String,
+    picture:       Option<String>,
+    bio:           String,
+    level:         LevelInfo,
+    equipped:      Vec<ItemThumbnail>,
+    inventory:     Vec<ItemThumbnail>,
+    badges:        Vec<String>,
+    background:    String,
+    is_banned:     bool,
+    is_curr_user:  bool,
+    ban_timestamp: String,
+    viewer_role:   Role,
+    viewer_name:   String,
+    offers:        i64,
+    notes:         String,
 }
 
 impl ProfilePage {
@@ -374,8 +471,15 @@ impl ProfilePage {
             .map(|(drop, _)| drop.thumbnail(&conn))
             .collect::<Vec<_>>();
 
+        let ban_timestamp = user
+            .banned_until
+            .map(|x| x.format(crate::DATE_FMT).to_string())
+            .unwrap_or_else(String::new);
+
         Ok(Self {
             id,
+            is_banned: user.is_banned(),
+            ban_timestamp,
             picture: user.get_profile_pic(&conn),
             offers: items::IncomingOffer::count(&conn, &curr_user),
             level: user.level_info(),
@@ -386,7 +490,9 @@ impl ProfilePage {
             equipped,
             inventory,
             is_curr_user: user.id == curr_user.id,
-            viewer_role: Role::User,
+            notes: user.notes,
+            viewer_role: curr_user.role,
+            viewer_name: curr_user.name,
         })
     }
 }
@@ -429,26 +535,47 @@ impl<B> FromRequest<B> for User
 where
     B: Send,
 {
-    type Rejection = Unauthorized;
+    type Rejection = UserRejection;
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
-        let cookies = Cookies::from_request(req).await.map_err(|_| Unauthorized)?;
+        let cookies = Cookies::from_request(req)
+            .await
+            .map_err(|_| UserRejection::Unauthorized)?;
         let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let signed = cookies.private(&private_key);
-        let session_id = signed.get(USER_SESSION_ID_COOKIE).ok_or(Unauthorized)?;
+        let session_id = signed
+            .get(USER_SESSION_ID_COOKIE)
+            .ok_or(UserRejection::Unauthorized)?;
         let conn = crate::establish_db_connection();
         let session = LoginSession::fetch(&conn, session_id.value())
-            .map_err(|_| Unauthorized)?;
-        User::from_session(&conn, &session).map_err(|_| Unauthorized)
+            .map_err(|_| UserRejection::Unauthorized)?;
+        User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized)
     }
 }
 
-pub struct Unauthorized;
+pub enum UserRejection {
+    Unauthorized,
+    Banned { until: NaiveDateTime },
+}
 
-impl IntoResponse for Unauthorized {
+impl IntoResponse for UserRejection {
     fn into_response(self) -> Response {
-        Redirect::to("/login").into_response()
+        match self {
+            Self::Banned { until } => Banned {
+                judge_type: rand::random(),
+                until:      until.format(crate::DATE_FMT).to_string(),
+            }
+            .into_response(),
+            Self::Unauthorized => Redirect::to("/login").into_response(),
+        }
     }
+}
+
+#[derive(Template)]
+#[template(path = "banned.html")]
+pub struct Banned {
+    judge_type: bool,
+    until:      String,
 }
 
 #[derive(Template)]

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<head>
+  <title>{% block title %}{% endblock %}</title>
+    <link href="/static/styles.css" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Arvo&display=swap" rel="stylesheet">
+  <script
+		src="https://code.jquery.com/jquery-3.6.0.min.js"
+		integrity="sha256-/xUj+3OJU5yExlq6GSYGSHk7tPXikynS7ogEvDej/m4="
+		crossorigin="anonymous">
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery.form/4.3.0/jquery.form.min.js" integrity="sha384-qlmct0AOBiA2VPZkMY3+2WqkHtIQ9lSdAsAn5RUJD/3vA5MKDgSGcdmIv4ycVxyn" crossorigin="anonymous"></script>
+</head>
+<body>
+  <ul class="menu-item">
+    <li class="menu-item" style="text-align: center; padding: 10px;">
+      <h1>{% if judge_type %}👩‍⚖️{% else %}👨‍⚖️{% endif %}You have been banned!</h1>
+      <h3>You have been found in violation of our <a href="/rules">rules</a> and/or <a href="/terms">terms of service</a> resulting in suspension of your access</h3>
+      <p>This ban will last until {{until}}</p>
+      <p>If you believe that this ban is unfair, contact the administrator of this server <a href="mailto:admin@cest-le-marche.com">via email</a>.</p>        
+  </ul>
+</body>
