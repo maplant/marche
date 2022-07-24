@@ -9,6 +9,7 @@
       <div class="heavy-cell"></div>
       <div class="heavy-cell" style="width: 100%;">
         <b {% if is_banned %}style="color: red"{% endif %}>
+          {% if role == Role::Moderator %}👑 {% endif %}
           {% if is_banned %}✖ {{name}} ✖{% else %}{{name}}{% endif %}
         </b>
       </div>
@@ -43,56 +44,97 @@
         <div><progress max="{{level.next_level_xp}}" value="{{level.curr_xp}}"></progress></div>
       </div>
     </div>
-    {% if !is_curr_user && viewer_role >= Role::Moderator %}
+    {% if !is_curr_user && viewer_role >= Role::Moderator && role < viewer_role %}
     <div class="row">
-      <div class="heavy-cell" style="vertical-align: top; text-align: right;">
+      <div class="heavy-cell" style="text-align: right;">
         Moderator tools:
       </div>
       <div class="heavy-cell">
-        <div id="notes">{{notes|e("none")}}</div>
-        <div style="margin: 5px">
-          <label>
-            <input type="text" name="note" id="note" style="padding: 5px" placeholder="Add a note about the user">
-            <button id="add_note_button" onclick="addNote()" style="padding: 5px">➕</button>
-          </label>
+        <div class="table" style="border-radius: 5px; border: 1px solid black; margin: 5px; padding: 10px; width: 90%">
+          <div class="row">
+            <div class="heavy-cell" style="text-align: right;">
+              Ban:
+            </div>
+            <div class="heavy-cell">
+              <div {% if is_banned %}style="display: none"{% endif %} id="ban-form">
+                Ban for <input type="number" style="width: 4em" name="ban_len" id="ban-len" style="padding: 5px" min="1" max="1000" value="1"> days?
+                <button style="padding: 5px" onclick="setBan(parseInt($('#ban-len').val()))">Go!</button>
+              </div>
+              <div {% if !is_banned %}style="display: none"{% endif %} id="unban">
+                <p style="color: red">This user is banned until {{ban_timestamp}}</p>
+                <button style="padding: 5px" onclick="setBan('')">Remove this ban?</button>
+              </div>
+            </div>
+          </div>
+          {% if viewer_role == Role::Admin %}
+          <div class="row">
+            <div class="heavy-cell" style="text-align: right;">
+              Role:
+            </div>
+            <div class="heavy-cell">
+              {% if role == Role::Moderator %}
+              <button style="padding: 5px" onclick="setRole('User')">Demote to user</button>
+              {% else %}
+              <button style="padding: 5px" onclick="setRole('Moderator')">Promote to moderator</button>
+              {% endif %}
+            </div>
+          </div>
+          {% endif %}
+          <div class="row">
+            <div class="cell" style="text-align: right;">
+              Notes:
+            </div>
+            <div class="cell">
+              <div id="notes" style="color: #5b5b5b">{{notes|e("none")}}</div>
+              <div style="margin: 5px">
+                <label>
+                  <input type="text" name="note" id="note" style="padding: 5px" placeholder="Add a note about the user">
+                  <button id="add_note_button" onclick="addNote()" style="padding: 5px">➕</button>
+                </label>
+              </div>
+            </div>
+          </div>
         </div>
-        <div style="margin: 5px; {% if is_banned %}display: none{% endif %}" id="ban-form">
-          Ban for <input type="number" style="width: 4em" name="ban_len" id="ban-len" style="padding: 5px" min="1" max="1000"> days?
-          <button style="padding: 5px" onclick="setBan(parseInt($('#ban-len').val()))">Go!</button>
-        </div>
-        <div style="margin: 5px; {% if !is_banned %}display: none{% endif %}" id="unban">
-          <p style="color: red">This user is banned until {{ban_timestamp}}</p>
-          <button style="padding: 5px" onclick="setBan('')">Remove this ban?</button>
-        </div>
-        <script type="text/javascript">
-          function setBan(days) {
-              if (days === '' || !isNaN(days)) {
-                  $.ajax({
-                      url: `/set_ban/{{id}}?ban_len=${days}`,
-                      type: 'post',
-                      complete: function(_, _) {
-                          location.reload();
-                      }
-                  });
-              }
-          }
-          function addNote() {
+      </div>
+    </div>
+    <script type="text/javascript">
+      function setBan(days) {
+          if (days === '' || !isNaN(days)) {
               $.ajax({
-                  url: '/add_note/{{id}}',
+                  url: `/set_ban/{{id}}?ban_len=${days}`,
                   type: 'post',
-                  data: {
-                      body: $('#note').val(),
-                  },
                   complete: function(_, _) {
-                      var body = $('#note').val();
-                      $('#note').val("");
-                      $('#notes').append(`<p>“${body}” — {{viewer_name}}</p>`);
+                      location.reload();
                   }
               });
           }
-        </script>
-      </div>
-    </div>
+      }
+      function addNote() {
+          $.ajax({
+              url: '/add_note/{{id}}',
+              type: 'post',
+              data: {
+                  body: $('#note').val(),
+              },
+              complete: function(_, _) {
+                  var body = $('#note').val();
+                  $('#note').val("");
+                  $('#notes').append(`<p>“${body}” — {{viewer_name}}</p>`);
+              }
+          });
+      }
+      {% if viewer_role == Role::Admin %}
+      function setRole(role) {
+          $.ajax({
+              url: `/set_role/{{id}}?role=${role}`,
+              type: 'post',
+              complete: function(_, _) {
+                  location.reload();
+              }
+          });
+      }
+      {% endif %}
+    </script>
     {% endif %}
     <div class="row">
       <div class="heavy-cell" style="vertical-align: top; text-align: right;">

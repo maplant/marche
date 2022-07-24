@@ -334,6 +334,46 @@ impl User {
 }
 
 #[derive(Deserialize)]
+pub struct SetRole {
+    role: Role,
+}
+
+#[derive(Serialize, From)]
+pub enum SetRoleError {
+    Unprivileged,
+    NoSuchUser,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+impl SetRole {
+    #[json_result]
+    pub async fn submit(
+        curr_user: User,
+        Path(user_id): Path<i32>,
+        Query(SetRole { role: new_role }): Query<SetRole>,
+    ) -> Json<Result<(), SetRoleError>> {
+        use self::users::dsl::*;
+
+        if curr_user.id == user_id {
+            return Err(SetRoleError::Unprivileged);
+        }
+
+        let conn = crate::establish_db_connection();
+        let user = User::fetch(&conn, user_id).map_err(|_| SetRoleError::NoSuchUser)?;
+
+        if user.role >= curr_user.role || new_role >= curr_user.role {
+            return Err(SetRoleError::Unprivileged);
+        }
+
+        let _ = diesel::update(users.find(user_id))
+            .set(role.eq(new_role))
+            .get_result::<User>(&conn)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
 pub struct SetBan {
     #[serde(default, deserialize_with = "crate::empty_string_as_none")]
     ban_len: Option<u32>,
@@ -415,6 +455,7 @@ pub struct ProfilePage {
     picture:       Option<String>,
     bio:           String,
     level:         LevelInfo,
+    role:          Role,
     equipped:      Vec<ItemThumbnail>,
     inventory:     Vec<ItemThumbnail>,
     badges:        Vec<String>,
@@ -486,6 +527,7 @@ impl ProfilePage {
             background: user.get_background_style(&conn),
             name: user.name,
             bio: user.bio,
+            role: user.role,
             equipped,
             inventory,
             is_curr_user: user.id == curr_user.id,
@@ -500,7 +542,9 @@ pub async fn show_current_user(curr_user: User) -> Redirect {
     Redirect::to(&format!("/profile/{}", curr_user.id))
 }
 
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord)]
+#[derive(
+    Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum Role {
     User,
     Moderator,

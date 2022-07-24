@@ -11,7 +11,9 @@ use marche_server::{
     threads::{
         AuthorPage, EditPostForm, Index, ReplyForm, SetLocked, SetPinned, ThreadForm, ThreadPage,
     },
-    users::{self, AddNoteForm, LeaderboardPage, LoginPage, ProfilePage, SetBan, UpdateBioPage},
+    users::{
+        self, AddNoteForm, LeaderboardPage, LoginPage, ProfilePage, SetBan, SetRole, UpdateBioPage,
+    },
 };
 use tower_cookies::CookieManagerLayer;
 use tower_http::{services::ServeDir, trace::TraceLayer};
@@ -59,6 +61,7 @@ async fn main() {
         .route("/decline/:trade_id", post(items::decline_offer))
         .route("/offer/:receiver_id", get(TradeRequestPage::show))
         .route("/offers", get(TradeRequestsPage::show))
+        .route("/set_role/:user_id", post(SetRole::submit))
         .route("/set_ban/:user_id", post(SetBan::submit))
         .route("/add_note/:user_id", post(AddNoteForm::submit))
         .route("/:catch/*catch", get(marche_server::NotFound::show))
