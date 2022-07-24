@@ -354,8 +354,6 @@ impl SetBan {
     ) -> Json<Result<(), BanUserError>> {
         use self::users::dsl::*;
 
-        println!("here?");
-
         if curr_user.role < Role::Moderator {
             return Err(BanUserError::Unprivileged);
         }
@@ -549,7 +547,14 @@ where
         let conn = crate::establish_db_connection();
         let session = LoginSession::fetch(&conn, session_id.value())
             .map_err(|_| UserRejection::Unauthorized)?;
-        User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized)
+        let user = User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized)?;
+        if user.is_banned() {
+            Err(UserRejection::Banned {
+                until: user.banned_until.unwrap(),
+            })
+        } else {
+            Ok(user)
+        }
     }
 }
 

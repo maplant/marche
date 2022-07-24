@@ -21,7 +21,7 @@ use derive_more::From;
 use diesel::{pg::PgConnection, Connection};
 use serde::{de::DeserializeOwned, Serialize};
 
-pub const DATE_FMT: &str = "%B %-d at %I:%M %P";
+pub const DATE_FMT: &str = "%B %-d, %Y at %I:%M %P";
 
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be

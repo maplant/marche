@@ -14,10 +14,14 @@
 </head>
 <body>
   <ul class="menu-item">
-    <li class="menu-item" style="text-align: center; padding: 10px;">
-      <h1>{% if judge_type %}👩‍⚖️{% else %}👨‍⚖️{% endif %}You have been banned!</h1>
+    <li class="menu-item" style="padding: 50px;">
+      <h1>
+        <span style="font-size: 200%">{% if judge_type %}👩‍⚖️{% else %}👨‍⚖️{% endif %}</span>
+        <span style="position: absolute; transform: translatey(60%) translatex(25px);">You have been <b style="color: red">banned!</b>
+        </span>
+      </h1>
       <h3>You have been found in violation of our <a href="/rules">rules</a> and/or <a href="/terms">terms of service</a> resulting in suspension of your access</h3>
-      <p>This ban will last until {{until}}</p>
-      <p>If you believe that this ban is unfair, contact the administrator of this server <a href="mailto:admin@cest-le-marche.com">via email</a>.</p>        
+      <p>Assuming no other changes occur this ban will expire on {{until}}</p>
+      <p>If you believe that this ban is unfair contact the administrator of this server <a href="mailto:admin@cest-le-marche.com">via email</a></p>        
   </ul>
 </body>
