@@ -701,8 +701,6 @@ table! {
 }
 
 /// User login sessions
-// TODO(map): Add the IP address used to create the session for added
-// security.
 #[derive(Queryable)]
 pub struct LoginSession {
     /// Id of the login session

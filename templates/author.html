@@ -3,38 +3,54 @@
 {% block title %}Author Post{% endblock %}
 
 {% block content %}
-<li class="menu-item" style="padding-left: 25px; padding-right: 25px">
+<li class="menu-item">
   <form action="/author" method="post" enctype="multipart/form-data">
-    <h3 style="padding-top: 15px">
+    <h3 style="padding-top: 15px; text-align: center">
       New Post
     </h3>
-    <div style="padding-bottom: 15px">
-      <b><label for="title">Title</label></b>
-    </div>
-    <div>
-      <input type="text" name="title" id="title" style="width: 100%; box-sizing: border-box; padding: 5px">
-    </div>
-    <div style="padding-top: 15px; padding-bottom: 15px">
-      <b><label for="body">Body</label></b>
-    </div>
-    <div>
-      <textarea name="body" id="body" rows="18" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea>
-    </div>
-    <div style="padding-top: 15px; padding-bottom: 15px">
-      <b><label for="title">Image</label></b>
-    </div>
-    <div>
-      <input type="file" name="file" id="file" style="width: 100%; box-sizing: border-box; padding: 5px" multipart>
-    </div>
-    <div style="padding-top: 15px; padding-bottom: 15px">
-      <b><label for="title">Tags</label></b>
-    </div>
-    <div>
-      <input type="text" name="tags" id="tags" value="en, " style="width: 100%; box-sizing: border-box; padding: 5px">
-    </div>
-    <div style="padding-top: 15px; padding-bottom: 15px; display: flow-root">
-      <button type="submit" style="float: right">Post</button>
-      <div id="error" style="display: inline"></div>
+    <div class="table" style="width: 100%">
+      <div class="row">
+        <div class="heavy-cell" style="text-align: right">
+          <b><label for="title">Title:</label></b>
+        </div>
+        <div class="heavy-cell">
+          <input type="text" name="title" id="title" style="width: 100%; box-sizing: border-box; padding: 5px">
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell" style="text-align: right; vertical-align: top">
+          <b><label for="body">Body:</label></b>
+        </div>
+        <div class="heavy-cell">
+          <textarea name="body" id="body" rows="18" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea>
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell" style="text-align: right">
+          <b><label for="file">Image:</label></b>
+        </div>
+        <div class="heavy-cell">
+          <input type="file" name="file" id="file" style="width: 100%; box-sizing: border-box; padding: 5px" multipart>
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell" style="text-align: right">
+          <b><label for="tags">Tags:</label></b>
+        </div>
+        <div class="heavy-cell">
+          <input type="text" name="tags" id="tags" value="en, " style="width: 100%; box-sizing: border-box; padding: 5px">
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell">
+        </div>
+        <div class="cell">
+          <div style="padding-top: 15px; padding-bottom: 15px; display: flow-root">
+            <button type="submit" class="action-box action-box-standard-size" style="float: right">Post</button>
+            <div id="error" style="display: inline"></div>
+          </div>
+        </div>
+      </div>
     </div>
     <script type="text/javascript">
       $(document).ready(function () {
