@@ -394,6 +394,7 @@ impl AddNoteForm {
 
         let conn = crate::establish_db_connection();
         let viewer_name = viewer.name;
+        let body = html_escape::encode_text(&body);
 
         let new_note = format!("<p>“{body}” — {viewer_name}</p>");
 
