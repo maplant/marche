@@ -7,10 +7,10 @@
 <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
   {{title}}
   {% if viewer_role > Role::User %}
-  <button id="toggle_pinned_button" onclick="toggle_pinned()"
+  <button onclick="togglePinned()"
           {% if pinned %}style="filter: brightness(70%)"{% endif %}
           >📌</button>
-  <button id="toggle_locked_button" onclick="toggle_locked()"
+  <button onclick="toggleLocked()"
           {% if locked %}style="filter: brightness(70%)"{% endif %}
           >🔒</button>
   {% endif %}
@@ -112,7 +112,7 @@
     {% endif %}
     <script type="text/javascript">
       {% if viewer_role >= Role::User %}
-      function toggle_pinned() {
+      function togglePinned() {
           var set_pinned = !{{pinned}};
           $.ajax({
               url: `/set_pinned?thread={{id}}&pinned=${set_pinned}`,
@@ -122,7 +122,7 @@
               }
           });
       }
-      function toggle_locked() {
+      function toggleLocked() {
           var set_locked = !{{locked}};
           $.ajax({
               url: `/set_locked?thread={{id}}&locked=${set_locked}`,
