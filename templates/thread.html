@@ -62,7 +62,7 @@
               <div class="error-{{post.id}}" style="margin-top: 15px"></div>
             </form>
             {% endif %}
-            <span class="parsed-{{post.id}}">{{post.body|e("none")}}</span>
+            <span class="parsed-{{post.id}}">{{post.body_html|e("none")}}</span>
             <p style="font-size: 80%; color: grey">Posted on {{post.date}} UTC</p>
           </div>
           <div style="display: inline">
