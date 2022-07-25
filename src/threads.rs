@@ -464,10 +464,15 @@ pub struct ThreadForm {
 #[derive(Serialize, From)]
 pub enum SubmitThreadError {
     TitleOrBodyIsEmpty,
+    TagTooLong,
+    TooManyTags,
     UploadImageError(UploadImageError),
     InternalDbError(#[serde(skip)] diesel::result::Error),
     MultipartFormError(MultipartFormError),
 }
+
+pub const MAX_TAG_LEN: usize = 16;
+pub const MAX_NUM_TAGS: usize = 6;
 
 impl ThreadForm {
     #[json_result]
@@ -491,10 +496,28 @@ impl ThreadForm {
         let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
 
         let conn = crate::establish_db_connection();
-        let tags = parse_tag_list(&thread.tags)
-            .filter_map(|t| Tag::fetch_and_inc(&conn, t))
-            .map(|t| t.id())
-            .collect();
+
+        let mut tags = Vec::new();
+        for tag in parse_tag_list(&thread.tags) {
+            if tag.len() > MAX_TAG_LEN {
+                return Err(SubmitThreadError::TagTooLong);
+            }
+            tags.push(tag);
+        }
+
+        if tags.len() > MAX_NUM_TAGS {
+            return Err(SubmitThreadError::TooManyTags);
+        }
+
+        // I suppose this could be done in a transaction to make more safe.
+        // Honestly I don't really like this fetch_and_inc interface, I think
+        // it could be done better.
+        let mut tag_ids = Vec::new();
+        for tag in tags.into_iter() {
+            tag_ids.push(
+                Tag::fetch_and_inc(&conn, tag)?.id()
+            );
+        }
 
         conn.transaction(|| -> Result<Thread, diesel::result::Error> {
             use diesel::result::Error::RollbackTransaction;
@@ -526,7 +549,7 @@ impl ThreadForm {
                     id: next_thread,
                     last_post: first_post.id,
                     title: &title,
-                    tags,
+                    tags: tag_ids,
                     num_replies: 0,
                     pinned: false,
                     locked: false,
@@ -577,22 +600,17 @@ impl Tag {
 
     /// Fetches a tag, creating it if it doesn't already exist. num_tagged is
     /// incremented or set to one.
-    pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Option<Self> {
+    ///
+    /// Assumes that str is not empty.
+    pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
         use self::tags::dsl::*;
 
-        let tag = clean_tag_name(tag);
-        if tag.is_empty() {
-            return None;
-        }
-
-        // TODO: make this an insert with an ON CONFLICT
         diesel::insert_into(tags)
-            .values(&NewTag { name: &tag })
+            .values(&NewTag { name: &clean_tag_name(tag) })
             .on_conflict(name)
             .do_update()
             .set(num_tagged.eq(num_tagged + 1))
             .get_result(conn)
-            .ok()
     }
 
     pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Option<Self> {

@@ -10,7 +10,7 @@
       <div class="heavy-cell" style="width: 100%;">
         <b {% if is_banned %}style="color: red"{% endif %}>
           {% if role == Role::Moderator %}👑 {% endif %}
-          {% if is_banned %}✖ {{name}} ✖{% else %}{{name}}{% endif %}
+          {% if is_banned %}{{name|redact}}{% else %}{{name}}{% endif %}
         </b>
       </div>
     </div>
@@ -24,9 +24,11 @@
         </div>
       </div>
       <div class="heavy-cell" style="vertical-align: top; padding: 15px">
-        <p>{{bio}}</p>
         {% if is_banned %}
+        <p>{{bio|redact|linebreaks|e("none")}}</p>
         <p style="color: red">This user has been banned!</p>
+        {% else %}
+        {{bio|escape|linebreaks|e("none")}}       
         {% endif %}
         {% if is_curr_user %}
         <form action="/update_bio/">

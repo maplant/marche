@@ -534,6 +534,20 @@ impl ProfilePage {
     }
 }
 
+mod filters {
+    pub fn redact(input: &str) -> ::askama::Result<String> {
+        Ok(
+            input.chars().map(|c| {
+                if c.is_whitespace() || c == '.' || c == ',' || c == '!' || c =='?' {
+                    c
+                } else {
+                    '█'
+                }
+            }).collect::<String>()
+        )
+    }
+}
+
 pub async fn show_current_user(curr_user: User) -> Redirect {
     Redirect::to(&format!("/profile/{}", curr_user.id))
 }

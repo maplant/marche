@@ -16,10 +16,8 @@
         </div>
       </div>
       <div class="post">
-        <h3>Rank {{user.rank}}.</h3>
-        <p style="min-height: 80px">
-          {{user.bio}}
-        </p>
+        <h3><u>Rank {{user.rank}}</u></h3>
+        {{user.bio|escape|linebreaks|e("none")}}
       </div>
     </div>
   </div>

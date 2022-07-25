@@ -59,6 +59,8 @@
               UploadImageError: "There was an error uploading the image",
               InternalDbError: "There was an internal error, please try again later",
               MultipartFormError: "File is too large",
+              TagTooLong: "Tags may only be {{MAX_TAG_LEN}} characters long",
+              TooManyTags: "Threads may only have {{MAX_NUM_TAGS}} tags"
           };
           $("form").ajaxForm({
               url: '/author',
