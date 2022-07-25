@@ -308,7 +308,7 @@ impl User {
             .filter(thread_id.eq(thread.id))
             .first::<ReadingHistory>(conn)
             .ok()
-            .map_or(false, |history| history.last_read == thread.last_post)
+            .map_or(false, |history| history.last_read >= thread.last_post)
     }
 
     pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
