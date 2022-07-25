@@ -57,6 +57,18 @@ pub struct Thread {
     pub locked:      bool,
 }
 
+#[derive(Serialize)]
+pub enum FetchThreadError {
+    NoSuchThread,
+}
+
+#[derive(Serialize, From)]
+pub enum DeleteThreadError {
+    Unprivileged,
+    NoSuchThread,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
 impl Thread {
     pub fn fetch(conn: &PgConnection, thread_id: i32) -> Result<Self, FetchThreadError> {
         use self::threads::dsl::*;
@@ -66,11 +78,47 @@ impl Thread {
             .first::<Self>(conn)
             .map_err(|_| FetchThreadError::NoSuchThread)
     }
-}
 
-#[derive(Serialize)]
-pub enum FetchThreadError {
-    NoSuchThread,
+    #[json_result]
+    pub async fn delete(
+        user: User,
+        Path(dead_thread_id): Path<i32>,
+    ) -> Json<Result<(), DeleteThreadError>> {
+        if user.role < Role::Moderator {
+            return Err(DeleteThreadError::Unprivileged);
+        }
+
+        let conn = crate::establish_db_connection();
+
+        // Fetch the thread title for logging purposes
+        let thread_title = Thread::fetch(&conn, dead_thread_id)
+            .map_err(|_| DeleteThreadError::NoSuchThread)?
+            .title;
+
+        let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
+            // Delete the thread:
+            {
+                use self::threads::dsl::*;
+                diesel::delete(threads.filter(id.eq(dead_thread_id))).execute(&conn)?;
+            }
+            // Delete any reply on the thread:
+            {
+                use self::replies::dsl::*;
+                diesel::delete(replies.filter(thread_id.eq(dead_thread_id)))
+                    .execute(&conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)?;
+            }
+
+            Ok(())
+        });
+
+        tracing::info!(
+            "User `{}` has deleted thread {dead_thread_id} titled: `{thread_title}`",
+            user.name
+        );
+
+        Ok(())
+    }
 }
 
 #[derive(Insertable)]
@@ -216,6 +264,10 @@ impl Index {
     }
 }
 
+// TODO: Instead of having set_pinned and set_locked be separate endpoints that
+// both take a thread query parameter, we should make them a single endpoint,
+// for example: `/set_thread_flags/:thread_id?pinned=&locked=`
+
 #[derive(Deserialize)]
 pub struct SetPinned {
     thread: i32,
@@ -244,8 +296,7 @@ impl SetPinned {
 
         let conn = crate::establish_db_connection();
         Json(
-            diesel::update(threads)
-                .filter(id.eq(thread))
+            diesel::update(threads.find(thread))
                 .set(pinned.eq(set_pinned))
                 .get_result(&conn)
                 .map(|_: Thread| ())
@@ -426,7 +477,10 @@ impl ThreadForm {
     ) -> Json<Result<Thread, SubmitThreadError>> {
         let MultipartForm { file, form: thread } = form?;
 
-        if thread.title.is_empty() || (thread.body.is_empty() && file.is_none()) {
+        let title = thread.title.trim();
+        let body = thread.body.trim();
+
+        if title.is_empty() || (body.is_empty() && file.is_none()) {
             return Err(SubmitThreadError::TitleOrBodyIsEmpty);
         }
 
@@ -434,7 +488,7 @@ impl ThreadForm {
         let (image, thumbnail, filename) = upload_image(file).await?;
 
         // Parse the body as markdown
-        let html_output = markdown_to_html(&thread.body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
+        let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
 
         let conn = crate::establish_db_connection();
         let tags = parse_tag_list(&thread.tags)
@@ -456,7 +510,7 @@ impl ThreadForm {
                     author_id: user.id,
                     thread_id: next_thread,
                     post_date,
-                    body: &thread.body,
+                    body: &body,
                     body_html: &html_output,
                     reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
                     reactions: Vec::new(),
@@ -471,7 +525,7 @@ impl ThreadForm {
                 .values(&NewThread {
                     id: next_thread,
                     last_post: first_post.id,
-                    title: &thread.title,
+                    title: &title,
                     tags,
                     num_replies: 0,
                     pinned: false,
@@ -669,11 +723,68 @@ pub struct Reply {
     pub filename:  String,
 }
 
+#[derive(Serialize, From)]
+pub enum DeleteReplyError {
+    Unprivileged,
+    NoSuchReply,
+    CannotDeleteFirstReply,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
 impl Reply {
     pub fn fetch(conn: &PgConnection, reply_id: i32) -> Result<Self, diesel::result::Error> {
         use self::replies::dsl::*;
 
-        replies.filter(id.eq(reply_id)).first::<Reply>(conn)
+        replies.find(reply_id).first::<Reply>(conn)
+    }
+
+    #[json_result]
+    pub async fn delete(
+        user: User,
+        Path(dead_reply_id): Path<i32>,
+    ) -> Json<Result<(), DeleteReplyError>> {
+        use self::replies::dsl::*;
+
+        if user.role < Role::Moderator {
+            return Err(DeleteReplyError::Unprivileged);
+        }
+
+        let conn = crate::establish_db_connection();
+        let dead_reply =
+            Reply::fetch(&conn, dead_reply_id).map_err(|_| DeleteReplyError::NoSuchReply)?;
+
+        // Get the post before this one in case last_post is the dead reply
+        let prev_reply = replies
+            .filter(thread_id.eq(dead_reply.thread_id))
+            .filter(id.lt(dead_reply_id))
+            .order(id.desc())
+            .first::<Reply>(&conn)
+            .map_err(|_| DeleteReplyError::CannotDeleteFirstReply)?;
+
+        {
+            use self::threads::dsl::*;
+
+            // Discard any error:
+            let _ = diesel::update(threads.find(dead_reply.thread_id))
+                .filter(last_post.eq(dead_reply_id))
+                .set(last_post.eq(prev_reply.id))
+                .get_result::<Thread>(&conn);
+
+            // Reduce the number of replies by one:
+            diesel::update(threads.find(dead_reply.thread_id))
+                .set(num_replies.eq(num_replies - 1))
+                .get_result::<Thread>(&conn)?;
+        }
+
+        diesel::delete(replies.find(dead_reply_id)).execute(&conn)?;
+
+        tracing::info!(
+            "User `{}` has deleted reply {dead_reply_id} in thread {}",
+            user.name,
+            dead_reply.thread_id,
+        );
+
+        Ok(())
     }
 }
 
@@ -735,10 +846,9 @@ impl ReplyForm {
 
         {
             use self::threads::dsl::*;
-            let _: Thread = diesel::update(threads)
-                .filter(id.eq(thread_id))
+            diesel::update(threads.find(thread_id))
                 .set(num_replies.eq(num_replies + 1))
-                .get_result(&conn)?;
+                .get_result::<Thread>(&conn)?;
         }
 
         let reply: Reply = diesel::insert_into(replies::table)
@@ -756,10 +866,9 @@ impl ReplyForm {
             })
             .get_result(&conn)?;
 
-        let _: Thread = diesel::update(threads::table)
-            .filter(threads::dsl::id.eq(thread_id))
+        diesel::update(threads::table.find(thread_id))
             .set(threads::dsl::last_post.eq(reply.id))
-            .get_result(&conn)?;
+            .get_result::<Thread>(&conn)?;
 
         Ok(reply)
     }

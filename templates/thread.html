@@ -7,16 +7,21 @@
 <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
   {{title}}
   {% if viewer_role > Role::User %}
-  <button onclick="togglePinned()"
-          {% if pinned %}style="filter: brightness(70%)"{% endif %}
-          >📌</button>
-  <button onclick="toggleLocked()"
-          {% if locked %}style="filter: brightness(70%)"{% endif %}
-          >🔒</button>
+  <div style="margin-top: 5px">
+    <button onclick="togglePinned()"
+            {% if pinned %}style="filter: brightness(70%)"{% endif %}
+            >📌</button>
+    <button onclick="toggleLocked()"
+            {% if locked %}style="filter: brightness(70%)"{% endif %}
+            >🔒</button>
+    <button ondblclick="deleteThread()" type="submit" style="background: red; color: white; margin: 0px" class="action-box">
+      ⚠️ Delete thread
+    </button>
+  </div>
   {% endif %}
 </li>
 {% for post in posts %}
-<li class="menu-item">
+<li class="menu-item" id="reply-{{post.id}}">
   <div style="display: table" class="reply" id={{post.id}} author={{post.author.name}}>
     <div style="display: table-row">
       <div class="profile" style="{{post.author.background}}">
@@ -83,6 +88,11 @@
             <div class="reply-to-button action-box action-box-standard-size" style="margin-right: 0px" replyid={{post.id}}>
               + Respond!
             </div>
+            {% if viewer_role > Role::User && loop.index > 1 %}
+            <button ondblclick="deleteReply({{post.id}})" type="submit" style="background: red; color: white" class="action-box">
+              ⚠️ Delete reply
+            </button>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -131,7 +141,25 @@
                   location.href = `/thread/{{id}}`;
               }
           });
-      }       
+      }
+      function deleteThread() {
+          $.ajax({
+              url: '/delete_thread/{{id}}',
+              type: 'post',
+              complete: function(_, _) {
+                  location.href = '/t/en';
+              }
+          });
+      }
+      function deleteReply(id) {
+          $.ajax({
+              url: `/delete_reply/${id}`,
+              type: 'post',
+              complete: function(_, _) {
+                  $(`#reply-${id}`).slideToggle();
+              }
+          });
+      }
       {% endif %}
       // posting replies
       $(document).ready(function () {

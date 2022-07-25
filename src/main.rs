@@ -9,7 +9,8 @@ use axum::{
 use marche_server::{
     items::{self, ItemPage, ReactPage, TradeRequestForm, TradeRequestPage, TradeRequestsPage},
     threads::{
-        AuthorPage, EditPostForm, Index, ReplyForm, SetLocked, SetPinned, ThreadForm, ThreadPage,
+        AuthorPage, EditPostForm, Index, Reply, ReplyForm, SetLocked, SetPinned, Thread,
+        ThreadForm, ThreadPage,
     },
     users::{
         self, AddNoteForm, LeaderboardPage, LoginPage, ProfilePage, SetBan, SetRole, UpdateBioPage,
@@ -37,6 +38,8 @@ async fn main() {
             "/thread/:thread_id",
             get(ThreadPage::show).post(ReplyForm::submit),
         )
+        .route("/delete_thread/:thread_id", post(Thread::delete))
+        .route("/delete_reply/:thread_id", post(Reply::delete))
         .route(
             "/react/:thread_id",
             get(ReactPage::show).post(ReactPage::apply),

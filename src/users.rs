@@ -252,10 +252,7 @@ impl User {
     pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, ()> {
         use self::users::dsl::*;
 
-        users
-            .filter(id.eq(user_id))
-            .first::<Self>(conn)
-            .map_err(|_| ())
+        users.find(user_id).first::<Self>(conn).map_err(|_| ())
     }
 
     pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
@@ -438,8 +435,7 @@ impl AddNoteForm {
 
         let new_note = format!("<p>“{body}” — {viewer_name}</p>");
 
-        let _: User = diesel::update(users)
-            .filter(id.eq(user_id))
+        let _: User = diesel::update(users.find(user_id))
             .set(notes.eq(notes.concat(new_note)))
             .get_result(&conn)?;
 
