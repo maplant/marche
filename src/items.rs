@@ -367,7 +367,7 @@ impl ItemDrop {
                 // This is kind of redundant (we fetch Item twice), whatever
                 format!(
                     r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
-                    self.background_style(conn)
+                    self.as_background_style(conn)
                 )
             }
             ItemType::Reaction { filename, .. } => format!(
@@ -409,7 +409,7 @@ impl ItemDrop {
         }
     }
 
-    pub fn profile_pic(&self, conn: &PgConnection) -> String {
+    pub fn as_profile_pic(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
             ItemType::Avatar { filename } => filename,
@@ -417,7 +417,7 @@ impl ItemDrop {
         }
     }
 
-    pub fn background_style(&self, conn: &PgConnection) -> String {
+    pub fn as_background_style(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
             ItemType::ProfileBackground { colors } => {
@@ -438,7 +438,7 @@ impl ItemDrop {
         }
     }
 
-    pub fn badge(&self, conn: &PgConnection) -> String {
+    pub fn as_badge(&self, conn: &PgConnection) -> String {
         let item = Item::fetch(&conn, self.item_id);
         match item.item_type {
             ItemType::Badge { value } => format!("<div>{}</div>", value),

@@ -212,19 +212,19 @@ impl User {
     /// Returns the profile picture of the user
     fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
         self.equip_slot_prof_pic
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).profile_pic(&conn))
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).as_profile_pic(&conn))
     }
 
     fn get_background_style(&self, conn: &PgConnection) -> String {
         self.equip_slot_background
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).background_style(&conn))
-            .unwrap_or_else(|| String::from("background: #DBD2E0;"))
+            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).as_background_style(&conn))
+            .unwrap_or_else(|| String::from("background: #ddd;"))
     }
 
     fn get_badges(&self, conn: &PgConnection) -> Vec<String> {
         self.equip_slot_badges
             .iter()
-            .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).badge(conn))
+            .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).as_badge(conn))
             .collect()
     }
 
