@@ -170,7 +170,8 @@ impl Index {
     ) -> Result<Self, Redirect> {
         use self::threads::dsl::*;
 
-        let viewed_tags = Tags::from(&*viewed_tags);
+        let conn = crate::establish_db_connection();
+        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags);
 
         // If no tags are selected and the user is not privileged, force
         // the user to redirect to /t/en
@@ -178,10 +179,8 @@ impl Index {
             return Err(Redirect::to("/t/en"));
         }
 
-        let conn = crate::establish_db_connection();
-
         let posts: Vec<_> = threads
-            .filter(tags.contains(viewed_tags.clone().into_id_vec()))
+            .filter(tags.contains(viewed_tags.clone().into_ids().collect::<Vec<_>>()))
             .order((pinned.desc(), last_post.desc()))
             .limit(THREADS_PER_PAGE)
             .load::<Thread>(&conn)
@@ -247,7 +246,7 @@ impl Index {
                     tags: thread
                         .tags
                         .into_iter()
-                        .filter_map(|tid| Tag::fetch_from_id(&conn, tid))
+                        .filter_map(|tid| Tag::fetch_from_id(&conn, tid).ok())
                         .map(|t| t.name)
                         .collect(),
                     pinned: thread.pinned,
@@ -348,6 +347,7 @@ impl SetLocked {
 pub struct ThreadPage {
     id:          i32,
     title:       String,
+    tags:        Vec<String>,
     posts:       Vec<Post>,
     offers:      i64,
     pinned:      bool,
@@ -430,8 +430,9 @@ impl ThreadPage {
 
         Ok(Self {
             id: thread_id,
-            title: thread.title.clone(), // I feel like I should be able to move this
+            title: thread.title.clone(),
             posts,
+            tags: Tags::fetch_from_ids(&conn, thread.tags.iter()).into_names().collect(),
             pinned: thread.pinned,
             locked: thread.locked,
             offers: IncomingOffer::count(&conn, &user),
@@ -493,6 +494,7 @@ impl ThreadForm {
         let (image, thumbnail, filename) = upload_image(file).await?;
 
         // Parse the body as markdown
+        // This is pretty terrible. We really 
         let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
 
         let conn = crate::establish_db_connection();
@@ -515,7 +517,7 @@ impl ThreadForm {
         let mut tag_ids = Vec::new();
         for tag in tags.into_iter() {
             tag_ids.push(
-                Tag::fetch_and_inc(&conn, tag)?.id()
+                Tag::fetch_from_str_and_inc(&conn, tag)?.id()
             );
         }
 
@@ -598,11 +600,25 @@ impl Tag {
             .unwrap_or_default()
     }
 
+    pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Result<Self, diesel::result::Error> {
+        use self::tags::dsl::*;
+        tags.find(tag_id).first::<Self>(conn)
+    }
+
+    pub fn fetch_from_str(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
+        use self::tags::dsl::*;
+
+        tags.filter(name.eq(clean_tag_name(tag)))
+            .first::<Self>(conn)
+    }
+
     /// Fetches a tag, creating it if it doesn't already exist. num_tagged is
     /// incremented or set to one.
     ///
+    /// It's kind of a weird interface, I'm open to suggestions. 
+    ///
     /// Assumes that str is not empty.
-    pub fn fetch_and_inc(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
+    pub fn fetch_from_str_and_inc(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
         use self::tags::dsl::*;
 
         diesel::insert_into(tags)
@@ -612,26 +628,17 @@ impl Tag {
             .set(num_tagged.eq(num_tagged + 1))
             .get_result(conn)
     }
-
-    pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Option<Self> {
-        use self::tags::dsl::*;
-
-        tags.filter(id.eq(tag_id)).first::<Self>(conn).ok()
-    }
-
-    /// Fetches a tag only if that tag already exists.
-    pub fn fetch_if_exists(conn: &PgConnection, tag: &str) -> Option<Self> {
-        use self::tags::dsl::*;
-
-        tags.filter(name.eq(clean_tag_name(tag)))
-            .first::<Self>(conn)
-            .ok()
-    }
 }
 
 fn clean_tag_name(name: &str) -> String {
     name.trim().to_lowercase()
 }
+
+fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
+    // TODO: More stuff!
+    list.split(",").map(|i| i.trim())
+}
+
 
 #[derive(Debug, Clone)]
 pub struct Tags {
@@ -639,63 +646,42 @@ pub struct Tags {
 }
 
 impl Tags {
-    /// Returns the most popular tags.
-    pub fn popular(conn: &PgConnection) -> Self {
-        use self::tags::dsl::*;
-
-        Self {
-            tags: tags
-                .order(num_tagged.desc())
-                .limit(10)
-                .load::<Tag>(conn)
-                .unwrap_or_default(),
-        }
-    }
-
-    pub fn fmt(&self) -> String {
-        self.tags
-            .iter()
-            .fold(String::new(), |prefix, suffix| prefix + &suffix.name + "/")
-    }
-
-    pub fn push(&mut self, tag: Tag) {
-        self.tags.push(tag);
-    }
-
-    pub fn into_id_vec(self) -> Vec<i32> {
-        self.into()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.tags.is_empty()
-    }
-}
-
-impl Into<Vec<i32>> for Tags {
-    fn into(self) -> Vec<i32> {
-        self.tags.into_iter().map(|x| x.id).collect()
-    }
-}
-
-impl From<&'_ str> for Tags {
-    fn from(path: &'_ str) -> Self {
-        let conn = crate::establish_db_connection();
+    pub fn fetch_from_str(conn: &PgConnection, path: &str) -> Self {
         let mut seen = HashSet::new();
         let tags = path
             .split("/")
             .filter_map(|s| {
-                Tag::fetch_if_exists(&conn, s)
+                Tag::fetch_from_str(&conn, s)
                     .map(|t| seen.insert(t.id).then(|| t))
+                    .ok()
                     .flatten()
             })
             .collect::<Vec<_>>();
         Tags { tags }
     }
-}
 
-fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
-    // TODO: More stuff!
-    list.split(",").map(|i| i.trim())
+    pub fn fetch_from_ids<'a>(conn: &PgConnection, ids: impl Iterator<Item = &'a i32>) -> Self {
+        Self {
+            tags:
+        ids.filter_map(|id| Tag::fetch_from_id(conn, *id).ok())
+                .collect()
+        }
+    }
+
+    // Not going to deal with lifetimes here. Just clone it.
+
+    pub fn into_names(self) -> impl Iterator<Item = String> {
+        self.tags.into_iter().map(|x| x.name)
+    }
+
+    pub fn into_ids(self) -> impl Iterator<Item = i32> {
+        self.tags.into_iter().map(|x| x.id)
+    }
+
+    
+    pub fn is_empty(&self) -> bool {
+        self.tags.is_empty()
+    }
 }
 
 table! {
@@ -808,12 +794,12 @@ impl Reply {
 
 #[derive(Insertable, Debug)]
 #[table_name = "replies"]
-pub struct NewReply<'b, 'h> {
+pub struct NewReply<'b> {
     author_id: i32,
     thread_id: i32,
     post_date: NaiveDateTime,
     body:      &'b str,
-    body_html: &'h str,
+    body_html: &'b str,
     reward:    Option<i32>,
     reactions: Vec<i32>,
     image:     Option<String>,

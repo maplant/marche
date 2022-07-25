@@ -11,9 +11,10 @@ axum = { version = "0.5", features = ["multipart", "json"] }
 axum-client-ip = "0.2.0"
 base64ct = "1.5"
 thiserror = "1.0"
-aws-config = "0.10.1"
-aws-sdk-s3 = "0.10.1"
+aws-config = "0.46"
+aws-sdk-s3 = "0.16"
 html-escape = "0.2.11"
+comrak = "0.14.0"
 rand = { version = "0.8" , features = ["getrandom"] }
 derive_more = "0.99"
 diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json", "network-address"] }
@@ -27,7 +28,6 @@ lazy_static = "1.4"
 diesel-derive-enum = { version = "1", features = ["postgres"] }
 rand_xorshift = "0.3.0"
 regex = "1"
-comrak = "0.12"
 askama = { version = "0.11", features = ["with-axum"], git = "https://github.com/djc/askama.git" }
 askama_axum = { version = "0.1", git = "https://github.com/djc/askama.git" }
 tokio = { version = "1", features = ["full"] }

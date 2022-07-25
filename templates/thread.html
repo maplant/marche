@@ -6,6 +6,14 @@
 <script src="/static/thread.js" async></script>
 <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
   {{title}}
+  <div>
+    {% for tag in tags %}
+    {# TODO: This should redirect to the user's preferred language #}
+    <a href="/t/en/{{tag}}" style="text-decoration: none">
+      <div class="tag" name="{{tag}}">{{tag}}</div>
+    </a>
+    {% endfor %}
+  </div>
   {% if viewer_role > Role::User %}
   <div style="margin-top: 5px">
     <button onclick="togglePinned()"
@@ -54,7 +62,7 @@
               <div class="error-{{post.id}}" style="margin-top: 15px"></div>
             </form>
             {% endif %}
-            <span class="parsed-{{post.id}}">{{post.body_html|e("none")}}</span>
+            <span class="parsed-{{post.id}}">{{post.body|e("none")}}</span>
             <p style="font-size: 80%; color: grey">Posted on {{post.date}} UTC</p>
           </div>
           <div style="display: inline">
