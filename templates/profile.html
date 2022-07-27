@@ -103,7 +103,7 @@
       function setBan(days) {
           if (days === '' || !isNaN(days)) {
               $.ajax({
-                  url: `/set_ban/{{id}}?ban_len=${days}`,
+                  url: `/ban/{{id}}?ban_len=${days}`,
                   type: 'post',
                   complete: function(_, _) {
                       location.reload();
