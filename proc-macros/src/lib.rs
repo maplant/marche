@@ -1,5 +1,5 @@
 use proc_macro::{self, TokenStream};
-use quote::ToTokens;
+use quote::{quote, ToTokens};
 use syn::{
     Expr,
     parse_macro_input, parse_quote, Block,
@@ -82,6 +82,18 @@ fn transform_params_to_call(params: Punctuated<syn::FnArg, syn::token::Comma>) -
     // Generate expression from Punctuated (and wrap with parentheses)
     let transformed_params = parse_quote!((#punctuated));
     transformed_params
+}
+
+#[proc_macro]
+pub fn get_fn_name(item: TokenStream) -> TokenStream {
+    let ItemFn {
+        sig,
+        ..
+    } = parse_macro_input!(item as ItemFn);
+    let ident = sig.ident;
+    quote! {
+        #ident
+    }.into()
 }
 
 #[proc_macro_attribute]

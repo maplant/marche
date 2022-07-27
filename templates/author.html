@@ -4,7 +4,7 @@
 
 {% block content %}
 <li class="menu-item">
-  <form action="/author" method="post" enctype="multipart/form-data">
+  <form action="/thread" method="post" enctype="multipart/form-data">
     <h3 style="padding-top: 15px; text-align: center; margin-top: 0px">
       New Post
     </h3>
@@ -47,7 +47,7 @@
         <div class="cell">
           <div style="padding-top: 15px; padding-bottom: 15px; display: flow-root">
             <button type="submit" class="action-box action-box-standard-size" style="float: right">Post</button>
-            <div id="error" style="display: inline"></div>
+            <div id="error" class="error" style="display: none"></div>
           </div>
         </div>
       </div>
@@ -59,23 +59,25 @@
               UploadImageError: "There was an error uploading the image",
               InternalDbError: "There was an internal error, please try again later",
               MultipartFormError: "File is too large",
-              TagTooLong: "Tags may only be {{MAX_TAG_LEN}} characters long",
-              TooManyTags: "Threads may only have {{MAX_NUM_TAGS}} tags"
+              TagTooLong: "Tags may only be {{crate::threads::MAX_TAG_LEN}} characters long",
+              TooManyTags: "Threads may only have {{crate::threads::MAX_NUM_TAGS}} tags"
           };
           $("form").ajaxForm({
-              url: '/author',
+              url: '/thread',
               type: 'post',
               success: function(response, _, _, _) {
                   if (response.Err !== undefined) {
                       var error_message = error_messages[response.Err];
                       var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
-                      $("#error").html(`<div class="error" id="error">${error_message}</div>`)
+                      $('#error').show();
+                      $('#error').html(`${error_message}`);
                   } else {
                       location.href = `/thread/${response.Ok.id}`;
                   }
               },
               error: function(_, status, error) {
-                  $("#error").html(`<div class="error" id="error">Unable to upload image</div>`)
+                  $('#error').show();
+                  $('#error').html('An unknown error occurred');
               }
           });
       });

@@ -1,9 +1,7 @@
 use std::{cmp::PartialEq, collections::HashMap};
 
-use askama::Template;
 use axum::{
     extract::{Form, Path},
-    response::Redirect,
     Json,
 };
 use chrono::{Duration, Utc};
@@ -27,7 +25,7 @@ use rand_xorshift::XorShiftRng;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    threads::Reply,
+    post,
     users::{ProfileStub, User, UserCache},
 };
 
@@ -264,10 +262,10 @@ pub struct NewDrop {
 }
 
 impl ItemDrop {
-    pub fn fetch(conn: &PgConnection, drop_id: i32) -> Self {
+    pub fn fetch(conn: &PgConnection, drop_id: i32) -> Result<Self, diesel::result::Error> {
         use self::drops::dsl::*;
 
-        drops.filter(id.eq(drop_id)).first::<Self>(conn).unwrap()
+        drops.find(drop_id).first::<Self>(conn)
     }
 
     pub fn fetch_item(&self, conn: &PgConnection) -> Item {
@@ -351,6 +349,7 @@ impl ItemDrop {
         User::fetch(conn, self.owner_id)
             .unwrap()
             .equipped(conn)
+            .unwrap()
             .contains(&self)
     }
 
@@ -484,23 +483,61 @@ impl ItemDrop {
                 })
                 .flatten();
 
-            // Check if the user has had a drop since this time
             if item.is_some() {
-                if User::fetch(conn, user.id).unwrap().last_reward != user.last_reward {
-                    // Rollback the transaction
-                    Err(diesel::result::Error::RollbackTransaction)
-                } else {
-                    // Otherwise, attempt to set a new last drop.
-                    user.update_last_reward(conn)
-                        .map_err(|_| diesel::result::Error::RollbackTransaction)
-                        .map(move |_| item)
-                }
+                // Update the last reward. This will fail if the user has seen a reward
+                // since the start of this function.
+                user.update_last_reward(conn)
+                    .map_err(|_| diesel::result::Error::RollbackTransaction)
+                    .map(move |_| item)
             } else {
                 Ok(item)
             }
         })
         .ok()
         .flatten()
+    }
+}
+
+#[derive(Serialize)]
+pub enum EquipError {
+    NoSuchItem,
+    NotYourItem,
+}
+
+post! {
+    "/equip/:item_id",
+    #[json_result]
+    async fn equip(user: User, Path(drop_id): Path<i32>) -> Json<Result<(), EquipError>> {
+        let conn = crate::establish_db_connection();
+        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_| EquipError::NoSuchItem)?;
+        if drop.owner_id == user.id {
+            drop.equip(&conn);
+        } else {
+            return Err(EquipError::NotYourItem);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+pub enum UnequipError {
+    NoSuchItem,
+    NotYourItem,
+}
+
+post! {
+    "/unequip/:item_id",
+    #[json_result]
+    pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Json<Result<(), UnequipError>> {
+        let conn = crate::establish_db_connection();
+        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_|UnequipError::NoSuchItem)?;
+        if drop.owner_id == user.id {
+            drop.unequip(&conn);
+        } else {
+            return Err(UnequipError::NotYourItem);
+        }
+
+        Ok(())
     }
 }
 
@@ -636,191 +673,6 @@ impl Attributes {
     }
 }
 
-#[derive(Template)]
-#[template(path = "item.html")]
-pub struct ItemPage {
-    id:           i32,
-    name:         String,
-    description:  String,
-    pattern:      u16,
-    rarity:       String,
-    thumbnail:    String,
-    equip_action: Option<AvailableEquipAction>,
-    owner_id:     i32,
-    owner_name:   String,
-    offers:       i64,
-}
-
-pub enum AvailableEquipAction {
-    Equip,
-    Unequip,
-}
-
-impl ItemPage {
-    pub async fn show(user: User, Path(drop_id): Path<i32>) -> Self {
-        let conn = crate::establish_db_connection();
-        let drop = ItemDrop::fetch(&conn, drop_id);
-        let item = Item::fetch(&conn, drop.item_id);
-        let owner = User::fetch(&conn, drop.owner_id).unwrap();
-        let equip_action = (user.id == drop.owner_id && item.is_equipable()).then(|| {
-            if drop.is_equipped(&conn) {
-                AvailableEquipAction::Unequip
-            } else {
-                AvailableEquipAction::Equip
-            }
-        });
-
-        Self {
-            id: drop_id,
-            name: item.name,
-            description: item.description,
-            pattern: drop.pattern as u16,
-            rarity: item.rarity.to_string(),
-            thumbnail: drop.thumbnail_html(&conn),
-            owner_id: owner.id,
-            owner_name: owner.name.to_string(),
-            equip_action,
-            offers: IncomingOffer::count(&conn, &user),
-        }
-    }
-}
-
-pub async fn equip(user: User, Path(drop_id): Path<i32>) -> Redirect {
-    let conn = crate::establish_db_connection();
-    let drop = ItemDrop::fetch(&conn, drop_id);
-    if drop.owner_id == user.id {
-        drop.equip(&conn);
-    }
-    Redirect::to(&format!("/profile/{}", user.id))
-}
-
-pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Redirect {
-    let conn = crate::establish_db_connection();
-    let drop = ItemDrop::fetch(&conn, drop_id);
-    if drop.owner_id == user.id {
-        drop.unequip(&conn);
-    }
-    Redirect::to(&format!("/profile/{}", user.id))
-}
-
-#[derive(Template)]
-#[template(path = "react.html")]
-pub struct ReactPage {
-    post_id:   i32,
-    author:    ProfileStub,
-    body:      String,
-    inventory: Vec<ItemThumbnail>,
-    offers:    i64,
-    error:     Option<String>,
-    image:     Option<String>,
-    thumbnail: Option<String>,
-    filename:  String,
-}
-
-impl ReactPage {
-    pub fn new(user: &User, post_id: i32, error: Option<String>) -> Self {
-        let conn = crate::establish_db_connection();
-        let post = Reply::fetch(&conn, post_id).unwrap();
-        let author = User::fetch(&conn, post.author_id)
-            .unwrap()
-            .profile_stub(&conn);
-        let inventory: Vec<_> = user
-            .inventory(&conn)
-            .filter_map(|(item, drop)| item.is_reaction().then(|| drop.thumbnail(&conn)))
-            .collect();
-
-        Self {
-            post_id,
-            author,
-            body: post.body,
-            inventory,
-            offers: IncomingOffer::count(&conn, &user),
-            error,
-            image: post.image,
-            thumbnail: post.thumbnail,
-            filename: post.filename,
-        }
-    }
-
-    pub async fn show(user: User, Path(post_id): Path<i32>) -> Self {
-        Self::new(&user, post_id, None)
-    }
-
-    pub async fn apply(
-        user: User,
-        Path(post_id): Path<i32>,
-        Form(used_reactions): Form<HashMap<i32, String>>,
-    ) -> Result<Redirect, Self> {
-        let conn = crate::establish_db_connection();
-
-        let thread_id = conn
-            .transaction(|| -> Result<i32, diesel::result::Error> {
-                use diesel::result::Error;
-
-                use crate::threads::replies::dsl::*;
-
-                // Get the reply
-                let reply = Reply::fetch(&conn, post_id).map_err(|_| Error::RollbackTransaction)?;
-
-                let mut new_reactions = reply.reactions;
-
-                // Verify that the author does not own this reply:
-                if reply.author_id == user.id {
-                    return Err(Error::RollbackTransaction);
-                }
-
-                let author =
-                    User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
-
-                // Verify that all of the reactions are owned by the user:
-                for (reaction, selected) in used_reactions.into_iter() {
-                    let drop = ItemDrop::fetch(&conn, reaction);
-                    let item = Item::fetch(&conn, drop.item_id);
-                    if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
-                        return Err(Error::RollbackTransaction);
-                    }
-
-                    // Set the drops to consumed.
-                    use self::drops::dsl::*;
-
-                    diesel::update(drops.find(reaction))
-                        .filter(consumed.eq(false))
-                        .set(consumed.eq(true))
-                        .get_result::<ItemDrop>(&conn)
-                        .map_err(|_| Error::RollbackTransaction)?;
-
-                    new_reactions.push(reaction);
-                    match item.item_type {
-                        ItemType::Reaction { xp_value, .. } => {
-                            author.add_experience(&conn, xp_value as i64)
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-
-                // Update the post with the new reactions:
-                // TODO: Move into Reply struct
-                diesel::update(replies.find(post_id))
-                    .set(reactions.eq(new_reactions))
-                    .get_result::<Reply>(&conn)
-                    .map_err(|_| Error::RollbackTransaction)?;
-
-                Ok(reply.thread_id)
-            })
-            .map_err(|e| {
-                Self::new(
-                    &user,
-                    post_id,
-                    Some(format!("Unable to post reaction: {e}")),
-                )
-            })?;
-
-        Ok(Redirect::to(&format!(
-            "/thread/{thread_id}?jump_to={post_id}"
-        )))
-    }
-}
-
 table! {
     trade_requests(id) {
         id -> Integer,
@@ -849,22 +701,52 @@ pub struct TradeRequest {
     pub note:           Option<String>,
 }
 
+#[derive(Serialize)]
+pub enum FetchTradeRequestError {
+    NoSuchTradeRequest,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+impl From<diesel::result::Error> for FetchTradeRequestError {
+    fn from(err: diesel::result::Error) -> Self {
+        match err {
+            diesel::result::Error::NotFound => Self::NoSuchTradeRequest,
+            x => Self::InternalDbError(x),
+        }
+    }
+}
+
+#[derive(Serialize, From)]
+pub enum TradeResponseError {
+    NoSuchTrade,
+    NotYourTrade,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+impl From<FetchTradeRequestError> for TradeResponseError {
+    fn from(err: FetchTradeRequestError) -> Self {
+        match err {
+            FetchTradeRequestError::NoSuchTradeRequest => Self::NoSuchTrade,
+            FetchTradeRequestError::InternalDbError(err) => Self::InternalDbError(err),
+        }
+    }
+}
+
 impl TradeRequest {
-    pub fn fetch(conn: &PgConnection, req_id: i32) -> Result<Self, &'static str> {
+    pub fn fetch(conn: &PgConnection, req_id: i32) -> Result<Self, FetchTradeRequestError> {
         use self::trade_requests::dsl::*;
 
-        trade_requests
-            .filter(id.eq(req_id))
-            .load::<Self>(conn)
-            .ok()
-            .and_then(|v| v.into_iter().next())
-            .ok_or("No such trade request")
+        match trade_requests.find(req_id).first::<Self>(conn) {
+            Ok(x) => Ok(x),
+            Err(diesel::result::Error::NotFound) => Err(FetchTradeRequestError::NoSuchTradeRequest),
+            Err(x) => Err(FetchTradeRequestError::InternalDbError(x)),
+        }
     }
 
-    pub fn accept(&self, conn: &PgConnection) -> Result<(), &'static str> {
+    pub fn accept(&self, conn: &PgConnection) -> Result<(), TradeResponseError> {
         use self::drops::dsl::*;
 
-        let res = conn.transaction(|| -> Result<(), diesel::result::Error> {
+        conn.transaction(|| -> Result<(), diesel::result::Error> {
             for sender_item in &self.sender_items {
                 diesel::update(drops.find(sender_item))
                     .set(owner_id.eq(self.receiver_id))
@@ -910,24 +792,17 @@ impl TradeRequest {
             // delete the transaction
             let _ = self.decline(&conn);
             Ok(())
-        });
+        })?;
 
-        // Decline the request if we got an error
-        if res.is_err() {
-            let _ = self.decline(&conn);
-            Err("Unable to accept transaction")
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
-    pub fn decline(&self, conn: &PgConnection) -> Result<(), &'static str> {
+    pub fn decline(&self, conn: &PgConnection) -> Result<(), TradeResponseError> {
         use self::trade_requests::dsl::*;
 
-        diesel::delete(trade_requests.filter(id.eq(self.id)))
-            .execute(conn)
-            .map(|_| ())
-            .map_err(|_| "Unable to decline transaction")
+        diesel::delete(trade_requests.find(self.id)).execute(conn)?;
+
+        Ok(())
     }
 }
 
@@ -941,49 +816,19 @@ pub struct NewTradeRequest {
     note:           Option<String>,
 }
 
-#[derive(Template)]
-#[template(path = "offer.html")]
-pub struct TradeRequestPage {
-    sender:             ProfileStub,
-    sender_inventory:   Vec<ItemThumbnail>,
-    receiver:           ProfileStub,
-    receiver_inventory: Vec<ItemThumbnail>,
-    offers:             i64,
-}
-
-impl TradeRequestPage {
-    pub async fn show(sender: User, Path(receiver_id): Path<i32>) -> Self {
-        let conn = crate::establish_db_connection();
-        let receiver = User::fetch(&conn, receiver_id).unwrap();
-
-        Self {
-            sender:             sender.profile_stub(&conn),
-            // Got to put this somewhere, but don't know where
-            sender_inventory:   sender
-                .inventory(&conn)
-                .map(|(_, d)| d.thumbnail(&conn))
-                .collect(),
-            receiver:           receiver.profile_stub(&conn),
-            receiver_inventory: receiver
-                .inventory(&conn)
-                .map(|(_, d)| d.thumbnail(&conn))
-                .collect(),
-            offers:             IncomingOffer::count(&conn, &sender),
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct TradeRequestForm {
-    note:  Option<String>,
+    receiver_id: String,
+    note:        Option<String>,
     #[serde(flatten)]
-    trade: HashMap<String, String>,
+    trade:       HashMap<String, String>,
 }
 
 #[derive(Serialize, From)]
 pub enum SubmitOfferError {
     CannotTradeWithSelf,
     ItemNoLongerOwned,
+    NoSuchUser,
     InvalidTrade,
     NoteTooLong,
     TradeIsEmpty,
@@ -993,27 +838,32 @@ pub enum SubmitOfferError {
 
 const MAX_NOTE_LENGTH: usize = 150;
 
-impl TradeRequestForm {
+post! {
+    "/offer/",
     #[json_result]
-    pub async fn submit(
+    pub async fn submit_offer(
         sender: User,
-        Path(receiver_id): Path<i32>,
-        Form(TradeRequestForm { note, trade }): Form<TradeRequestForm>,
+        Form(TradeRequestForm { receiver_id, note, trade }): Form<TradeRequestForm>,
     ) -> Json<Result<TradeRequest, SubmitOfferError>> {
         let mut sender_items = Vec::new();
         let mut receiver_items = Vec::new();
+
+        let receiver_id: i32 = receiver_id.parse().map_err(|_|SubmitOfferError::NoSuchUser)?;
 
         if sender.id == receiver_id {
             return Err(SubmitOfferError::CannotTradeWithSelf);
         }
 
         let conn = crate::establish_db_connection();
+        if User::fetch(&conn, receiver_id).is_err() {
+            return Err(SubmitOfferError::NoSuchUser);
+        }
 
         for (item, trader) in trade.into_iter() {
             let item: i32 = item.parse()?;
             let trader: i32 = trader.parse()?;
 
-            let drop = ItemDrop::fetch(&conn, item);
+            let drop = ItemDrop::fetch(&conn, item)?;
             if trader != drop.owner_id {
                 return Err(SubmitOfferError::ItemNoLongerOwned);
             }
@@ -1051,76 +901,52 @@ impl TradeRequestForm {
                 receiver_items,
                 note,
             })
-            .get_result::<TradeRequest>(&conn)?)
+           .get_result::<TradeRequest>(&conn)?)
     }
 }
 
-pub async fn decline_offer(
-    user: User,
-    Path(trade_id): Path<i32>,
-) -> Json<Result<(), &'static str>> {
-    let conn = crate::establish_db_connection();
-    let req = match TradeRequest::fetch(&conn, trade_id) {
-        Ok(req) => req,
-        Err(_err) => return Json(Ok(())),
-    };
-    Json(if req.sender_id == user.id || req.receiver_id == user.id {
-        req.decline(&conn)
-    } else {
-        Err("You are not a participant in this transaction")
-    })
-}
-
-pub async fn accept_offer(user: User, Path(trade_id): Path<i32>) -> Json<Result<(), &'static str>> {
-    let conn = crate::establish_db_connection();
-    let req = match TradeRequest::fetch(&conn, trade_id) {
-        Ok(req) => req,
-        Err(err) => return Json(Err(err)),
-    };
-    Json(if req.receiver_id == user.id {
-        req.accept(&conn)
-    } else {
-        Err("You are not a participant in this transaction")
-    })
-}
-
-#[derive(Template)]
-#[template(path = "offers.html")]
-pub struct TradeRequestsPage {
-    user:            ProfileStub,
-    incoming_offers: Vec<IncomingOffer>,
-    outgoing_offers: Vec<OutgoingOffer>,
-    offers:          i64,
-}
-
-impl TradeRequestsPage {
-    pub async fn show(user: User) -> Self {
+post! {
+    "/accept/:trade_id",
+    #[json_result]
+    async fn accept(user: User, Path(trade_id): Path<i32>) -> Json<Result<(), TradeResponseError>> {
         let conn = crate::establish_db_connection();
-        let mut user_cache = UserCache::new(&conn);
-        // TODO: filter out trade requests that are no longer valid.
-        let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
-        let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
+        let req = TradeRequest::fetch(&conn, trade_id)?;
+        if req.receiver_id == user.id {
+            req.accept(&conn)
+        } else {
+            Err(TradeResponseError::NotYourTrade)
+        }
+    }
+}
 
-        Self {
-            user: user.profile_stub(&conn),
-            offers: incoming_offers.len() as i64,
-            incoming_offers,
-            outgoing_offers,
+post! {
+    "/decline/:trade_id",
+    #[json_result]
+    async fn decline_offer(
+        user: User,
+        Path(trade_id): Path<i32>,
+    ) -> Json<Result<(), TradeResponseError>> {
+        let conn = crate::establish_db_connection();
+        let req = TradeRequest::fetch(&conn, trade_id)?;
+        if req.sender_id == user.id || req.receiver_id == user.id {
+            req.decline(&conn)
+        } else {
+            Err(TradeResponseError::NotYourTrade)
         }
     }
 }
 
 #[derive(Serialize)]
 pub struct IncomingOffer {
-    id:             i32,
-    sender:         ProfileStub,
-    sender_items:   Vec<ItemThumbnail>,
-    receiver_items: Vec<ItemThumbnail>,
-    note:           Option<String>,
+    pub id:             i32,
+    pub sender:         ProfileStub,
+    pub sender_items:   Vec<ItemThumbnail>,
+    pub receiver_items: Vec<ItemThumbnail>,
+    pub note:           Option<String>,
 }
 
 impl IncomingOffer {
-    fn retrieve(
+    pub fn retrieve(
         conn: &PgConnection,
         user_cache: &mut UserCache,
         user: &User,
@@ -1139,12 +965,12 @@ impl IncomingOffer {
                     sender_items:   trade
                         .sender_items
                         .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
                         .collect(),
                     receiver_items: trade
                         .receiver_items
                         .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
                         .collect(),
                     note:           trade.note,
                 }
@@ -1163,16 +989,16 @@ impl IncomingOffer {
 }
 
 #[derive(Serialize)]
-struct OutgoingOffer {
-    id:             i32,
-    sender_items:   Vec<ItemThumbnail>,
-    receiver:       ProfileStub,
-    receiver_items: Vec<ItemThumbnail>,
-    note:           Option<String>,
+pub struct OutgoingOffer {
+    pub id:             i32,
+    pub sender_items:   Vec<ItemThumbnail>,
+    pub receiver:       ProfileStub,
+    pub receiver_items: Vec<ItemThumbnail>,
+    pub note:           Option<String>,
 }
 
 impl OutgoingOffer {
-    fn retrieve(
+    pub fn retrieve(
         conn: &PgConnection,
         user_cache: &mut UserCache,
         user: &User,
@@ -1191,12 +1017,12 @@ impl OutgoingOffer {
                     sender_items:   trade
                         .sender_items
                         .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
                         .collect(),
                     receiver_items: trade
                         .receiver_items
                         .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).thumbnail(&conn))
+                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
                         .collect(),
                     note:           trade.note,
                 }

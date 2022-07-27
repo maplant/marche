@@ -2,26 +2,130 @@
 extern crate diesel;
 
 pub mod items;
+pub mod pages;
 pub mod threads;
 pub mod users;
 
-use std::{collections::HashMap, env, error::Error as StdError};
+pub mod threads_dsl {
+    pub use crate::threads::threads::dsl::*;
+}
+
+pub mod replies_dsl {
+    pub use crate::threads::replies::dsl::*;
+}
+
+pub mod drops_dsl {
+    pub use crate::items::drops::dsl::*;
+}
+
+pub mod users_dsl {
+    pub use crate::users::users::dsl::*;
+}
+
+use std::{any::Any, collections::HashMap, env, error::Error as StdError};
 
 use askama::Template;
 use axum::{
     async_trait,
-    body::Bytes,
+    body::{Body, Bytes},
     extract::{
         multipart::MultipartError, ContentLengthLimit, FromRequest, Multipart, RequestParts,
     },
+    handler::Handler,
     http::StatusCode,
     response::{IntoResponse, Response},
+    Router,
 };
-use derive_more::From;
+use derive_more::{Display, From};
 use diesel::{pg::PgConnection, Connection};
 use serde::{de::DeserializeOwned, Serialize};
 
 pub const DATE_FMT: &str = "%B %-d, %Y at %I:%M %P";
+
+pub struct Endpoint {
+    route_type: RouteType,
+    path:       &'static str,
+    handler:    &'static (dyn Any + Send + Sync + 'static),
+    installer: fn(
+        RouteType,
+        &'static str,
+        &'static (dyn Any + Send + Sync + 'static),
+        Router<Body>,
+    ) -> Router<Body>,
+}
+
+impl Endpoint {
+    pub const fn new<I, A>(route_type: RouteType, path: &'static str, handler: &'static I) -> Self
+    where
+        I: Handler<A, Body> + Copy + Any + Send + Sync + 'static,
+        A: 'static,
+    {
+        Self {
+            path,
+            route_type,
+            handler: handler as &(dyn Any + Send + Sync + 'static),
+            installer: install::<I, A>,
+        }
+    }
+
+    pub fn install(&self, router: Router<Body>) -> Router<Body> {
+        (self.installer)(self.route_type, self.path, self.handler, router)
+    }
+}
+
+#[derive(Copy, Clone, Display)]
+pub enum RouteType {
+    #[display(fmt = "GET")]
+    Get,
+    #[display(fmt = "POST")]
+    Post,
+}
+
+inventory::collect!(Endpoint);
+
+pub fn install<I, A>(
+    route_type: RouteType,
+    path: &'static str,
+    handler: &'static (dyn Any + Send + Sync + 'static),
+    router: Router<Body>,
+) -> Router<Body>
+where
+    I: Handler<A, Body> + Copy,
+    A: 'static,
+{
+    tracing::info!("{route_type} {path} registered");
+    router.route(
+        &path,
+        match route_type {
+            RouteType::Get => axum::routing::get(*handler.downcast_ref::<I>().unwrap()),
+            RouteType::Post => axum::routing::post(*handler.downcast_ref::<I>().unwrap()),
+        },
+    )
+}
+
+#[macro_export]
+macro_rules! get {
+    ( $suffix:literal, $func:item ) => {
+        inventory::submit! {
+            crate::Endpoint::new::<_, _>(
+                crate::RouteType::Get, $suffix, &marche_proc_macros::get_fn_name!( $func )
+            )
+        }
+        $func
+    };
+}
+
+#[macro_export]
+macro_rules! post {
+    ( $suffix:literal, $func:item ) => {
+        inventory::submit! {
+            crate::Endpoint::new::<_, _>(
+                crate::RouteType::Post, $suffix, &marche_proc_macros::get_fn_name!( $func )
+            )
+        }
+        $func
+    };
+}
 
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be

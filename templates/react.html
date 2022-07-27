@@ -35,13 +35,8 @@
           {% endfor %}
           <div style="padding: 5px">
             <button type="submit">React!</button>
-            {% match error %}
-            {% when Some(error) %}
-            <div class="error"> 
-              {{error}}
+            <div id="error" class="error" style="display: none"> 
             </div>
-            {% when None %}
-            {% endmatch %}
           </div>
         </div>
       </div>

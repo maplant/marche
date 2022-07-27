@@ -1,11 +1,9 @@
 //! Display threads
 use std::collections::{HashMap, HashSet};
 
-use askama::Template;
 use axum::{
     body::Bytes,
     extract::{Form, Path, Query},
-    response::Redirect,
     Json,
 };
 use chrono::{prelude::*, NaiveDateTime};
@@ -17,9 +15,10 @@ use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    items::{IncomingOffer, ItemDrop, ItemThumbnail},
-    users::{ProfileStub, Role, User, UserCache},
-    File, MultipartForm, MultipartFormError, NotFound,
+    items::{Item, ItemDrop, ItemType},
+    post,
+    users::{Role, User, UserCache},
+    File, MultipartForm, MultipartFormError,
 };
 
 table! {
@@ -31,6 +30,7 @@ table! {
         num_replies -> Integer,
         pinned -> Bool,
         locked -> Bool,
+        hidden -> Bool,
     }
 }
 
@@ -55,18 +55,25 @@ pub struct Thread {
     pub pinned:      bool,
     /// Whether or not the thread is locked
     pub locked:      bool,
+    /// Whether or not the thread is hidden
+    pub hidden:      bool,
+}
+
+#[derive(Insertable)]
+#[table_name = "threads"]
+pub struct NewThread<'t> {
+    id:          i32,
+    title:       &'t str,
+    tags:        Vec<i32>,
+    last_post:   i32,
+    num_replies: i32,
+    pinned:      bool,
+    locked:      bool,
 }
 
 #[derive(Serialize)]
 pub enum FetchThreadError {
     NoSuchThread,
-}
-
-#[derive(Serialize, From)]
-pub enum DeleteThreadError {
-    Unprivileged,
-    NoSuchThread,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
 impl Thread {
@@ -78,9 +85,12 @@ impl Thread {
             .first::<Self>(conn)
             .map_err(|_| FetchThreadError::NoSuchThread)
     }
+}
 
+post! {
+    "/delete_thread/:dead_thread_id",
     #[json_result]
-    pub async fn delete(
+    pub async fn delete_thread(
         user: User,
         Path(dead_thread_id): Path<i32>,
     ) -> Json<Result<(), DeleteThreadError>> {
@@ -121,340 +131,6 @@ impl Thread {
     }
 }
 
-#[derive(Insertable)]
-#[table_name = "threads"]
-pub struct NewThread<'t> {
-    id:          i32,
-    title:       &'t str,
-    tags:        Vec<i32>,
-    last_post:   i32,
-    num_replies: i32,
-    pinned:      bool,
-    locked:      bool,
-}
-
-const THREADS_PER_PAGE: i64 = 25;
-const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
-
-#[derive(Template)]
-#[template(path = "index.html")]
-pub struct Index {
-    tags:   Vec<Tag>,
-    posts:  Vec<ThreadLink>,
-    offers: i64,
-}
-
-#[derive(Serialize)]
-struct ThreadLink {
-    num:            usize,
-    id:             i32,
-    title:          String,
-    date:           String,
-    emphasize_date: bool,
-    read:           bool,
-    jump_to:        i32,
-    replies:        String,
-    tags:           Vec<String>,
-    pinned:         bool,
-    locked:         bool,
-}
-
-impl Index {
-    pub async fn show(_user: User) -> Redirect {
-        Redirect::to("/t/en")
-    }
-
-    pub async fn show_with_tags(
-        user: User,
-        Path(viewed_tags): Path<String>,
-    ) -> Result<Self, Redirect> {
-        use self::threads::dsl::*;
-
-        let conn = crate::establish_db_connection();
-        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags);
-
-        // If no tags are selected and the user is not privileged, force
-        // the user to redirect to /t/en
-        if viewed_tags.is_empty() && user.role < Role::Moderator {
-            return Err(Redirect::to("/t/en"));
-        }
-
-        let posts: Vec<_> = threads
-            .filter(tags.contains(viewed_tags.clone().into_ids().collect::<Vec<_>>()))
-            .order((pinned.desc(), last_post.desc()))
-            .limit(THREADS_PER_PAGE)
-            .load::<Thread>(&conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .enumerate()
-            .map(|(i, thread)| {
-                // Format the date:
-                // TODO: Consider moving duration->plaintext into common utility
-                let duration_since_last_post = Utc::now().naive_utc()
-                    - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
-                let duration_min = duration_since_last_post.num_minutes();
-                let duration_hours = duration_since_last_post.num_hours();
-                let duration_days = duration_since_last_post.num_days();
-                let duration_weeks = duration_since_last_post.num_weeks();
-                let duration_string: String = if duration_weeks > 0 {
-                    format!(
-                        "{} week{} ago",
-                        duration_weeks,
-                        if duration_weeks > 1 { "s" } else { "" }
-                    )
-                } else if duration_days > 0 {
-                    format!(
-                        "{} day{} ago",
-                        duration_days,
-                        if duration_days > 1 { "s" } else { "" }
-                    )
-                } else if duration_hours > 0 {
-                    format!(
-                        "{} hour{} ago",
-                        duration_hours,
-                        if duration_hours > 1 { "s" } else { "" }
-                    )
-                } else if duration_min >= 5 {
-                    format!(
-                        "{} minute{} ago",
-                        duration_min,
-                        if duration_min > 1 { "s" } else { "" }
-                    )
-                } else {
-                    String::from("just now!")
-                };
-
-                let replies = match thread.num_replies {
-                    0 => format!("No replies"),
-                    1 => format!("1 reply"),
-                    x => format!("{} replies", x - 1),
-                };
-
-                let read = user.has_read(&conn, &thread);
-                let jump_to = user.next_unread(&conn, &thread);
-
-                ThreadLink {
-                    num: i + 1,
-                    id: thread.id,
-                    title: thread.title,
-                    date: duration_string,
-                    emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
-                    read,
-                    jump_to,
-                    replies,
-                    tags: thread
-                        .tags
-                        .into_iter()
-                        .filter_map(|tid| Tag::fetch_from_id(&conn, tid).ok())
-                        .map(|t| t.name)
-                        .collect(),
-                    pinned: thread.pinned,
-                    locked: thread.locked,
-                }
-            })
-            .collect();
-
-        Ok(Self {
-            tags:   viewed_tags.tags,
-            posts:  posts,
-            offers: IncomingOffer::count(&conn, &user),
-        })
-    }
-}
-
-// TODO: Instead of having set_pinned and set_locked be separate endpoints that
-// both take a thread query parameter, we should make them a single endpoint,
-// for example: `/set_thread_flags/:thread_id?pinned=&locked=`
-
-#[derive(Deserialize)]
-pub struct SetPinned {
-    thread: i32,
-    pinned: bool,
-}
-
-#[derive(Serialize)]
-pub enum SetPinnedError {
-    NotPermitted,
-    DbError,
-}
-
-impl SetPinned {
-    pub async fn set_pinned(
-        user: User,
-        Query(SetPinned {
-            thread,
-            pinned: set_pinned,
-        }): Query<Self>,
-    ) -> Json<Result<(), SetPinnedError>> {
-        use self::threads::dsl::*;
-
-        if user.role < Role::Moderator {
-            return Json(Result::Err(SetPinnedError::NotPermitted));
-        }
-
-        let conn = crate::establish_db_connection();
-        Json(
-            diesel::update(threads.find(thread))
-                .set(pinned.eq(set_pinned))
-                .get_result(&conn)
-                .map(|_: Thread| ())
-                .map_err(|_| SetPinnedError::DbError),
-        )
-    }
-}
-
-#[derive(Deserialize)]
-pub struct SetLocked {
-    thread: i32,
-    locked: bool,
-}
-
-#[derive(Serialize)]
-pub enum SetLockedError {
-    NotPermitted,
-    DbError,
-}
-
-impl SetLocked {
-    pub async fn set_locked(
-        user: User,
-        Query(Self {
-            thread,
-            locked: set_locked,
-        }): Query<Self>,
-    ) -> Json<Result<(), SetLockedError>> {
-        use self::threads::dsl::*;
-
-        if user.role < Role::Moderator {
-            return Json(Result::Err(SetLockedError::NotPermitted));
-        }
-
-        let conn = crate::establish_db_connection();
-        Json(
-            diesel::update(threads)
-                .filter(id.eq(thread))
-                .set(locked.eq(set_locked))
-                .get_result(&conn)
-                .map(|_: Thread| ())
-                .map_err(|_| SetLockedError::DbError),
-        )
-    }
-}
-
-#[derive(Template)]
-#[template(path = "thread.html")]
-pub struct ThreadPage {
-    id:          i32,
-    title:       String,
-    tags:        Vec<String>,
-    posts:       Vec<Post>,
-    offers:      i64,
-    pinned:      bool,
-    locked:      bool,
-    viewer_role: Role,
-}
-
-#[derive(Serialize)]
-struct Reward {
-    thumbnail:   String,
-    name:        String,
-    description: String,
-    rarity:      String,
-}
-
-#[derive(Serialize)]
-struct Post {
-    id:        i32,
-    author:    ProfileStub,
-    body:      String,
-    body_html: String,
-    date:      String,
-    reactions: Vec<ItemThumbnail>,
-    reward:    Option<Reward>,
-    can_react: bool,
-    can_edit:  bool,
-    image:     Option<String>,
-    thumbnail: Option<String>,
-    filename:  String,
-}
-
-impl ThreadPage {
-    pub async fn show(user: User, Path(thread_id): Path<i32>) -> Result<Self, crate::NotFound> {
-        use self::threads::dsl::*;
-
-        let conn = crate::establish_db_connection();
-        let offers = user.incoming_offers(&conn);
-        let thread = &threads
-            .filter(id.eq(thread_id))
-            .first::<Thread>(&conn)
-            .map_err(|_| NotFound::new(offers))?;
-        user.read_thread(&conn, &thread);
-
-        let mut user_cache = UserCache::new(&conn);
-        let posts = replies::dsl::replies
-            .filter(replies::dsl::thread_id.eq(thread_id))
-            .order(replies::dsl::post_date.asc())
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .map(|t| Post {
-                id:        t.id,
-                author:    user_cache.get(t.author_id).clone(),
-                body:      t.body,
-                body_html: t.body_html,
-                // TODO: we need to add a user setting to format this to the local time.
-                date:      t.post_date.format(crate::DATE_FMT).to_string(),
-                reactions: t
-                    .reactions
-                    .into_iter()
-                    .map(|d| ItemDrop::fetch(&conn, d).thumbnail(&conn))
-                    .collect(),
-                reward:    t.reward.map(|r| {
-                    let drop = ItemDrop::fetch(&conn, r);
-                    let item = drop.fetch_item(&conn);
-                    Reward {
-                        name:        item.name,
-                        description: item.description,
-                        thumbnail:   drop.thumbnail_html(&conn),
-                        rarity:      item.rarity.to_string(),
-                    }
-                }),
-                can_edit:  t.author_id == user.id, // TODO: Add time limit for replies
-                can_react: t.author_id != user.id,
-                image:     t.image,
-                thumbnail: t.thumbnail,
-                filename:  t.filename,
-            })
-            .collect::<Vec<_>>();
-
-        Ok(Self {
-            id: thread_id,
-            title: thread.title.clone(),
-            posts,
-            tags: Tags::fetch_from_ids(&conn, thread.tags.iter()).into_names().collect(),
-            pinned: thread.pinned,
-            locked: thread.locked,
-            offers: IncomingOffer::count(&conn, &user),
-            viewer_role: user.role,
-        })
-    }
-}
-
-#[derive(Template, Debug)]
-#[template(path = "author.html")]
-pub struct AuthorPage {
-    offers: i64,
-}
-
-impl AuthorPage {
-    pub async fn show(user: User) -> Self {
-        Self {
-            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
@@ -475,13 +151,14 @@ pub enum SubmitThreadError {
 pub const MAX_TAG_LEN: usize = 16;
 pub const MAX_NUM_TAGS: usize = 6;
 
-impl ThreadForm {
+post! {
+    "/thread",
     #[json_result]
-    pub async fn submit(
+    async fn new_thread(
         user: User,
         form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
     ) -> Json<Result<Thread, SubmitThreadError>> {
-        let MultipartForm { file, form: thread } = form?;
+                let MultipartForm { file, form: thread } = form?;
 
         let title = thread.title.trim();
         let body = thread.body.trim();
@@ -494,13 +171,17 @@ impl ThreadForm {
         let (image, thumbnail, filename) = upload_image(file).await?;
 
         // Parse the body as markdown
-        // This is pretty terrible. We really 
+        // This is pretty terrible. We really
         let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
 
         let conn = crate::establish_db_connection();
 
         let mut tags = Vec::new();
         for tag in parse_tag_list(&thread.tags) {
+            let tag = tag.trim();
+            if tag.is_empty() {
+                continue;
+            }
             if tag.len() > MAX_TAG_LEN {
                 return Err(SubmitThreadError::TagTooLong);
             }
@@ -563,6 +244,76 @@ impl ThreadForm {
     }
 }
 
+#[derive(Deserialize)]
+struct UpdateThread {
+    locked: Option<bool>,
+    pinned: Option<bool>,
+    hidden: Option<bool>,
+}
+
+#[derive(Serialize, From)]
+enum UpdateThreadError {
+    Unprivileged,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+post! {
+    "/thread/:thread_id",
+    #[json_result]
+    async fn update_thread_flags(
+        user: User,
+        Path(thread_id): Path<i32>,
+        Query(UpdateThread {
+            locked: set_locked,
+            pinned: set_pinned,
+            hidden: set_hidden,
+        }): Query<UpdateThread>
+    ) -> Json<Result<(), UpdateThreadError>> {
+        use self::threads::dsl::*;
+
+        if user.role < Role::Moderator {
+            return Err(UpdateThreadError::Unprivileged);
+        }
+
+        if set_locked.is_none() &&
+            set_pinned.is_none() &&
+            set_hidden.is_none() {
+            return Ok(());
+        }
+
+        let conn = crate::establish_db_connection();
+
+        // TODO: Come up with some pattern to chain these
+
+        if let Some(set_locked) = set_locked {
+            diesel::update(threads.find(thread_id))
+                .set(locked.eq(set_locked))
+                .get_result::<Thread>(&conn)?;
+         }
+
+        if let Some(set_pinned) = set_pinned {
+            diesel::update(threads.find(thread_id))
+                .set(pinned.eq(set_pinned))
+                .get_result::<Thread>(&conn)?;
+        }
+
+        if let Some(set_hidden) = set_hidden {
+            diesel::update(threads.find(thread_id))
+                .set(hidden.eq(set_hidden))
+                .get_result::<Thread>(&conn)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Serialize, From)]
+pub enum DeleteThreadError {
+    Unprivileged,
+    NoSuchThread,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
 table! {
     tags(id) {
         id -> Integer,
@@ -602,11 +353,16 @@ impl Tag {
 
     pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Result<Self, diesel::result::Error> {
         use self::tags::dsl::*;
+
         tags.find(tag_id).first::<Self>(conn)
     }
 
     pub fn fetch_from_str(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
         use self::tags::dsl::*;
+
+        if tag.trim().is_empty() {
+            return Err(diesel::result::Error::NotFound);
+        }
 
         tags.filter(name.eq(clean_tag_name(tag)))
             .first::<Self>(conn)
@@ -615,14 +371,23 @@ impl Tag {
     /// Fetches a tag, creating it if it doesn't already exist. num_tagged is
     /// incremented or set to one.
     ///
-    /// It's kind of a weird interface, I'm open to suggestions. 
+    /// It's kind of a weird interface, I'm open to suggestions.
     ///
     /// Assumes that str is not empty.
-    pub fn fetch_from_str_and_inc(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
+    pub fn fetch_from_str_and_inc(
+        conn: &PgConnection,
+        tag: &str,
+    ) -> Result<Self, diesel::result::Error> {
         use self::tags::dsl::*;
 
+        if tag.trim().is_empty() {
+            return Err(diesel::result::Error::NotFound);
+        }
+
         diesel::insert_into(tags)
-            .values(&NewTag { name: &clean_tag_name(tag) })
+            .values(&NewTag {
+                name: &clean_tag_name(tag),
+            })
             .on_conflict(name)
             .do_update()
             .set(num_tagged.eq(num_tagged + 1))
@@ -639,10 +404,9 @@ fn parse_tag_list(list: &str) -> impl Iterator<Item = &str> {
     list.split(",").map(|i| i.trim())
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Tags {
-    tags: Vec<Tag>,
+    pub tags: Vec<Tag>,
 }
 
 impl Tags {
@@ -662,9 +426,9 @@ impl Tags {
 
     pub fn fetch_from_ids<'a>(conn: &PgConnection, ids: impl Iterator<Item = &'a i32>) -> Self {
         Self {
-            tags:
-        ids.filter_map(|id| Tag::fetch_from_id(conn, *id).ok())
-                .collect()
+            tags: ids
+                .filter_map(|id| Tag::fetch_from_id(conn, *id).ok())
+                .collect(),
         }
     }
 
@@ -678,7 +442,6 @@ impl Tags {
         self.tags.into_iter().map(|x| x.id)
     }
 
-    
     pub fn is_empty(&self) -> bool {
         self.tags.is_empty()
     }
@@ -741,9 +504,12 @@ impl Reply {
 
         replies.find(reply_id).first::<Reply>(conn)
     }
+}
 
+post! {
+    "delete_reply/:dead_reply_id",
     #[json_result]
-    pub async fn delete(
+    async fn delete_reply(
         user: User,
         Path(dead_reply_id): Path<i32>,
     ) -> Json<Result<(), DeleteReplyError>> {
@@ -809,27 +575,28 @@ pub struct NewReply<'b> {
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
-    // TODO: Rename body
-    reply: String,
+    // TODO: Rename to body
+    reply:     String,
+    thread_id: String,
 }
 
 #[derive(Serialize, From)]
 pub enum ReplyError {
     ReplyIsEmpty,
     ThreadIsLocked,
-    UploadImageError(UploadImageError),
+    UploadImageError(#[serde(skip)] UploadImageError),
     InternalDbError(#[serde(skip)] diesel::result::Error),
-    FetchThreadError(FetchThreadError),
+    FetchThreadError(#[serde(skip)] FetchThreadError),
 }
 
-impl ReplyForm {
+post! {
+    "/reply",
     #[json_result]
-    pub async fn submit(
+    pub async fn new_reply(
         user: User,
-        Path(thread_id): Path<i32>,
         MultipartForm {
             file,
-            form: ReplyForm { reply },
+            form: ReplyForm { thread_id, reply },
         }: MultipartForm<ReplyForm, MAXIMUM_FILE_SIZE>,
     ) -> Json<Result<Reply, ReplyError>> {
         let reply = reply.trim();
@@ -839,6 +606,7 @@ impl ReplyForm {
 
         let conn = crate::establish_db_connection();
 
+        let thread_id: i32 = thread_id.parse().unwrap();
         if Thread::fetch(&conn, thread_id)?.locked {
             return Err(ReplyError::ThreadIsLocked);
         }
@@ -879,36 +647,37 @@ impl ReplyForm {
 }
 
 #[derive(Deserialize)]
-pub struct EditPostForm {
+pub struct EditReplyForm {
     // TODO: Name every post contents field "body"
     body: String,
 }
 
 #[derive(Serialize, From)]
-pub enum EditPostError {
+pub enum EditReplyError {
     DoesNotOwnPost,
     CannotMakeEmpty,
     InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
-impl EditPostForm {
+post! {
+    "/reply/:post_id",
     #[json_result]
-    pub async fn submit(
+    pub async fn edit_reply(
         user: User,
         Path(post_id): Path<i32>,
-        Form(EditPostForm { body }): Form<EditPostForm>,
-    ) -> Json<Result<Reply, EditPostError>> {
+        Form(EditReplyForm { body }): Form<EditReplyForm>,
+    ) -> Json<Result<Reply, EditReplyError>> {
         let body = body.trim();
 
         let conn = crate::establish_db_connection();
         let post = Reply::fetch(&conn, post_id)?;
 
         if post.author_id != user.id {
-            return Err(EditPostError::DoesNotOwnPost);
+            return Err(EditReplyError::DoesNotOwnPost);
         }
 
         if post.image.is_none() && body.is_empty() {
-            return Err(EditPostError::CannotMakeEmpty);
+            return Err(EditReplyError::CannotMakeEmpty);
         }
 
         // TODO: check if time period to edit has expired.
@@ -924,7 +693,80 @@ impl EditPostForm {
                 replies::dsl::body_html.eq(html_output),
             ))
             .get_result(&conn)
-            .map_err(EditPostError::InternalDbError)
+            .map_err(EditReplyError::InternalDbError)
+    }
+}
+
+#[derive(Serialize, From)]
+pub enum ReactError {
+    NoSuchReply,
+    ThisIsYourPost,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+post! {
+    "/react/:post_id",
+    #[json_result]
+    pub async fn react(
+        user: User,
+        Path(post_id): Path<i32>,
+        Form(used_reactions): Form<HashMap<i32, String>>,
+    ) -> Json<Result<(), ReactError>> {
+        use diesel::result::Error;
+        use crate::threads::replies::dsl::*;
+
+        let conn = crate::establish_db_connection();
+        let reply = Reply::fetch(&conn, post_id).map_err(|_| ReactError::NoSuchReply)?;
+
+        if reply.author_id == user.id {
+            return Err(ReactError::ThisIsYourPost);
+        }
+
+        conn
+            .transaction(|| -> Result<i32, diesel::result::Error> {
+                let mut new_reactions = reply.reactions;
+
+                let author =
+                    User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
+
+                // Verify that all of the reactions are owned by the user:
+                for (reaction, selected) in used_reactions.into_iter() {
+                    let drop = ItemDrop::fetch(&conn, reaction)
+                        .map_err(|_| Error::RollbackTransaction)?;
+                    let item = Item::fetch(&conn, drop.item_id);
+                    if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
+                        return Err(Error::RollbackTransaction);
+                    }
+
+                    // Set the drops to consumed.
+                    use crate::drops_dsl::*;
+
+                    diesel::update(drops.find(reaction))
+                        .filter(consumed.eq(false))
+                        .set(consumed.eq(true))
+                        .get_result::<ItemDrop>(&conn)
+                        .map_err(|_| Error::RollbackTransaction)?;
+
+                    new_reactions.push(reaction);
+                    match item.item_type {
+                        ItemType::Reaction { xp_value, .. } => {
+                            author.add_experience(&conn, xp_value as i64)
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+
+                // Update the post with the new reactions:
+                // TODO: Move into Reply struct
+                diesel::update(replies.find(post_id))
+                    .set(reactions.eq(new_reactions))
+                    .get_result::<Reply>(&conn)
+                    .map_err(|_| Error::RollbackTransaction)?;
+
+                Ok(reply.thread_id)
+            })?;
+
+        Ok(())
     }
 }
 

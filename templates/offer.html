@@ -4,7 +4,8 @@
 
 {% block content %}
 <li class="menu-item">
-  <form action="/offer/{{receiver.id}}" method="post">
+  <form action="/offer/" method="post">
+    <input type="hidden" name="receiver_id" value="{{receiver.id}}">
     <div class="table">
       <div class="row">
         <div class="cell"></div>
@@ -106,7 +107,7 @@
               InternalDbError: "There was an internal error, please try again later",
           };
           $("form").ajaxForm({
-              url: '/offer/{{receiver.id}}',
+              url: '/offer',
               type: 'post',
               success: function(response, _, _, _) {
                   if (response.Err !== undefined) {

@@ -134,7 +134,7 @@
       <div class="cell">
         <div style="display: table-cell; padding: 10px">
           <button id="rescind-{{offer.id}}" type="submit" onclick="rescind({{offer.id}})">Rescind</button>
-          <div id="error-{{offer.id}}" style="position: absolute; z-index: 10; transform: translatey(-100%) translatex(140px);"></div>
+          <div id="error-{{offer.id}}" style="position: absolute; z-index: 10; transform: translatey(-100%) translatex(80px);"></div>
         </div>
       </div>
       <div class="cell"></div>
@@ -149,7 +149,7 @@
       $(`#decline-${offer_id}`).prop("disabled", true);
       $(`#error-${offer_id}`).html("");
       $.ajax({
-          url: `accept/${offer_id}`,
+          url: `/accept/${offer_id}`,
           type: 'post',
           success: function(response, _, _, _) {
               console.log(response);
@@ -174,7 +174,7 @@
       $(`#decline-${offer_id}`).prop("disabled", true);
       $(`#error-${offer_id}`).html("");
       $.ajax({
-          url: `decline/${offer_id}`,
+          url: `/decline/${offer_id}`,
           type: 'post',
           success: function(response, _, _, _) {
               if (response.Err !== undefined) {
@@ -197,7 +197,7 @@
       $(`#rescind-${offer_id}`).prop("disabled", true);
       $(`#error-${offer_id}`).html("");
       $.ajax({
-          url: `decline/${offer_id}`,
+          url: `/decline/${offer_id}`,
           type: 'post',
           success: function(response, _, _, _) {
               if (response.Err !== undefined) {

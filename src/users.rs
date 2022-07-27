@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Range,
-};
+use std::{collections::HashMap, ops::Range};
 
 use askama::Template;
 use axum::{
@@ -23,9 +20,9 @@ use serde::{Deserialize, Serialize};
 use tower_cookies::{Cookie, Cookies, Key};
 
 use crate::{
-    items::{self, Item, ItemDrop, ItemThumbnail},
+    items::{self, Item, ItemDrop},
+    post,
     threads::Thread,
-    NotFound,
 };
 
 table! {
@@ -45,17 +42,6 @@ table! {
         equip_slot_badges -> Array<Integer>,
         banned_until -> Nullable<Timestamp>,
         notes -> Text,
-    }
-}
-
-table! {
-    reading_history(id) {
-        id -> Integer,
-        // It is important that the UNIQUE ( reader_id, article_id )
-        // constraint is applied.
-        reader_id -> Integer,
-        thread_id -> Integer,
-        last_read -> Integer,
     }
 }
 
@@ -87,23 +73,34 @@ pub struct User {
     pub notes:                 String,
 }
 
+/// Displayable user profile
+#[derive(Clone, Serialize)]
+pub struct ProfileStub {
+    pub id:         i32,
+    pub name:       String,
+    pub picture:    Option<String>,
+    pub background: String,
+    pub badges:     Vec<String>,
+    pub level:      LevelInfo,
+}
+
+#[derive(
+    Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord, Serialize, Deserialize,
+)]
+pub enum Role {
+    User,
+    Moderator,
+    Admin,
+}
+
+#[derive(Copy, Clone, Serialize)]
+pub struct LevelInfo {
+    pub level:         u32,
+    pub curr_xp:       u64,
+    pub next_level_xp: u64,
+}
+
 pub const MAX_NUM_BADGES: usize = 10;
-
-#[derive(Queryable)]
-pub struct ReadingHistory {
-    pub id:        i32,
-    pub reader_id: i32,
-    pub thread_id: i32,
-    pub last_read: i32,
-}
-
-#[derive(Insertable)]
-#[table_name = "reading_history"]
-pub struct NewReadingHistory {
-    reader_id: i32,
-    thread_id: i32,
-    last_read: i32,
-}
 
 impl User {
     /// Returns the raw, total experience of the user
@@ -170,22 +167,22 @@ impl User {
     }
 
     /// Returns a vec of equipped items.
-    pub fn equipped(&self, conn: &PgConnection) -> Vec<ItemDrop> {
+    pub fn equipped(&self, conn: &PgConnection) -> Result<Vec<ItemDrop>, diesel::result::Error> {
         let mut items = Vec::new();
 
         if let Some(prof_pic) = self.equip_slot_prof_pic {
-            items.push(ItemDrop::fetch(conn, prof_pic));
+            items.push(ItemDrop::fetch(conn, prof_pic)?);
         }
 
         if let Some(background) = self.equip_slot_background {
-            items.push(ItemDrop::fetch(conn, background));
+            items.push(ItemDrop::fetch(conn, background)?);
         }
 
         for badge in self.equip_slot_badges.iter() {
-            items.push(ItemDrop::fetch(conn, *badge));
+            items.push(ItemDrop::fetch(conn, *badge)?);
         }
 
-        items
+        Ok(items)
     }
 
     pub fn inventory(&self, conn: &PgConnection) -> impl Iterator<Item = (Item, ItemDrop)> {
@@ -210,30 +207,41 @@ impl User {
     }
 
     /// Returns the profile picture of the user
-    fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
-        self.equip_slot_prof_pic
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).as_profile_pic(&conn))
+    pub fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
+        self.equip_slot_prof_pic.map(|drop_id| {
+            ItemDrop::fetch(&conn, drop_id)
+                .unwrap()
+                .as_profile_pic(&conn)
+        })
     }
 
-    fn get_background_style(&self, conn: &PgConnection) -> String {
+    pub fn get_background_style(&self, conn: &PgConnection) -> String {
         self.equip_slot_background
-            .map(|drop_id| ItemDrop::fetch(&conn, drop_id).as_background_style(&conn))
+            .map(|drop_id| {
+                ItemDrop::fetch(&conn, drop_id)
+                    .unwrap()
+                    .as_background_style(&conn)
+            })
             .unwrap_or_else(|| String::from("background: #ddd;"))
     }
 
-    fn get_badges(&self, conn: &PgConnection) -> Vec<String> {
+    pub fn get_badges(&self, conn: &PgConnection) -> Vec<String> {
         self.equip_slot_badges
             .iter()
-            .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).as_badge(conn))
+            .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).unwrap().as_badge(conn))
             .collect()
     }
 
     /// Attempt to update the last drop time. If we fail, return false.
+    /// This will fail if the user has received a new reward since the user has
+    /// been fetched, which is by design.
     pub fn update_last_reward(&self, conn: &PgConnection) -> Result<Self, ()> {
         use self::users::dsl::{last_reward, users};
 
+        let prev_reward = self.last_reward;
         diesel::update(users.find(self.id))
             .set(last_reward.eq(Utc::now().naive_utc()))
+            .filter(last_reward.eq(prev_reward))
             .get_result::<Self>(conn)
             .map_err(|_| ())
     }
@@ -249,10 +257,10 @@ impl User {
         }
     }
 
-    pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, ()> {
+    pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, diesel::result::Error> {
         use self::users::dsl::*;
 
-        users.find(user_id).first::<Self>(conn).map_err(|_| ())
+        users.find(user_id).first::<Self>(conn)
     }
 
     pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
@@ -331,35 +339,32 @@ impl User {
 }
 
 #[derive(Deserialize)]
-pub struct SetRole {
+pub struct UpdateUser {
     role: Role,
 }
 
 #[derive(Serialize, From)]
-pub enum SetRoleError {
+pub enum UpdateUserError {
     Unprivileged,
     NoSuchUser,
     InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
-impl SetRole {
+post! {
+    "/user/:user_id",
     #[json_result]
-    pub async fn submit(
-        curr_user: User,
+    async fn update_user(
+        moderator: User,
         Path(user_id): Path<i32>,
-        Query(SetRole { role: new_role }): Query<SetRole>,
-    ) -> Json<Result<(), SetRoleError>> {
+        Query(UpdateUser { role: new_role }): Query<UpdateUser>
+    ) -> Json<Result<(), UpdateUserError>> {
         use self::users::dsl::*;
 
-        if curr_user.id == user_id {
-            return Err(SetRoleError::Unprivileged);
-        }
-
         let conn = crate::establish_db_connection();
-        let user = User::fetch(&conn, user_id).map_err(|_| SetRoleError::NoSuchUser)?;
+        let user = User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
 
-        if user.role >= curr_user.role || new_role >= curr_user.role {
-            return Err(SetRoleError::Unprivileged);
+        if user.role >= moderator.role || new_role >= moderator.role {
+            return Err(UpdateUserError::Unprivileged);
         }
 
         let _ = diesel::update(users.find(user_id))
@@ -371,34 +376,66 @@ impl SetRole {
 }
 
 #[derive(Deserialize)]
-pub struct SetBan {
+pub struct BanUser {
     #[serde(default, deserialize_with = "crate::empty_string_as_none")]
     ban_len: Option<u32>,
 }
 
-#[derive(Serialize, From)]
-pub enum BanUserError {
-    Unprivileged,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-}
-
-impl SetBan {
+post! {
+    "/ban/:user_id",
     #[json_result]
-    pub async fn submit(
-        curr_user: User,
+    async fn ban_user(
+        moderator: User,
         Path(user_id): Path<i32>,
-        Query(SetBan { ban_len }): Query<SetBan>,
-    ) -> Json<Result<(), BanUserError>> {
+        Query(BanUser { ban_len }): Query<BanUser>
+    ) -> Json<Result<(), UpdateUserError>> {
         use self::users::dsl::*;
 
-        if curr_user.role < Role::Moderator {
-            return Err(BanUserError::Unprivileged);
+        if moderator.role < Role::Moderator ||  moderator.id == user_id {
+            return Err(UpdateUserError::Unprivileged);
         }
 
         let conn = crate::establish_db_connection();
+        User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
+
         let ban = ban_len.map(|days| (Utc::now() + Duration::days(days as i64)).naive_utc());
-        let _ = diesel::update(users.find(user_id))
-            .set(banned_until.eq(ban))
+            let _ = diesel::update(users.find(user_id))
+                .set(banned_until.eq(ban))
+                .get_result::<User>(&conn)?;
+
+        Ok(())
+    }
+}
+
+#[derive(Deserialize)]
+pub struct UpdateBioForm {
+    bio: String,
+}
+
+#[derive(Serialize, From)]
+pub enum UpdateBioError {
+    TooLong,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
+}
+
+pub const MAX_BIO_LEN: usize = 300;
+
+post! {
+    "/bio",
+    #[json_result]
+    async fn update_bio(
+        curr_user: User,
+        Form(UpdateBioForm { bio: new_bio }): Form<UpdateBioForm>,
+    ) -> Json<Result<(), UpdateBioError>> {
+        use self::users::dsl::*;
+
+        if new_bio.len() > MAX_BIO_LEN {
+            return Err(UpdateBioError::TooLong);
+        }
+
+        let conn = crate::establish_db_connection();
+        diesel::update(users.find(curr_user.id))
+            .set(bio.eq(new_bio))
             .get_result::<User>(&conn)?;
 
         Ok(())
@@ -416,7 +453,8 @@ pub enum AddNoteError {
     InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
-impl AddNoteForm {
+post! {
+    "/add_note/:user_id",
     #[json_result]
     pub async fn submit(
         viewer: User,
@@ -441,142 +479,6 @@ impl AddNoteForm {
 
         Ok(())
     }
-}
-
-#[derive(Template)]
-#[template(path = "profile.html")]
-pub struct ProfilePage {
-    id:            i32,
-    name:          String,
-    picture:       Option<String>,
-    bio:           String,
-    level:         LevelInfo,
-    role:          Role,
-    equipped:      Vec<ItemThumbnail>,
-    inventory:     Vec<ItemThumbnail>,
-    badges:        Vec<String>,
-    background:    String,
-    is_banned:     bool,
-    is_curr_user:  bool,
-    ban_timestamp: String,
-    viewer_role:   Role,
-    viewer_name:   String,
-    offers:        i64,
-    notes:         String,
-}
-
-impl ProfilePage {
-    pub async fn show(curr_user: User, Path(id): Path<i32>) -> Result<Self, NotFound> {
-        use crate::items::drops;
-
-        let conn = crate::establish_db_connection();
-        let user =
-            User::fetch(&conn, id).map_err(|_| NotFound::new(curr_user.incoming_offers(&conn)))?;
-
-        let mut is_equipped = HashSet::new();
-
-        let equipped = user
-            .equipped(&conn)
-            .into_iter()
-            .map(|drop| {
-                // TODO: extract this to function.
-                is_equipped.insert(drop.id);
-                drop.thumbnail(&conn)
-            })
-            .collect::<Vec<_>>();
-
-        let mut inventory = drops::table
-            .filter(drops::dsl::owner_id.eq(user.id))
-            .filter(drops::dsl::consumed.eq(false))
-            .load::<ItemDrop>(&conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .filter_map(|drop| {
-                (!is_equipped.contains(&drop.id)).then(|| {
-                    let id = drop.item_id;
-                    (drop, Item::fetch(&conn, id).rarity)
-                })
-            })
-            .collect::<Vec<_>>();
-
-        inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
-
-        let inventory = inventory
-            .into_iter()
-            .map(|(drop, _)| drop.thumbnail(&conn))
-            .collect::<Vec<_>>();
-
-        let ban_timestamp = user
-            .banned_until
-            .map(|x| x.format(crate::DATE_FMT).to_string())
-            .unwrap_or_else(String::new);
-
-        Ok(Self {
-            id,
-            is_banned: user.is_banned(),
-            ban_timestamp,
-            picture: user.get_profile_pic(&conn),
-            offers: items::IncomingOffer::count(&conn, &curr_user),
-            level: user.level_info(),
-            badges: user.get_badges(&conn),
-            background: user.get_background_style(&conn),
-            name: user.name,
-            bio: user.bio,
-            role: user.role,
-            equipped,
-            inventory,
-            is_curr_user: user.id == curr_user.id,
-            notes: user.notes,
-            viewer_role: curr_user.role,
-            viewer_name: curr_user.name,
-        })
-    }
-}
-
-mod filters {
-    pub fn redact(input: &str) -> ::askama::Result<String> {
-        Ok(
-            input.chars().map(|c| {
-                if c.is_whitespace() || c == '.' || c == ',' || c == '!' || c =='?' {
-                    c
-                } else {
-                    '█'
-                }
-            }).collect::<String>()
-        )
-    }
-}
-
-pub async fn show_current_user(curr_user: User) -> Redirect {
-    Redirect::to(&format!("/profile/{}", curr_user.id))
-}
-
-#[derive(
-    Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord, Serialize, Deserialize,
-)]
-pub enum Role {
-    User,
-    Moderator,
-    Admin,
-}
-
-/// Displayable user profile
-#[derive(Clone, Serialize)]
-pub struct ProfileStub {
-    pub id:         i32,
-    pub name:       String,
-    pub picture:    Option<String>,
-    pub background: String,
-    pub badges:     Vec<String>,
-    pub level:      LevelInfo,
-}
-
-#[derive(Copy, Clone, Serialize)]
-pub struct LevelInfo {
-    level:         u32,
-    curr_xp:       u64,
-    next_level_xp: u64,
 }
 
 /// Name of the cookie we use to store the session Id.
@@ -637,47 +539,6 @@ pub struct Banned {
     judge_type: bool,
     until:      String,
 }
-
-#[derive(Template)]
-#[template(path = "leaderboard.html")]
-pub struct LeaderboardPage {
-    offers: i64,
-    users:  Vec<UserRank>,
-}
-
-struct UserRank {
-    rank:    usize,
-    bio:     String,
-    profile: ProfileStub,
-}
-
-impl LeaderboardPage {
-    pub async fn show(user: User) -> Self {
-        use self::users::dsl::*;
-
-        let conn = crate::establish_db_connection();
-
-        let user_profiles = users
-            .order(experience.desc())
-            .limit(100)
-            .load::<User>(&conn)
-            .unwrap()
-            .into_iter()
-            .enumerate()
-            .map(|(i, u)| UserRank {
-                rank:    i + 1,
-                bio:     u.bio.clone(),
-                profile: u.profile_stub(&conn),
-            })
-            .collect();
-
-        Self {
-            users:  user_profiles,
-            offers: items::IncomingOffer::count(&conn, &user),
-        }
-    }
-}
-
 pub struct UserCache<'a> {
     conn:   &'a PgConnection,
     cached: HashMap<i32, ProfileStub>,
@@ -734,10 +595,10 @@ pub struct NewSession {
     ip_addr:       IpNetwork,
 }
 
+#[derive(Serialize, From)]
 pub enum LoginFailure {
     UserOrPasswordIncorrect,
-    FailedToCreateSession,
-    ServerError,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
 impl LoginSession {
@@ -795,10 +656,12 @@ impl LoginSession {
             session_start,
             ip_addr,
         };
-        diesel::insert_into(login_sessions::table)
+
+        let session = diesel::insert_into(login_sessions::table)
             .values(&new_session)
-            .get_result(conn)
-            .map_err(|_| LoginFailure::FailedToCreateSession)
+            .get_result(conn)?;
+
+        Ok(session)
     }
 }
 
@@ -808,82 +671,48 @@ pub struct LoginForm {
     password: String,
 }
 
-#[derive(Template)]
-#[template(path = "login.html")]
-pub struct LoginPage {
-    error:  Option<&'static str>,
-    offers: usize,
-}
-
-impl LoginPage {
-    pub async fn show() -> Self {
-        Self {
-            error:  None,
-            offers: 0,
-        }
-    }
-
-    pub async fn attempt(
+post! {
+    "/login",
+    #[json_result]
+    async fn login(
         jar: Cookies,
         ClientIp(ip): ClientIp,
         login: Form<LoginForm>,
-    ) -> Result<Redirect, Self> {
+    ) -> Json<Result<(), LoginFailure>> {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
         let conn = crate::establish_db_connection();
-        LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))
-            .map(|LoginSession { session_id, .. }| {
-                private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
-                Redirect::to("/")
-            })
-            .map_err(|_e| Self {
-                error:  Some("Incorrect username or password"),
-                offers: 0,
-            })
+        let LoginSession { session_id, .. } =
+            LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))?;
+        private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
+        Ok(())
     }
 }
 
-#[derive(Template)]
-#[template(path = "update_bio.html")]
-pub struct UpdateBioPage {
-    name:       String,
-    picture:    Option<String>,
-    badges:     Vec<String>,
-    background: String,
-    bio:        String,
-    offers:     usize,
+table! {
+    reading_history(id) {
+        id -> Integer,
+        // It is important that the UNIQUE ( reader_id, article_id )
+        // constraint is applied.
+        reader_id -> Integer,
+        thread_id -> Integer,
+        last_read -> Integer,
+    }
 }
 
-#[derive(Deserialize)]
-pub struct UpdateBioForm {
-    bio: String,
+#[derive(Queryable)]
+pub struct ReadingHistory {
+    pub id:        i32,
+    pub reader_id: i32,
+    pub thread_id: i32,
+    pub last_read: i32,
 }
 
-impl UpdateBioPage {
-    pub async fn show(curr_user: User) -> Self {
-        let conn = crate::establish_db_connection();
-        Self {
-            picture:    curr_user.get_profile_pic(&conn),
-            badges:     curr_user.get_badges(&conn),
-            background: curr_user.get_background_style(&conn),
-            offers:     curr_user.incoming_offers(&conn) as usize,
-            bio:        curr_user.bio,
-            name:       curr_user.name,
-        }
-    }
-
-    pub async fn submit(
-        curr_user: User,
-        Form(UpdateBioForm { bio: new_bio }): Form<UpdateBioForm>,
-    ) -> Redirect {
-        use self::users::dsl::*;
-
-        let conn = crate::establish_db_connection();
-        let _ = diesel::update(users.find(curr_user.id))
-            .set(bio.eq(new_bio))
-            .get_result::<User>(&conn);
-
-        Redirect::to(&format!("/profile/{}", curr_user.id))
-    }
+#[derive(Insertable)]
+#[table_name = "reading_history"]
+pub struct NewReadingHistory {
+    reader_id: i32,
+    thread_id: i32,
+    last_read: i32,
 }

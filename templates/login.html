@@ -29,16 +29,36 @@
         <div class="cell">
           <button type="submit">Log In</button>
         </div>
-        {% match error %}
-        {% when Some with (error) %}
-        <div class="error">
-          {{error|e}} 
+        <div id="error" class="error" style="display: none">
         </div>
-        {% else %}
-        {% endmatch %}
         <p>Don't have an account? <u><a href="/register">Register a new one!</a></u></p>
       </div>
     </div>
+    <script type="text/javascript">
+      const error_messages = {
+          UserOrPasswordIncorrect: "Invalid username or password",
+          InternalDbError: "Internal server error, please try again later"
+      };
+      $(document).ready(function () {
+          $("form").ajaxForm({
+              url: '/login',
+              type: 'post',
+              success: function(response, _, _, _) {
+                  if (response.Err !== undefined) {
+                      var error_message = error_messages[response.Err];
+                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                      $('#error').show();
+                      $('#error').html(`${error_message}`);
+                  } else {
+                      location.href = '/';
+                  }
+              },
+              error: function(_, _, _) {
+                  $('#error').html('An unknown error occurred');
+              }
+          });
+      });
+    </script>
   </form>
 </li>
 {% endblock %}

@@ -22,9 +22,14 @@
     <button onclick="toggleLocked()"
             {% if locked %}style="filter: brightness(70%)"{% endif %}
             >🔒</button>
+    <button onclick="toggleHidden()"
+            {% if hidden %}style="filter: brightness(70%)"{% endif %}
+            >🙈</button>
+    {% if viewer_role == Role::Admin %}
     <button ondblclick="deleteThread()" type="submit" style="background: red; color: white; margin: 0px" class="action-box">
       ⚠️ Delete thread
     </button>
+    {% endif %}
   </div>
   {% endif %}
 </li>
@@ -109,6 +114,7 @@
 </li>
 {% endfor %}
 <form action="/thread/{{id}}" method="post" id="reply" enctype="multipart/form-data">
+  <input type="hidden" id="thread_id" name="thread_id" value={{id}}>
   <li class="menu-item" style="padding: 25px">
     {% if locked %}
     <div style="display: flow-root">
@@ -125,7 +131,7 @@
         <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
         <span id="attach-file-to-reply-text-container">+ File!</span>
       </label>
-      <div id="error" style="margin-top: 15px"></div>
+      <div id="error" style="margin-top: 15px; display: none" class="error"></div>
     </div>
     {% endif %}
     <script type="text/javascript">
@@ -133,7 +139,7 @@
       function togglePinned() {
           var set_pinned = !{{pinned}};
           $.ajax({
-              url: `/set_pinned?thread={{id}}&pinned=${set_pinned}`,
+              url: `/thread/{{id}}?pinned=${set_pinned}`,
               type: 'post',
               complete: function(_, _) {
                   location.href = `/thread/{{id}}`;
@@ -143,7 +149,17 @@
       function toggleLocked() {
           var set_locked = !{{locked}};
           $.ajax({
-              url: `/set_locked?thread={{id}}&locked=${set_locked}`,
+              url: `/thread/{{id}}?locked=${set_locked}`,
+              type: 'post',
+              complete: function(_, _) {
+                  location.href = `/thread/{{id}}`;
+              }
+          });
+      }
+      function toggleHidden() {
+          var set_hidden = !{{hidden}};
+          $.ajax({
+              url: `/thread/{{id}}?hidden=${set_hidden}`,
               type: 'post',
               complete: function(_, _) {
                   location.href = `/thread/{{id}}`;
@@ -176,10 +192,10 @@
               ThreadIsLocked: "Thread is locked",
               UploadImageError: "There was an error uploading the image",
               InternalDbError: "There was an internal error, please try again later",
-              FetchThreadError: "This thread has been deleted",
+              FetchThreadError: "This thread does not exist or has been deleted",
           };
           $("form#reply").ajaxForm({
-              url: '/thread/{{id}}',
+              url: '/reply',
               type: 'post',
               success: function(response, _, _, _) {
                   if (response.Err !== undefined) {
