@@ -507,7 +507,7 @@ impl Reply {
 }
 
 post! {
-    "delete_reply/:dead_reply_id",
+    "/delete_reply/:dead_reply_id",
     #[json_result]
     async fn delete_reply(
         user: User,
