@@ -41,10 +41,12 @@
         {% when Some(AvailableEquipAction::Equip) %}
         <form action="/equip/{{id}}">
           <button type="submit">Equip</button>
+          <div id="error" class="error" style="display: none"></div>
         </form>
         {% when Some(AvailableEquipAction::Unequip) %}
         <form action="/unequip/{{id}}">
           <button type="submit">Unequip</button>
+          <div id="error" class="error" style="display: none"></div>
         </form>
         {% when None %}
         <button disabled>Cannot equip item</button>
@@ -53,5 +55,24 @@
     </div>
   </div>
 </li>
+<script type="text/javascript">
+  $(document).ready(function () {
+      $("form").ajaxForm({
+          type: 'post',
+          success: function(response, _, _, _) {
+              if (response.Err !== undefined) {
+                  $('#error').show();
+                  $('#error').html('Failed to equip this item');
+              } else {
+                  location.href = '/profile';
+              }
+          },
+          error: function(_, _, _) {
+              $('#error').show();
+              $('#error').html('Failed to equip this item');
+          }
+      });
+  });
+</script>
 {% endblock %}
       
