@@ -158,7 +158,7 @@ post! {
         user: User,
         form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
     ) -> Json<Result<Thread, SubmitThreadError>> {
-                let MultipartForm { file, form: thread } = form?;
+        let MultipartForm { file, form: thread } = form?;
 
         let title = thread.title.trim();
         let body = thread.body.trim();
@@ -678,6 +678,8 @@ post! {
     ) -> Json<Result<Reply, UpdateReplyError>> {
         let conn = crate::establish_db_connection();
 
+        let post = Reply::fetch(&conn, post_id)?;
+
         let reply = if let Some(hidden) = hidden {
             if user.role < Role::Moderator {
                 return Err(UpdateReplyError::Unprivileged);
@@ -693,10 +695,9 @@ post! {
         let body = if let Some(body) = body {
             body
         } else {
-            return Ok(());
+            return Ok(reply.unwrap_or(post));
         };
 
-        let post = Reply::fetch(&conn, post_id)?;
         if post.author_id != user.id && user.role < Role::Moderator {
             return Err(UpdateReplyError::NotYourPost);
         }
