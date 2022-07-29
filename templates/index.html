@@ -17,14 +17,16 @@
   {% endfor %}
 </li>
 {% for post in posts %}
-<li class="menu-item thread-menu-item" style="display: grid">
+{% if !post.hidden || viewer_role > Role::User %}
+<li class="menu-item thread-menu-item thread-row" style="display: grid">
   <div class="table">
-    <div class="thread-row row" onclick="window.location='/thread/{{post.id}}?jump_to={{post.jump_to}}'">
+    <div class="row" onclick="window.location='/thread/{{post.id}}?jump_to={{post.jump_to}}'">
       <div class="cell" style="width: 60%; padding-left: 25px; vertical-align: middle">
         {{post.title}}
         <div style="margin-left: 0px; font-size: 80%; color: #4d4d4d">
           └{{post.replies}}
           | last activity {% if post.emphasize_date %}<b>{{post.date}}</b>{% else %}{{post.date}}{% endif %}
+          {% if post.hidden %} 🙈{% endif %}
           {% if post.pinned %} 📌{% endif %}
           {% if post.locked %} 🔒{% endif %}
           {% if !post.read %} 📨{% endif %}
@@ -38,5 +40,6 @@
     </div>
   </div>
 </li>
+{% endif %}
 {% endfor %}
 {% endblock %}

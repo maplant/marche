@@ -128,7 +128,7 @@
       {% if viewer_role == Role::Admin %}
       function setRole(role) {
           $.ajax({
-              url: `/set_role/{{id}}?role=${role}`,
+              url: `/user/{{id}}?role=${role}`,
               type: 'post',
               complete: function(_, _) {
                   location.reload();

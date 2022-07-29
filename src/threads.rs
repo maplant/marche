@@ -275,9 +275,7 @@ post! {
             return Err(UpdateThreadError::Unprivileged);
         }
 
-        if set_locked.is_none() &&
-            set_pinned.is_none() &&
-            set_hidden.is_none() {
+        if set_locked.is_none() && set_pinned.is_none() && set_hidden.is_none() {
             return Ok(());
         }
 
@@ -460,6 +458,7 @@ table! {
         image -> Nullable<Text>,
         thumbnail -> Nullable<Text>,
         filename -> Text,
+        hidden -> Bool,
     }
 }
 
@@ -488,14 +487,8 @@ pub struct Reply {
     pub thumbnail: Option<String>,
     /// Filename associated with the image
     pub filename:  String,
-}
-
-#[derive(Serialize, From)]
-pub enum DeleteReplyError {
-    Unprivileged,
-    NoSuchReply,
-    CannotDeleteFirstReply,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    /// Whether or not the thread is hidden
+    pub hidden:    bool,
 }
 
 impl Reply {
@@ -504,6 +497,14 @@ impl Reply {
 
         replies.find(reply_id).first::<Reply>(conn)
     }
+}
+
+#[derive(Serialize, From)]
+pub enum DeleteReplyError {
+    Unprivileged,
+    NoSuchReply,
+    CannotDeleteFirstReply,
+    InternalDbError(#[serde(skip)] diesel::result::Error),
 }
 
 post! {
@@ -647,14 +648,19 @@ post! {
 }
 
 #[derive(Deserialize)]
-pub struct EditReplyForm {
-    // TODO: Name every post contents field "body"
-    body: String,
+pub struct UpdateReplyParams {
+    hidden: Option<bool>,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateReplyForm {
+    body: Option<String>,
 }
 
 #[derive(Serialize, From)]
-pub enum EditReplyError {
-    DoesNotOwnPost,
+pub enum UpdateReplyError {
+    Unprivileged,
+    NotYourPost,
     CannotMakeEmpty,
     InternalDbError(#[serde(skip)] diesel::result::Error),
 }
@@ -662,22 +668,43 @@ pub enum EditReplyError {
 post! {
     "/reply/:post_id",
     #[json_result]
-    pub async fn edit_reply(
+    pub async fn update_reply(
         user: User,
         Path(post_id): Path<i32>,
-        Form(EditReplyForm { body }): Form<EditReplyForm>,
-    ) -> Json<Result<Reply, EditReplyError>> {
-        let body = body.trim();
-
+        Query(UpdateReplyParams {
+            hidden,
+        }): Query<UpdateReplyParams>,
+        Form(UpdateReplyForm { body }): Form<UpdateReplyForm>,
+    ) -> Json<Result<Reply, UpdateReplyError>> {
         let conn = crate::establish_db_connection();
-        let post = Reply::fetch(&conn, post_id)?;
 
-        if post.author_id != user.id {
-            return Err(EditReplyError::DoesNotOwnPost);
+        let reply = if let Some(hidden) = hidden {
+            if user.role < Role::Moderator {
+                return Err(UpdateReplyError::Unprivileged);
+            }
+
+            Some(diesel::update(replies::table.find(post_id))
+                .set(replies::hidden.eq(hidden))
+                .get_result::<Reply>(&conn)?)
+        } else {
+            None
+        };
+
+        let body = if let Some(body) = body {
+            body
+        } else {
+            return Ok(());
+        };
+
+        let post = Reply::fetch(&conn, post_id)?;
+        if post.author_id != user.id && user.role < Role::Moderator {
+            return Err(UpdateReplyError::NotYourPost);
         }
 
+        let body = body.trim();
+
         if post.image.is_none() && body.is_empty() {
-            return Err(EditReplyError::CannotMakeEmpty);
+            return Err(UpdateReplyError::CannotMakeEmpty);
         }
 
         // TODO: check if time period to edit has expired.
@@ -687,13 +714,14 @@ post! {
                 Utc::now().naive_utc().format(crate::DATE_FMT)
             );
 
-        diesel::update(replies::table.find(post_id))
+        let reply = diesel::update(replies::table.find(post_id))
             .set((
                 replies::dsl::body.eq(body),
                 replies::dsl::body_html.eq(html_output),
             ))
-            .get_result(&conn)
-            .map_err(EditReplyError::InternalDbError)
+            .get_result::<Reply>(&conn)?;
+
+        Ok(reply)
     }
 }
 

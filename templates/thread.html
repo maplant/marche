@@ -102,6 +102,18 @@
               + Respond!
             </div>
             {% if viewer_role > Role::User && loop.index > 1 %}
+            <button id="hidden-{{post.id}}"
+                    onclick="hideReply({{post.id}}, !{{post.hidden}})"
+                    type="submit"
+                    class="action-box"
+                    {% if post.hidden %}
+                    style="filter: brightness(70%)"
+                    {% endif %}
+                    >
+              🙈
+            </button>
+            {% endif %}
+            {% if viewer_role > Role::Moderator && loop.index > 1 %}
             <button ondblclick="deleteReply({{post.id}})" type="submit" style="background: red; color: white" class="action-box">
               ⚠️ Delete reply
             </button>
@@ -163,6 +175,24 @@
               type: 'post',
               complete: function(_, _) {
                   location.href = `/thread/{{id}}`;
+              }
+          });
+      }
+      function hideReply(id, hide) {
+          $.ajax({
+              url: `/reply/${id}?hidden=${hide}`,
+              type: 'post',
+              data: {
+                  hidden: hide,
+              },
+              complete: function(_, _) {
+                  if (hide) {
+                      $(`#hidden-${id}`).css('filter', 'brightness(70%)');
+                      $(`#reply-${id}`).css('fitler', 'brightness(70%)');
+                  } else {
+                      $(`#hidden-${id}`).css('filter', 'brightness(100%)');
+                      $(`#reply-${id}`).css('fitler', 'brightness(100%)');
+                  }
               }
           });
       }

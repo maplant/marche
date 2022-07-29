@@ -20,9 +20,10 @@ const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
-    tags:   Vec<Tag>,
-    posts:  Vec<ThreadLink>,
-    offers: i64,
+    tags:        Vec<Tag>,
+    posts:       Vec<ThreadLink>,
+    offers:      i64,
+    viewer_role: Role,
 }
 
 #[derive(Serialize)]
@@ -38,6 +39,7 @@ struct ThreadLink {
     tags:           Vec<String>,
     pinned:         bool,
     locked:         bool,
+    hidden:         bool,
 }
 
 get! {
@@ -134,6 +136,7 @@ get! {
                         .collect(),
                     pinned: thread.pinned,
                     locked: thread.locked,
+                    hidden: thread.hidden,
                 }
             })
             .collect();
@@ -141,6 +144,7 @@ get! {
         Ok(Index {
             tags:   viewed_tags.tags,
             posts:  posts,
+            viewer_role: user.role,
             offers: IncomingOffer::count(&conn, &user),
         })
     }
@@ -179,6 +183,7 @@ struct Post {
     reward:    Option<Reward>,
     can_react: bool,
     can_edit:  bool,
+    hidden:    bool,
     image:     Option<String>,
     thumbnail: Option<String>,
     filename:  String,
@@ -186,17 +191,20 @@ struct Post {
 
 get! {
     "/thread/:thread_id",
-    async fn view_thread(user: User, Path(thread_id): Path<i32>) -> Result<ThreadPage, crate::NotFound> {
+    async fn view_thread(user: User, Path(thread_id): Path<i32>) -> Result<ThreadPage, NotFound> {
         use crate::threads_dsl::*;
         use crate::replies_dsl;
 
         let conn = crate::establish_db_connection();
         let offers = user.incoming_offers(&conn);
-        let thread = &threads
-            .filter(id.eq(thread_id))
+        let thread = &threads.find(thread_id)
             .first::<Thread>(&conn)
             .map_err(|_| NotFound::new(offers))?;
         user.read_thread(&conn, &thread);
+
+        if thread.hidden && user.role == Role::User {
+            return Err(NotFound::new(offers));
+        }
 
         let mut user_cache = UserCache::new(&conn);
         let posts = replies_dsl::replies
@@ -229,6 +237,7 @@ get! {
                 }),
                 can_edit:  t.author_id == user.id, // TODO: Add time limit for replies
                 can_react: t.author_id != user.id,
+                hidden:    t.hidden,
                 image:     t.image,
                 thumbnail: t.thumbnail,
                 filename:  t.filename,

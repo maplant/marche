@@ -8,16 +8,16 @@ $(document).ready(function() {
     // editing replies
     $(".edit-post-form").each(function() {
         const error_messages = {
-            DoesNotOwnPost: "You do not own this post",
+            Unprivileged: "You do not have the privilege to edit this post",
+            NotYourPost: "You do not own this post",
             CannotMakeEmpty: "You cannot make a post empty",
             InternalDbError: "There was an internal error, please try again later",
         };
         const id = $(this).attr("postid");
         $(this).ajaxForm({
-            url: `/edit/${id}`,
+            url: `/reply/${id}`,
             type: 'post',
             success: function(response, _, _, _) {
-                console.log(response);
                 if (response.Err !== undefined) {
                     var error_message = error_messages[response.Err];
                     var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
