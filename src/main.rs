@@ -1,10 +1,15 @@
 use std::net::SocketAddr;
 
 use axum::{
+    extract::Extension,
     http::StatusCode,
     response::Redirect,
     routing::{get, get_service},
     Router,
+};
+use diesel::{
+    PgConnection,
+    r2d2::{ConnectionManager, Pool},
 };
 use marche_server::Endpoint;
 use tower_cookies::CookieManagerLayer;
@@ -15,7 +20,19 @@ async fn main() {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "marche=info")
     }
+    
     tracing_subscriber::fmt::init();
+
+    let db_url = std::env::var("DATABASE_URL");
+    let db_url = if let Ok(db_url) = db_url {
+        db_url
+    } else {
+        tracing::error!("DATABASE_URL is not set, aborting.");
+        return;
+    };
+
+    let manager = ConnectionManager::<PgConnection>::new(db_url);
+    let pool = Pool::builder().build(manager).expect("Failed to create database pool");
 
     // TODO: Use the inventory crate to clean this up.
     let mut app = Router::new();
@@ -41,7 +58,8 @@ async fn main() {
             }),
         )
         .layer(CookieManagerLayer::new())
-        .layer(TraceLayer::new_for_http());
+        .layer(TraceLayer::new_for_http())
+        .layer(Extension(pool));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
     tracing::info!("Marche server launched, listening on {}", addr);

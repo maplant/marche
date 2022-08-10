@@ -42,5 +42,30 @@
       </div>
     </div>
   </li>
+  <script type="text/javascript">
+    $(document).ready(function() {
+        const error_messages = {
+            NoSuchReply: "Reply does not exist",
+            ThisIsYourPost: "Cannot react to your own post",
+            InternalDbError: "An internal db error occurred, try again later",
+        };
+        $("form").ajaxForm({
+            url: '/react/{{post_id}}',
+            type: 'post',
+            success: function(response, _, _, _) {
+                if (response.Err !== undefined) {
+                    var error_message = error_messages[response.Err];
+                    var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                    $("#error").html(`${error_message}`)
+                } else {
+                    location.href = '/thread/{{thread_id}}?jump_to={{post_id}}';
+                }
+            },
+            error: function(_, status, error) {
+                $("#error").html(`An unknown error occurred`);
+            }
+        });
+    })
+  </script>
 </form>
 {% endblock %}

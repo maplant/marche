@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 
 use axum::{
     body::Bytes,
-    extract::{Form, Path, Query},
+    extract::{Extension, Form, Path, Query},
     Json,
 };
 use chrono::{prelude::*, NaiveDateTime};
@@ -18,7 +18,7 @@ use crate::{
     items::{Item, ItemDrop, ItemType},
     post,
     users::{Role, User, UserCache},
-    File, MultipartForm, MultipartFormError,
+    File, MultipartForm, MultipartFormError, PgPool,
 };
 
 table! {
@@ -42,33 +42,33 @@ sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
 #[derive(Queryable, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id:          i32,
+    pub id: i32,
     /// Id of the last post
-    pub last_post:   i32,
+    pub last_post: i32,
     /// Title of the thread
-    pub title:       String,
+    pub title: String,
     /// Tags given to this thread
-    pub tags:        Vec<i32>,
+    pub tags: Vec<i32>,
     /// Number of replies to this thread, not including the first.
     pub num_replies: i32,
     /// Whether or not the thread is pinned
-    pub pinned:      bool,
+    pub pinned: bool,
     /// Whether or not the thread is locked
-    pub locked:      bool,
+    pub locked: bool,
     /// Whether or not the thread is hidden
-    pub hidden:      bool,
+    pub hidden: bool,
 }
 
 #[derive(Insertable)]
 #[table_name = "threads"]
 pub struct NewThread<'t> {
-    id:          i32,
-    title:       &'t str,
-    tags:        Vec<i32>,
-    last_post:   i32,
+    id: i32,
+    title: &'t str,
+    tags: Vec<i32>,
+    last_post: i32,
     num_replies: i32,
-    pinned:      bool,
-    locked:      bool,
+    pinned: bool,
+    locked: bool,
 }
 
 #[derive(Serialize)]
@@ -91,6 +91,7 @@ post! {
     "/delete_thread/:dead_thread_id",
     #[json_result]
     pub async fn delete_thread(
+        pool: Extension<PgPool>,
         user: User,
         Path(dead_thread_id): Path<i32>,
     ) -> Json<Result<(), DeleteThreadError>> {
@@ -98,7 +99,7 @@ post! {
             return Err(DeleteThreadError::Unprivileged);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
 
         // Fetch the thread title for logging purposes
         let thread_title = Thread::fetch(&conn, dead_thread_id)
@@ -134,8 +135,8 @@ post! {
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
-    tags:  String,
-    body:  String,
+    tags: String,
+    body: String,
 }
 
 #[derive(Serialize, From)]
@@ -155,6 +156,7 @@ post! {
     "/thread",
     #[json_result]
     async fn new_thread(
+        pool: Extension<PgPool>,
         user: User,
         form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
     ) -> Json<Result<Thread, SubmitThreadError>> {
@@ -174,7 +176,7 @@ post! {
         // This is pretty terrible. We really
         let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
 
         let mut tags = Vec::new();
         for tag in parse_tag_list(&thread.tags) {
@@ -261,6 +263,7 @@ post! {
     "/thread/:thread_id",
     #[json_result]
     async fn update_thread_flags(
+        pool: Extension<PgPool>,
         user: User,
         Path(thread_id): Path<i32>,
         Query(UpdateThread {
@@ -279,7 +282,7 @@ post! {
             return Ok(());
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
 
         // TODO: Come up with some pattern to chain these
 
@@ -322,8 +325,8 @@ table! {
 
 #[derive(Debug, Queryable, Serialize, Clone)]
 pub struct Tag {
-    pub id:         i32,
-    pub name:       String,
+    pub id: i32,
+    pub name: String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
 }
@@ -465,7 +468,7 @@ table! {
 #[derive(Queryable, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
-    pub id:        i32,
+    pub id: i32,
     /// Id of the author
     pub author_id: i32,
     /// Id of the thread
@@ -474,21 +477,21 @@ pub struct Reply {
     #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
-    pub body:      String,
+    pub body: String,
     /// Body of the reply parsed to html (what the user typically sees)
     pub body_html: String,
     /// Any item that was rewarded for this post
-    pub reward:    Option<i32>,
+    pub reward: Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
     /// Image associated with this post
-    pub image:     Option<String>,
+    pub image: Option<String>,
     /// Thumbnail associated with this post's image
     pub thumbnail: Option<String>,
     /// Filename associated with the image
-    pub filename:  String,
+    pub filename: String,
     /// Whether or not the thread is hidden
-    pub hidden:    bool,
+    pub hidden: bool,
 }
 
 impl Reply {
@@ -511,6 +514,7 @@ post! {
     "/delete_reply/:dead_reply_id",
     #[json_result]
     async fn delete_reply(
+        pool: Extension<PgPool>,
         user: User,
         Path(dead_reply_id): Path<i32>,
     ) -> Json<Result<(), DeleteReplyError>> {
@@ -520,7 +524,7 @@ post! {
             return Err(DeleteReplyError::Unprivileged);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let dead_reply =
             Reply::fetch(&conn, dead_reply_id).map_err(|_| DeleteReplyError::NoSuchReply)?;
 
@@ -565,19 +569,19 @@ pub struct NewReply<'b> {
     author_id: i32,
     thread_id: i32,
     post_date: NaiveDateTime,
-    body:      &'b str,
+    body: &'b str,
     body_html: &'b str,
-    reward:    Option<i32>,
+    reward: Option<i32>,
     reactions: Vec<i32>,
-    image:     Option<String>,
+    image: Option<String>,
     thumbnail: Option<String>,
-    filename:  String,
+    filename: String,
 }
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
     // TODO: Rename to body
-    reply:     String,
+    reply: String,
     thread_id: String,
 }
 
@@ -594,6 +598,7 @@ post! {
     "/reply",
     #[json_result]
     pub async fn new_reply(
+        pool: Extension<PgPool>,
         user: User,
         MultipartForm {
             file,
@@ -605,7 +610,7 @@ post! {
             return Err(ReplyError::ReplyIsEmpty);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
 
         let thread_id: i32 = thread_id.parse().unwrap();
         if Thread::fetch(&conn, thread_id)?.locked {
@@ -669,6 +674,7 @@ post! {
     "/reply/:post_id",
     #[json_result]
     pub async fn update_reply(
+        pool: Extension<PgPool>,
         user: User,
         Path(post_id): Path<i32>,
         Query(UpdateReplyParams {
@@ -676,8 +682,7 @@ post! {
         }): Query<UpdateReplyParams>,
         Form(UpdateReplyForm { body }): Form<UpdateReplyForm>,
     ) -> Json<Result<Reply, UpdateReplyError>> {
-        let conn = crate::establish_db_connection();
-
+        let conn = pool.get().expect("Could not connect to db");
         let post = Reply::fetch(&conn, post_id)?;
 
         let reply = if let Some(hidden) = hidden {
@@ -737,6 +742,7 @@ post! {
     "/react/:post_id",
     #[json_result]
     pub async fn react(
+        pool: Extension<PgPool>,
         user: User,
         Path(post_id): Path<i32>,
         Form(used_reactions): Form<HashMap<i32, String>>,
@@ -744,57 +750,56 @@ post! {
         use diesel::result::Error;
         use crate::threads::replies::dsl::*;
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let reply = Reply::fetch(&conn, post_id).map_err(|_| ReactError::NoSuchReply)?;
 
         if reply.author_id == user.id {
             return Err(ReactError::ThisIsYourPost);
         }
 
-        conn
-            .transaction(|| -> Result<i32, diesel::result::Error> {
-                let mut new_reactions = reply.reactions;
+        conn.transaction(|| -> Result<i32, diesel::result::Error> {
+            let mut new_reactions = reply.reactions;
 
-                let author =
-                    User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
+            let author =
+                User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
 
-                // Verify that all of the reactions are owned by the user:
-                for (reaction, selected) in used_reactions.into_iter() {
-                    let drop = ItemDrop::fetch(&conn, reaction)
-                        .map_err(|_| Error::RollbackTransaction)?;
-                    let item = Item::fetch(&conn, drop.item_id);
-                    if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
-                        return Err(Error::RollbackTransaction);
-                    }
-
-                    // Set the drops to consumed.
-                    use crate::drops_dsl::*;
-
-                    diesel::update(drops.find(reaction))
-                        .filter(consumed.eq(false))
-                        .set(consumed.eq(true))
-                        .get_result::<ItemDrop>(&conn)
-                        .map_err(|_| Error::RollbackTransaction)?;
-
-                    new_reactions.push(reaction);
-                    match item.item_type {
-                        ItemType::Reaction { xp_value, .. } => {
-                            author.add_experience(&conn, xp_value as i64)
-                        }
-                        _ => unreachable!(),
-                    }
-                }
-
-                // Update the post with the new reactions:
-                // TODO: Move into Reply struct
-                diesel::update(replies.find(post_id))
-                    .set(reactions.eq(new_reactions))
-                    .get_result::<Reply>(&conn)
+            // Verify that all of the reactions are owned by the user:
+            for (reaction, selected) in used_reactions.into_iter() {
+                let drop = ItemDrop::fetch(&conn, reaction)
                     .map_err(|_| Error::RollbackTransaction)?;
-
-                Ok(reply.thread_id)
-            })?;
-
+                let item = Item::fetch(&conn, drop.item_id);
+                if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
+                    return Err(Error::RollbackTransaction);
+                }
+                
+                // Set the drops to consumed.
+                use crate::drops_dsl::*;
+                
+                diesel::update(drops.find(reaction))
+                    .filter(consumed.eq(false))
+                    .set(consumed.eq(true))
+                    .get_result::<ItemDrop>(&conn)
+                    .map_err(|_| Error::RollbackTransaction)?;
+                
+                new_reactions.push(reaction);
+                match item.item_type {
+                    ItemType::Reaction { xp_value, .. } => {
+                        author.add_experience(&conn, xp_value as i64)
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            
+            // Update the post with the new reactions:
+            // TODO: Move into Reply struct
+            diesel::update(replies.find(post_id))
+                .set(reactions.eq(new_reactions))
+                .get_result::<Reply>(&conn)
+                .map_err(|_| Error::RollbackTransaction)?;
+            
+            Ok(reply.thread_id)
+        })?;
+        
         Ok(())
     }
 }
@@ -892,7 +897,7 @@ use sha2::{Digest, Sha256};
 use tokio::task;
 
 pub struct Image {
-    pub filename:  String,
+    pub filename: String,
     pub thumbnail: Option<String>,
 }
 
@@ -996,7 +1001,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     if image_exists(&client, &filename).await {
         let thumbnail = format!("{hash}_thumbnail.{ext}");
         return Ok(Image {
-            filename:  get_url(&filename),
+            filename: get_url(&filename),
             thumbnail: image_exists(&client, &thumbnail)
                 .await
                 .then(move || get_url(&thumbnail)),
@@ -1025,7 +1030,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
 
     Ok(Image {
-        filename:  get_url(&filename),
+        filename: get_url(&filename),
         thumbnail: thumbnail.as_deref().map(get_url),
     })
 }

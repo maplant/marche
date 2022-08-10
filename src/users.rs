@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use askama::Template;
 use axum::{
     async_trait,
-    extract::{Form, FromRequest, Path, Query, RequestParts},
+    extract::{Form, FromRequest, Path, Query, RequestParts, Extension},
     response::{IntoResponse, Redirect, Response},
     Json,
 };
@@ -23,6 +23,7 @@ use crate::{
     items::{self, Item, ItemDrop},
     post,
     threads::Thread,
+    PgPool,
 };
 
 table! {
@@ -354,13 +355,14 @@ post! {
     "/user/:user_id",
     #[json_result]
     async fn update_user(
+        pool: Extension<PgPool>,
         moderator: User,
         Path(user_id): Path<i32>,
         Query(UpdateUser { role: new_role }): Query<UpdateUser>
     ) -> Json<Result<(), UpdateUserError>> {
         use self::users::dsl::*;
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let user = User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
 
         if user.role >= moderator.role || new_role >= moderator.role {
@@ -385,6 +387,7 @@ post! {
     "/ban/:user_id",
     #[json_result]
     async fn ban_user(
+        pool: Extension<PgPool>,
         moderator: User,
         Path(user_id): Path<i32>,
         Query(BanUser { ban_len }): Query<BanUser>
@@ -395,7 +398,7 @@ post! {
             return Err(UpdateUserError::Unprivileged);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
 
         let ban = ban_len.map(|days| (Utc::now() + Duration::days(days as i64)).naive_utc());
@@ -424,6 +427,7 @@ post! {
     "/bio",
     #[json_result]
     async fn update_bio(
+        pool: Extension<PgPool>,
         curr_user: User,
         Form(UpdateBioForm { bio: new_bio }): Form<UpdateBioForm>,
     ) -> Json<Result<(), UpdateBioError>> {
@@ -433,7 +437,7 @@ post! {
             return Err(UpdateBioError::TooLong);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         diesel::update(users.find(curr_user.id))
             .set(bio.eq(new_bio))
             .get_result::<User>(&conn)?;
@@ -457,6 +461,7 @@ post! {
     "/add_note/:user_id",
     #[json_result]
     pub async fn submit(
+        pool: Extension<PgPool>,
         viewer: User,
         Path(user_id): Path<i32>,
         Form(AddNoteForm { body }): Form<AddNoteForm>,
@@ -467,7 +472,7 @@ post! {
             return Err(AddNoteError::Unprivileged);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let viewer_name = viewer.name;
         let body = html_escape::encode_text(&body);
 
@@ -501,7 +506,11 @@ where
         let session_id = signed
             .get(USER_SESSION_ID_COOKIE)
             .ok_or(UserRejection::Unauthorized)?;
-        let conn = crate::establish_db_connection();
+        let conn = Extension::<PgPool>::from_request(req)
+            .await
+            .map_err(|_| UserRejection::InternalDbError)?
+            .get()
+            .expect("Could not connect to db");
         let session = LoginSession::fetch(&conn, session_id.value())
             .map_err(|_| UserRejection::Unauthorized)?;
         let user = User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized)?;
@@ -516,6 +525,7 @@ where
 }
 
 pub enum UserRejection {
+    InternalDbError,
     Unauthorized,
     Banned { until: NaiveDateTime },
 }
@@ -529,6 +539,7 @@ impl IntoResponse for UserRejection {
             }
             .into_response(),
             Self::Unauthorized => Redirect::to("/login").into_response(),
+            _ => todo!()
         }
     }
 }
@@ -675,6 +686,7 @@ post! {
     "/login",
     #[json_result]
     async fn login(
+        pool: Extension<PgPool>,
         jar: Cookies,
         ClientIp(ip): ClientIp,
         login: Form<LoginForm>,
@@ -682,7 +694,7 @@ post! {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to new db");
         let LoginSession { session_id, .. } =
             LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))?;
         private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));

@@ -1,7 +1,7 @@
 use std::{cmp::PartialEq, collections::HashMap};
 
 use axum::{
-    extract::{Form, Path},
+    extract::{Form, Path, Extension},
     Json,
 };
 use chrono::{Duration, Utc};
@@ -26,6 +26,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     post,
+    PgPool,
     users::{ProfileStub, User, UserCache},
 };
 
@@ -507,8 +508,12 @@ pub enum EquipError {
 post! {
     "/equip/:item_id",
     #[json_result]
-    async fn equip(user: User, Path(drop_id): Path<i32>) -> Json<Result<(), EquipError>> {
-        let conn = crate::establish_db_connection();
+    async fn equip(
+        pool: Extension<PgPool>,
+        user: User,
+        Path(drop_id): Path<i32>
+    ) -> Json<Result<(), EquipError>> {
+        let conn = pool.get().expect("Could not connect to db");
         let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_| EquipError::NoSuchItem)?;
         if drop.owner_id == user.id {
             drop.equip(&conn);
@@ -528,8 +533,12 @@ pub enum UnequipError {
 post! {
     "/unequip/:item_id",
     #[json_result]
-    pub async fn unequip(user: User, Path(drop_id): Path<i32>) -> Json<Result<(), UnequipError>> {
-        let conn = crate::establish_db_connection();
+    pub async fn unequip(
+        pool: Extension<PgPool>,
+        user: User,
+        Path(drop_id): Path<i32>
+    ) -> Json<Result<(), UnequipError>> {
+        let conn = pool.get().expect("Could not connect to db");
         let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_|UnequipError::NoSuchItem)?;
         if drop.owner_id == user.id {
             drop.unequip(&conn);
@@ -842,6 +851,7 @@ post! {
     "/offer/",
     #[json_result]
     pub async fn submit_offer(
+        pool: Extension<PgPool>,
         sender: User,
         Form(TradeRequestForm { receiver_id, note, trade }): Form<TradeRequestForm>,
     ) -> Json<Result<TradeRequest, SubmitOfferError>> {
@@ -854,7 +864,8 @@ post! {
             return Err(SubmitOfferError::CannotTradeWithSelf);
         }
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
+
         if User::fetch(&conn, receiver_id).is_err() {
             return Err(SubmitOfferError::NoSuchUser);
         }
@@ -908,8 +919,12 @@ post! {
 post! {
     "/accept/:trade_id",
     #[json_result]
-    async fn accept(user: User, Path(trade_id): Path<i32>) -> Json<Result<(), TradeResponseError>> {
-        let conn = crate::establish_db_connection();
+    async fn accept(
+        pool: Extension<PgPool>,
+        user: User,
+        Path(trade_id): Path<i32>
+    ) -> Json<Result<(), TradeResponseError>> {
+        let conn = pool.get().expect("Could not connect to db");
         let req = TradeRequest::fetch(&conn, trade_id)?;
         if req.receiver_id == user.id {
             req.accept(&conn)
@@ -923,10 +938,11 @@ post! {
     "/decline/:trade_id",
     #[json_result]
     async fn decline_offer(
+        pool: Extension<PgPool>,
         user: User,
         Path(trade_id): Path<i32>,
     ) -> Json<Result<(), TradeResponseError>> {
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let req = TradeRequest::fetch(&conn, trade_id)?;
         if req.sender_id == user.id || req.receiver_id == user.id {
             req.decline(&conn)

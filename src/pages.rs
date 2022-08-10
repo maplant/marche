@@ -1,13 +1,14 @@
 use std::collections::HashSet;
 
 use askama::Template;
-use axum::{extract::Path, response::Redirect};
+use axum::{extract::{Extension, Path}, response::Redirect};
 use chrono::prelude::*;
 use diesel::prelude::*;
 use serde::Serialize;
 
 use crate::{
     get,
+    PgPool,
     items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
     threads::{Reply, Tag, Tags, Thread},
     users::{LevelInfo, ProfileStub, Role, User, UserCache},
@@ -52,10 +53,14 @@ get! {
 
 get! {
     "/t/*tags",
-    async fn index(user: User, Path(viewed_tags): Path<String>) -> Result<Index, Redirect> {
+    async fn index(
+        pool: Extension<PgPool>,
+        user: User,
+        Path(viewed_tags): Path<String>
+    ) -> Result<Index, Redirect> {
         use crate::threads_dsl::*;
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags);
 
         // If no tags are selected and the user is not privileged, force
@@ -191,11 +196,15 @@ struct Post {
 
 get! {
     "/thread/:thread_id",
-    async fn view_thread(user: User, Path(thread_id): Path<i32>) -> Result<ThreadPage, NotFound> {
+    async fn view_thread(
+        pool: Extension<PgPool>,
+        user: User,
+        Path(thread_id): Path<i32>
+    ) -> Result<ThreadPage, NotFound> {
         use crate::threads_dsl::*;
         use crate::replies_dsl;
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let offers = user.incoming_offers(&conn);
         let thread = &threads.find(thread_id)
             .first::<Thread>(&conn)
@@ -266,9 +275,9 @@ pub struct AuthorPage {
 
 get! {
     "/author",
-    async fn author_page(user: User) -> AuthorPage {
+    async fn author_page(pool: Extension<PgPool>, user: User) -> AuthorPage {
         AuthorPage {
-            offers: IncomingOffer::count(&crate::establish_db_connection(), &user),
+            offers: IncomingOffer::count(&pool.get().expect("Could not connect to db"), &user),
         }
     }
 }
@@ -295,10 +304,14 @@ pub enum AvailableEquipAction {
 
 get! {
     "/item/:drop_id",
-    pub async fn show(user: User, Path(drop_id): Path<i32>) -> Result<ItemPage, crate::NotFound> {
-        let conn = crate::establish_db_connection();
+    pub async fn show(
+        pool: Extension<PgPool>,
+        user: User, Path(drop_id):
+        Path<i32>
+    ) -> Result<ItemPage, NotFound> {
+        let conn = pool.get().expect("Could not connect to db");
         // TODO: Fix NotFound
-        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_| crate::NotFound::new(0))?;
+        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_| NotFound::new(0))?;
         let item = Item::fetch(&conn, drop.item_id);
         let owner = User::fetch(&conn, drop.owner_id).unwrap();
         let equip_action = (user.id == drop.owner_id && item.is_equipable()).then(|| {
@@ -327,6 +340,7 @@ get! {
 #[derive(Template)]
 #[template(path = "react.html")]
 pub struct ReactPage {
+    thread_id: i32,
     post_id:   i32,
     author:    ProfileStub,
     body:      String,
@@ -336,10 +350,15 @@ pub struct ReactPage {
     thumbnail: Option<String>,
     filename:  String,
 }
+
 get! {
     "/react/:post_id",
-    async fn react_page(user: User, Path(post_id): Path<i32>) -> ReactPage {
-        let conn = crate::establish_db_connection();
+    async fn react_page(
+        pool: Extension<PgPool>,
+        user: User,
+        Path(post_id): Path<i32>
+    ) -> ReactPage {
+        let conn = pool.get().expect("Could not connect to db");
         let post = Reply::fetch(&conn, post_id).unwrap();
         let author = User::fetch(&conn, post.author_id)
             .unwrap()
@@ -350,6 +369,7 @@ get! {
             .collect();
 
         ReactPage {
+            thread_id: post.thread_id,
             post_id,
             author,
             body: post.body,
@@ -388,8 +408,8 @@ pub struct UpdateBioPage {
 
 get! {
     "/bio",
-    async fn update_bio_page(user: User) -> UpdateBioPage {
-        let conn = crate::establish_db_connection();
+    async fn update_bio_page(pool: Extension<PgPool>, user: User) -> UpdateBioPage {
+        let conn = pool.get().expect("Could not connect to db");
         UpdateBioPage {
             picture:    user.get_profile_pic(&conn),
             badges:     user.get_badges(&conn),
@@ -447,10 +467,14 @@ get! {
 
 get! {
     "/profile/:user_id",
-    async fn show_user_profile(curr_user: User, Path(user_id): Path<i32>) -> Result<ProfilePage, NotFound> {
+    async fn show_user_profile(
+        pool: Extension<PgPool>,
+        curr_user: User,
+        Path(user_id): Path<i32>
+    ) -> Result<ProfilePage, NotFound> {
         use crate::items::drops;
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
         let user =
             User::fetch(&conn, user_id).map_err(|_| NotFound::new(curr_user.incoming_offers(&conn)))?;
 
@@ -531,10 +555,13 @@ struct UserRank {
 
 get! {
     "/leaderboard",
-    async fn show_leaderboard(user: User) -> LeaderboardPage {
+    async fn show_leaderboard(
+        pool: Extension<PgPool>,
+        user: User
+    ) -> LeaderboardPage {
         use crate::users_dsl::*;
 
-        let conn = crate::establish_db_connection();
+        let conn = pool.get().expect("Could not connect to db");
 
         let user_profiles = users
             .order(experience.desc())
@@ -569,8 +596,12 @@ pub struct TradeRequestPage {
 
 get! {
     "/offer/:receiver_id",
-    async fn show_offer(sender: User, Path(receiver_id): Path<i32>) -> TradeRequestPage {
-        let conn = crate::establish_db_connection();
+    async fn show_offer(
+        pool: Extension<PgPool>,
+        sender: User,
+        Path(receiver_id): Path<i32>
+    ) -> TradeRequestPage {
+        let conn = pool.get().expect("Could not connect to db");
         let receiver = User::fetch(&conn, receiver_id).unwrap();
 
         TradeRequestPage {
@@ -601,8 +632,11 @@ pub struct TradeRequestsPage {
 
 get! {
     "/offers/",
-    async fn show_offers(user: User) -> TradeRequestsPage {
-        let conn = crate::establish_db_connection();
+    async fn show_offers(
+        pool: Extension<PgPool>,
+        user: User
+    ) -> TradeRequestsPage {
+        let conn = pool.get().expect("Could not connect to db");
         let mut user_cache = UserCache::new(&conn);
         // TODO: filter out trade requests that are no longer valid.
         let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);

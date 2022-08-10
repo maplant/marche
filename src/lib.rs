@@ -22,13 +22,14 @@ pub mod users_dsl {
     pub use crate::users::users::dsl::*;
 }
 
-use std::{any::Any, collections::HashMap, env, error::Error as StdError};
+use std::{any::Any, collections::HashMap, error::Error as StdError};
 
 use askama::Template;
 use axum::{
     async_trait,
     body::{Body, Bytes},
     extract::{
+        Extension,
         multipart::MultipartError, ContentLengthLimit, FromRequest, Multipart, RequestParts,
     },
     handler::Handler,
@@ -37,7 +38,7 @@ use axum::{
     Router,
 };
 use derive_more::{Display, From};
-use diesel::{pg::PgConnection, Connection};
+use diesel::{PgConnection, r2d2::{ConnectionManager, Pool}};
 use serde::{de::DeserializeOwned, Serialize};
 
 pub const DATE_FMT: &str = "%B %-d, %Y at %I:%M %P";
@@ -203,13 +204,7 @@ where
     }
 }
 
-pub fn establish_db_connection() -> PgConnection {
-    let database_url = env::var("DATABASE_URL").unwrap();
-    PgConnection::establish(&database_url).unwrap()
-}
-
-#[derive(Debug)]
-pub struct DbConnectionFailure;
+pub type PgPool = Pool<ConnectionManager<PgConnection>>;
 
 #[derive(Template)]
 #[template(path = "404.html")]
@@ -222,8 +217,8 @@ impl NotFound {
         Self { offers }
     }
 
-    pub async fn show(user: users::User) -> Self {
-        let conn = establish_db_connection();
+    pub async fn show(pool: Extension<PgPool>, user: users::User) -> Self {
+        let conn = pool.get().expect("Could not connect to db");
         Self {
             offers: user.incoming_offers(&conn),
         }

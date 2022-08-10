@@ -17,7 +17,7 @@ html-escape = "0.2.11"
 comrak = "0.14.0"
 rand = { version = "0.8" , features = ["getrandom"] }
 derive_more = "0.99"
-diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json", "network-address"] }
+diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json", "network-address", "r2d2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
