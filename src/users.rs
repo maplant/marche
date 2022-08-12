@@ -3,7 +3,7 @@ use std::{collections::HashMap, ops::Range};
 use askama::Template;
 use axum::{
     async_trait,
-    extract::{Form, FromRequest, Path, Query, RequestParts, Extension},
+    extract::{Extension, Form, FromRequest, Path, Query, RequestParts},
     response::{IntoResponse, Redirect, Response},
     Json,
 };
@@ -498,22 +498,38 @@ where
     type Rejection = UserRejection;
 
     async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
-        let cookies = Cookies::from_request(req)
-            .await
-            .map_err(|_| UserRejection::Unauthorized)?;
+        let redirect = req
+            .uri()
+            .path_and_query()
+            .map(|x| x.as_str().to_string())
+            .unwrap_or_else(String::new);
+        let cookies =
+            Cookies::from_request(req)
+                .await
+                .map_err(|_| UserRejection::Unauthorized {
+                    redirect: redirect.clone(),
+                })?;
         let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let signed = cookies.private(&private_key);
         let session_id = signed
             .get(USER_SESSION_ID_COOKIE)
-            .ok_or(UserRejection::Unauthorized)?;
+            .ok_or(UserRejection::Unauthorized {
+                redirect: redirect.clone(),
+            })?;
         let conn = Extension::<PgPool>::from_request(req)
             .await
             .map_err(|_| UserRejection::InternalDbError)?
             .get()
             .expect("Could not connect to db");
-        let session = LoginSession::fetch(&conn, session_id.value())
-            .map_err(|_| UserRejection::Unauthorized)?;
-        let user = User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized)?;
+        let session = LoginSession::fetch(&conn, session_id.value()).map_err(|_| {
+            UserRejection::Unauthorized {
+                redirect: redirect.clone(),
+            }
+        })?;
+        let user =
+            User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized {
+                redirect: redirect.clone(),
+            })?;
         if user.is_banned() {
             Err(UserRejection::Banned {
                 until: user.banned_until.unwrap(),
@@ -526,7 +542,7 @@ where
 
 pub enum UserRejection {
     InternalDbError,
-    Unauthorized,
+    Unauthorized { redirect: String },
     Banned { until: NaiveDateTime },
 }
 
@@ -538,8 +554,10 @@ impl IntoResponse for UserRejection {
                 until:      until.format(crate::DATE_FMT).to_string(),
             }
             .into_response(),
-            Self::Unauthorized => Redirect::to("/login").into_response(),
-            _ => todo!()
+            Self::Unauthorized { redirect } => {
+                Redirect::to(&format!("/login?redirect={redirect}")).into_response()
+            }
+            _ => todo!(),
         }
     }
 }
@@ -698,6 +716,34 @@ post! {
         let LoginSession { session_id, .. } =
             LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))?;
         private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
+        Ok(())
+    }
+}
+
+#[derive(Serialize)]
+pub enum LogoutFailure {
+    InternalDbError,
+}
+
+post! {
+    "/logout",
+    #[json_result]
+    async fn logout(
+        pool: Extension<PgPool>,
+        cookies: Cookies,
+    ) -> Json<Result<(), LogoutFailure>> {
+        use self::login_sessions::dsl::*;
+
+        let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
+        let signed = cookies.private(&private_key);
+        let curr_session_id = signed
+            .get(USER_SESSION_ID_COOKIE)
+            .ok_or(LogoutFailure::InternalDbError)?;
+
+        diesel::delete(login_sessions.filter(session_id.eq(curr_session_id.value())))
+            .execute(&pool.get().map_err(|_| LogoutFailure::InternalDbError)?)
+            .map_err(|_| LogoutFailure::InternalDbError)?;
+
         Ok(())
     }
 }

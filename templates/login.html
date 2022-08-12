@@ -35,7 +35,7 @@
       </div>
     </div>
     <script type="text/javascript">
-      const error_messages = {
+      const errorMessages = {
           UserOrPasswordIncorrect: "Invalid username or password",
           InternalDbError: "Internal server error, please try again later"
       };
@@ -45,12 +45,17 @@
               type: 'post',
               success: function(response, _, _, _) {
                   if (response.Err !== undefined) {
-                      var error_message = error_messages[response.Err];
-                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                      var errorMessage = errorMessages[response.Err];
+                      var errorMessage = errorMessage == undefined ? "An unknown error occurred" : errorMessage;
                       $('#error').show();
-                      $('#error').html(`${error_message}`);
+                      $('#error').html(`${errorMessage}`);
                   } else {
-                      location.href = '/';
+                      const urlParams = new URLSearchParams(window.location.search);
+                      if (urlParams.has('redirect')) {
+                          location.href = urlParams.get('redirect');
+                      } else {
+                          location.href = '/';
+                      }
                   }
               },
               error: function(_, _, _) {

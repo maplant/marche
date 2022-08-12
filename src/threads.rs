@@ -42,33 +42,33 @@ sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
 #[derive(Queryable, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id: i32,
+    pub id:          i32,
     /// Id of the last post
-    pub last_post: i32,
+    pub last_post:   i32,
     /// Title of the thread
-    pub title: String,
+    pub title:       String,
     /// Tags given to this thread
-    pub tags: Vec<i32>,
+    pub tags:        Vec<i32>,
     /// Number of replies to this thread, not including the first.
     pub num_replies: i32,
     /// Whether or not the thread is pinned
-    pub pinned: bool,
+    pub pinned:      bool,
     /// Whether or not the thread is locked
-    pub locked: bool,
+    pub locked:      bool,
     /// Whether or not the thread is hidden
-    pub hidden: bool,
+    pub hidden:      bool,
 }
 
 #[derive(Insertable)]
 #[table_name = "threads"]
 pub struct NewThread<'t> {
-    id: i32,
-    title: &'t str,
-    tags: Vec<i32>,
-    last_post: i32,
+    id:          i32,
+    title:       &'t str,
+    tags:        Vec<i32>,
+    last_post:   i32,
     num_replies: i32,
-    pinned: bool,
-    locked: bool,
+    pinned:      bool,
+    locked:      bool,
 }
 
 #[derive(Serialize)]
@@ -135,8 +135,8 @@ post! {
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
-    tags: String,
-    body: String,
+    tags:  String,
+    body:  String,
 }
 
 #[derive(Serialize, From)]
@@ -325,8 +325,8 @@ table! {
 
 #[derive(Debug, Queryable, Serialize, Clone)]
 pub struct Tag {
-    pub id: i32,
-    pub name: String,
+    pub id:         i32,
+    pub name:       String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
 }
@@ -468,7 +468,7 @@ table! {
 #[derive(Queryable, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
-    pub id: i32,
+    pub id:        i32,
     /// Id of the author
     pub author_id: i32,
     /// Id of the thread
@@ -477,21 +477,21 @@ pub struct Reply {
     #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
-    pub body: String,
+    pub body:      String,
     /// Body of the reply parsed to html (what the user typically sees)
     pub body_html: String,
     /// Any item that was rewarded for this post
-    pub reward: Option<i32>,
+    pub reward:    Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
     /// Image associated with this post
-    pub image: Option<String>,
+    pub image:     Option<String>,
     /// Thumbnail associated with this post's image
     pub thumbnail: Option<String>,
     /// Filename associated with the image
-    pub filename: String,
+    pub filename:  String,
     /// Whether or not the thread is hidden
-    pub hidden: bool,
+    pub hidden:    bool,
 }
 
 impl Reply {
@@ -569,19 +569,19 @@ pub struct NewReply<'b> {
     author_id: i32,
     thread_id: i32,
     post_date: NaiveDateTime,
-    body: &'b str,
+    body:      &'b str,
     body_html: &'b str,
-    reward: Option<i32>,
+    reward:    Option<i32>,
     reactions: Vec<i32>,
-    image: Option<String>,
+    image:     Option<String>,
     thumbnail: Option<String>,
-    filename: String,
+    filename:  String,
 }
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
     // TODO: Rename to body
-    reply: String,
+    reply:     String,
     thread_id: String,
 }
 
@@ -771,16 +771,16 @@ post! {
                 if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
                     return Err(Error::RollbackTransaction);
                 }
-                
+
                 // Set the drops to consumed.
                 use crate::drops_dsl::*;
-                
+
                 diesel::update(drops.find(reaction))
                     .filter(consumed.eq(false))
                     .set(consumed.eq(true))
                     .get_result::<ItemDrop>(&conn)
                     .map_err(|_| Error::RollbackTransaction)?;
-                
+
                 new_reactions.push(reaction);
                 match item.item_type {
                     ItemType::Reaction { xp_value, .. } => {
@@ -789,17 +789,17 @@ post! {
                     _ => unreachable!(),
                 }
             }
-            
+
             // Update the post with the new reactions:
             // TODO: Move into Reply struct
             diesel::update(replies.find(post_id))
                 .set(reactions.eq(new_reactions))
                 .get_result::<Reply>(&conn)
                 .map_err(|_| Error::RollbackTransaction)?;
-            
+
             Ok(reply.thread_id)
         })?;
-        
+
         Ok(())
     }
 }
@@ -897,7 +897,7 @@ use sha2::{Digest, Sha256};
 use tokio::task;
 
 pub struct Image {
-    pub filename: String,
+    pub filename:  String,
     pub thumbnail: Option<String>,
 }
 
@@ -1001,7 +1001,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     if image_exists(&client, &filename).await {
         let thumbnail = format!("{hash}_thumbnail.{ext}");
         return Ok(Image {
-            filename: get_url(&filename),
+            filename:  get_url(&filename),
             thumbnail: image_exists(&client, &thumbnail)
                 .await
                 .then(move || get_url(&thumbnail)),
@@ -1030,7 +1030,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
 
     Ok(Image {
-        filename: get_url(&filename),
+        filename:  get_url(&filename),
         thumbnail: thumbnail.as_deref().map(get_url),
     })
 }

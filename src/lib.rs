@@ -29,8 +29,8 @@ use axum::{
     async_trait,
     body::{Body, Bytes},
     extract::{
-        Extension,
-        multipart::MultipartError, ContentLengthLimit, FromRequest, Multipart, RequestParts,
+        multipart::MultipartError, ContentLengthLimit, Extension, FromRequest, Multipart,
+        RequestParts,
     },
     handler::Handler,
     http::StatusCode,
@@ -38,7 +38,10 @@ use axum::{
     Router,
 };
 use derive_more::{Display, From};
-use diesel::{PgConnection, r2d2::{ConnectionManager, Pool}};
+use diesel::{
+    r2d2::{ConnectionManager, Pool},
+    PgConnection,
+};
 use serde::{de::DeserializeOwned, Serialize};
 
 pub const DATE_FMT: &str = "%B %-d, %Y at %I:%M %P";

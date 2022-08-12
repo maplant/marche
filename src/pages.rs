@@ -1,18 +1,20 @@
 use std::collections::HashSet;
 
 use askama::Template;
-use axum::{extract::{Extension, Path}, response::Redirect};
+use axum::{
+    extract::{Extension, Path},
+    response::Redirect,
+};
 use chrono::prelude::*;
 use diesel::prelude::*;
 use serde::Serialize;
 
 use crate::{
     get,
-    PgPool,
     items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
     threads::{Reply, Tag, Tags, Thread},
     users::{LevelInfo, ProfileStub, Role, User, UserCache},
-    NotFound,
+    NotFound, PgPool,
 };
 
 const THREADS_PER_PAGE: i64 = 25;

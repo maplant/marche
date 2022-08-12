@@ -1,7 +1,7 @@
 use std::{cmp::PartialEq, collections::HashMap};
 
 use axum::{
-    extract::{Form, Path, Extension},
+    extract::{Extension, Form, Path},
     Json,
 };
 use chrono::{Duration, Utc};
@@ -26,8 +26,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     post,
-    PgPool,
     users::{ProfileStub, User, UserCache},
+    PgPool,
 };
 
 /// Rarity of an item.

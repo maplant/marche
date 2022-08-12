@@ -158,16 +158,29 @@
         {% endfor %}
       </div>
     </div>
-    {% if !is_curr_user %}
     <div class="row">
       <div class="cell"></div>
       <div class="cell">
+        {% if is_curr_user %}
+        <button type="submit" onclick="logout()">Log out</button>
+        <script type="text/javascript">
+          function logout() {
+              $.ajax({
+                  url: '/logout',
+                  type: 'post',
+                  complete: function(_, _) {
+                      location.href = '/login';
+                  }
+              });
+          }
+        </script>
+        {% else %}
         <form action="/offer/{{id}}">
           <button type="submit">Draft trade offer</button>
         </form>
+        {% endif %}
       </div>
     </div>
-    {% endif %}
   </div>
 </li>
 {% endblock %}
