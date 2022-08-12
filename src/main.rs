@@ -33,6 +33,7 @@ async fn main() {
 
     let manager = ConnectionManager::<PgConnection>::new(db_url);
     let pool = Pool::builder()
+        .max_size(5)
         .build(manager)
         .expect("Failed to create database pool");
 
