@@ -8,8 +8,8 @@ use axum::{
     Router,
 };
 use diesel::{
-    PgConnection,
     r2d2::{ConnectionManager, Pool},
+    PgConnection,
 };
 use marche_server::Endpoint;
 use tower_cookies::CookieManagerLayer;
@@ -20,7 +20,7 @@ async fn main() {
     if std::env::var_os("RUST_LOG").is_none() {
         std::env::set_var("RUST_LOG", "marche=info")
     }
-    
+
     tracing_subscriber::fmt::init();
 
     let db_url = std::env::var("DATABASE_URL");
@@ -32,9 +32,10 @@ async fn main() {
     };
 
     let manager = ConnectionManager::<PgConnection>::new(db_url);
-    let pool = Pool::builder().build(manager).expect("Failed to create database pool");
+    let pool = Pool::builder()
+        .build(manager)
+        .expect("Failed to create database pool");
 
-    // TODO: Use the inventory crate to clean this up.
     let mut app = Router::new();
 
     for endpoint in inventory::iter::<Endpoint>() {
