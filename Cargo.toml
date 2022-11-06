@@ -17,7 +17,6 @@ html-escape = "0.2.11"
 comrak = "0.14.0"
 rand = { version = "0.8" , features = ["getrandom"] }
 derive_more = "0.99"
-diesel = { version = "1.4.4", features = ["postgres", "chrono", "serde_json", "network-address", "r2d2"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
@@ -25,7 +24,6 @@ libpasta = "0.1"
 chrono = "0.4"
 maplit = "1.0"
 lazy_static = "1.4"
-diesel-derive-enum = { version = "1", features = ["postgres"] }
 rand_xorshift = "0.3.0"
 regex = "1"
 askama = { version = "0.11", features = ["with-axum"], git = "https://github.com/djc/askama.git" }
@@ -39,8 +37,9 @@ tracing-subscriber = "0.3"
 http = "0.2"
 urlencoding = "2"
 image = "0.24"
-ipnetwork = "0.18"
+ipnetwork = "0.19"
 inventory = "0.2"
+sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "postgres", "chrono", "ipnetwork" ] }
 
 [dependencies.marche-proc-macros]
 path = "proc-macros"

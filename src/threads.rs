@@ -8,85 +8,49 @@ use axum::{
 };
 use chrono::{prelude::*, NaiveDateTime};
 use derive_more::From;
-use diesel::prelude::*;
 use lazy_static::lazy_static;
 use marche_proc_macros::json_result;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgPool};
 
 use crate::{
     items::{Item, ItemDrop, ItemType},
     post,
-    users::{Role, User, UserCache},
-    File, MultipartForm, MultipartFormError, PgPool,
+    users::{Role, User /*, UserCache*/},
+    File, MultipartForm, MultipartFormError,
 };
 
-table! {
-    threads(id) {
-        id -> Integer,
-        last_post -> Integer,
-        title -> Text,
-        tags -> Array<Integer>,
-        num_replies -> Integer,
-        pinned -> Bool,
-        locked -> Bool,
-        hidden -> Bool,
-    }
-}
-
-use diesel::sql_types::{BigInt, Text};
-
-sql_function!(fn nextval(x: Text) -> BigInt);
-sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
-
-#[derive(Queryable, Debug, Serialize)]
+#[derive(FromRow, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id:          i32,
+    pub id: i32,
     /// Id of the last post
-    pub last_post:   i32,
+    pub last_post: i32,
     /// Title of the thread
-    pub title:       String,
+    pub title: String,
     /// Tags given to this thread
-    pub tags:        Vec<i32>,
+    pub tags: Vec<i32>,
     /// Number of replies to this thread, not including the first.
     pub num_replies: i32,
     /// Whether or not the thread is pinned
-    pub pinned:      bool,
+    pub pinned: bool,
     /// Whether or not the thread is locked
-    pub locked:      bool,
+    pub locked: bool,
     /// Whether or not the thread is hidden
-    pub hidden:      bool,
-}
-
-#[derive(Insertable)]
-#[table_name = "threads"]
-pub struct NewThread<'t> {
-    id:          i32,
-    title:       &'t str,
-    tags:        Vec<i32>,
-    last_post:   i32,
-    num_replies: i32,
-    pinned:      bool,
-    locked:      bool,
-}
-
-#[derive(Serialize)]
-pub enum FetchThreadError {
-    NoSuchThread,
+    pub hidden: bool,
 }
 
 impl Thread {
-    pub fn fetch(conn: &PgConnection, thread_id: i32) -> Result<Self, FetchThreadError> {
-        use self::threads::dsl::*;
-
-        threads
-            .filter(id.eq(thread_id))
-            .first::<Self>(conn)
-            .map_err(|_| FetchThreadError::NoSuchThread)
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM threads WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
     }
 }
 
+/*
 post! {
     "/delete_thread/:dead_thread_id",
     #[json_result]
@@ -109,14 +73,14 @@ post! {
         let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
             // Delete the thread:
             {
-                use self::threads::dsl::*;
-                diesel::delete(threads.filter(id.eq(dead_thread_id))).execute(&conn)?;
+                use crate::schema::threads::dsl::*;
+                diesel::delete(threads.filter(id.eq(dead_thread_id))).execute(&mut conn)?;
             }
             // Delete any reply on the thread:
             {
-                use self::replies::dsl::*;
+                use crate::schema::replies::dsl::*;
                 diesel::delete(replies.filter(thread_id.eq(dead_thread_id)))
-                    .execute(&conn)
+                    .execute(&mut conn)
                     .map_err(|_| diesel::result::Error::RollbackTransaction)?;
             }
 
@@ -131,12 +95,13 @@ post! {
         Ok(())
     }
 }
+*/
 
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
-    tags:  String,
-    body:  String,
+    tags: String,
+    body: String,
 }
 
 #[derive(Serialize, From)]
@@ -145,13 +110,14 @@ pub enum SubmitThreadError {
     TagTooLong,
     TooManyTags,
     UploadImageError(UploadImageError),
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
     MultipartFormError(MultipartFormError),
 }
 
 pub const MAX_TAG_LEN: usize = 16;
 pub const MAX_NUM_TAGS: usize = 6;
 
+/*
 post! {
     "/thread",
     #[json_result]
@@ -213,7 +179,7 @@ post! {
 
             let next_thread = next_thread as i32;
 
-            let first_post: Reply = diesel::insert_into(replies::table)
+            let first_post: Reply = diesel::insert_into(crate::schema::replies::table)
                 .values(&NewReply {
                     author_id: user.id,
                     thread_id: next_thread,
@@ -229,7 +195,7 @@ post! {
                 .get_result(&conn)
                 .map_err(|_| RollbackTransaction)?;
 
-            diesel::insert_into(threads::table)
+            diesel::insert_into(crate::schema::threads::table)
                 .values(&NewThread {
                     id: next_thread,
                     last_post: first_post.id,
@@ -245,6 +211,7 @@ post! {
         .map_err(SubmitThreadError::InternalDbError)
     }
 }
+*/
 
 #[derive(Deserialize)]
 struct UpdateThread {
@@ -256,9 +223,10 @@ struct UpdateThread {
 #[derive(Serialize, From)]
 enum UpdateThreadError {
     Unprivileged,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
+/*
 post! {
     "/thread/:thread_id",
     #[json_result]
@@ -272,7 +240,7 @@ post! {
             hidden: set_hidden,
         }): Query<UpdateThread>
     ) -> Json<Result<(), UpdateThreadError>> {
-        use self::threads::dsl::*;
+        use crate::schema::threads::dsl::*;
 
         if user.role < Role::Moderator {
             return Err(UpdateThreadError::Unprivileged);
@@ -307,34 +275,21 @@ post! {
         Ok(())
     }
 }
+*/
 
 #[derive(Serialize, From)]
 pub enum DeleteThreadError {
     Unprivileged,
     NoSuchThread,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
-table! {
-    tags(id) {
-        id -> Integer,
-        name -> Text,
-        num_tagged -> Integer,
-    }
-}
-
-#[derive(Debug, Queryable, Serialize, Clone)]
+#[derive(Debug, FromRow, Serialize, Clone)]
 pub struct Tag {
-    pub id:         i32,
-    pub name:       String,
+    pub id: i32,
+    pub name: String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
-}
-
-#[derive(Insertable)]
-#[table_name = "tags"]
-pub struct NewTag<'n> {
-    name: &'n str,
 }
 
 impl Tag {
@@ -343,30 +298,30 @@ impl Tag {
     }
 
     /// Returns the most popular tags.
-    pub fn popular(conn: &PgConnection) -> Vec<Self> {
-        use self::tags::dsl::*;
-
-        tags.order(num_tagged.desc())
-            .limit(10)
-            .load::<Self>(conn)
-            .unwrap_or_default()
+    pub async fn popular(conn: &PgPool) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM tags ORDER BY num_tagged DESC LIMIT 10")
+            .fetch_all(conn)
+            .await
     }
 
-    pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::tags::dsl::*;
-
-        tags.find(tag_id).first::<Self>(conn)
+    pub async fn fetch_from_id(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM tags WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
     }
 
-    pub fn fetch_from_str(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
-        use self::tags::dsl::*;
+    pub async fn fetch_from_str(conn: &PgPool, tag: &str) -> Result<Option<Self>, sqlx::Error> {
+        let tag_name = clean_tag_name(tag);
 
-        if tag.trim().is_empty() {
-            return Err(diesel::result::Error::NotFound);
+        if tag_name.is_empty() {
+            return Ok(None);
         }
 
-        tags.filter(name.eq(clean_tag_name(tag)))
-            .first::<Self>(conn)
+        sqlx::query_as("SELECT * FROM tags WHERE name = $1")
+            .bind(tag_name)
+            .fetch_optional(conn)
+            .await
     }
 
     /// Fetches a tag, creating it if it doesn't already exist. num_tagged is
@@ -375,24 +330,24 @@ impl Tag {
     /// It's kind of a weird interface, I'm open to suggestions.
     ///
     /// Assumes that str is not empty.
-    pub fn fetch_from_str_and_inc(
-        conn: &PgConnection,
-        tag: &str,
-    ) -> Result<Self, diesel::result::Error> {
-        use self::tags::dsl::*;
+    pub async fn fetch_from_str_and_inc(conn: &PgPool, tag: &str) -> Result<Option<Self>, sqlx::Error> {
+        let tag_name = clean_tag_name(tag);
 
-        if tag.trim().is_empty() {
-            return Err(diesel::result::Error::NotFound);
+        if tag_name.is_empty() {
+            return Ok(None);
         }
 
-        diesel::insert_into(tags)
-            .values(&NewTag {
-                name: &clean_tag_name(tag),
-            })
-            .on_conflict(name)
-            .do_update()
-            .set(num_tagged.eq(num_tagged + 1))
-            .get_result(conn)
+        sqlx::query_as(
+            r#"
+                INSERT INTO tags (name)
+                VALUES ($1)
+                ON CONFLICT (name) DO UPDATE SET num_tagged = num_tagged + 1
+                RETURNING *
+            "#,
+        )
+        .bind(tag_name)
+        .fetch_optional(conn)
+        .await
     }
 }
 
@@ -410,8 +365,9 @@ pub struct Tags {
     pub tags: Vec<Tag>,
 }
 
+/*
 impl Tags {
-    pub fn fetch_from_str(conn: &PgConnection, path: &str) -> Self {
+    pub fn fetch_from_str(conn: &PgPool, path: &str) -> Self {
         let mut seen = HashSet::new();
         let tags = path
             .split("/")
@@ -425,7 +381,7 @@ impl Tags {
         Tags { tags }
     }
 
-    pub fn fetch_from_ids<'a>(conn: &PgConnection, ids: impl Iterator<Item = &'a i32>) -> Self {
+    pub fn fetch_from_ids<'a>(conn: &PgPool, ids: impl Iterator<Item = &'a i32>) -> Self {
         Self {
             tags: ids
                 .filter_map(|id| Tag::fetch_from_id(conn, *id).ok())
@@ -447,28 +403,12 @@ impl Tags {
         self.tags.is_empty()
     }
 }
+*/
 
-table! {
-    replies(id) {
-        id -> Integer,
-        author_id -> Integer,
-        thread_id -> Integer,
-        post_date -> Timestamp,
-        body -> Text,
-        body_html -> Text,
-        reward -> Nullable<Integer>,
-        reactions -> Array<Integer>,
-        image -> Nullable<Text>,
-        thumbnail -> Nullable<Text>,
-        filename -> Text,
-        hidden -> Bool,
-    }
-}
-
-#[derive(Queryable, Debug, Serialize)]
+#[derive(FromRow, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
-    pub id:        i32,
+    pub id: i32,
     /// Id of the author
     pub author_id: i32,
     /// Id of the thread
@@ -477,28 +417,29 @@ pub struct Reply {
     #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
-    pub body:      String,
+    pub body: String,
     /// Body of the reply parsed to html (what the user typically sees)
     pub body_html: String,
     /// Any item that was rewarded for this post
-    pub reward:    Option<i32>,
+    pub reward: Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
     /// Image associated with this post
-    pub image:     Option<String>,
+    pub image: Option<String>,
     /// Thumbnail associated with this post's image
     pub thumbnail: Option<String>,
     /// Filename associated with the image
-    pub filename:  String,
+    pub filename: String,
     /// Whether or not the thread is hidden
-    pub hidden:    bool,
+    pub hidden: bool,
 }
 
 impl Reply {
-    pub fn fetch(conn: &PgConnection, reply_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::replies::dsl::*;
-
-        replies.find(reply_id).first::<Reply>(conn)
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM replies WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
     }
 }
 
@@ -507,9 +448,10 @@ pub enum DeleteReplyError {
     Unprivileged,
     NoSuchReply,
     CannotDeleteFirstReply,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
+/*
 post! {
     "/delete_reply/:dead_reply_id",
     #[json_result]
@@ -518,7 +460,7 @@ post! {
         user: User,
         Path(dead_reply_id): Path<i32>,
     ) -> Json<Result<(), DeleteReplyError>> {
-        use self::replies::dsl::*;
+        use crate::schema::replies::dsl::*;
 
         if user.role < Role::Moderator {
             return Err(DeleteReplyError::Unprivileged);
@@ -537,7 +479,7 @@ post! {
             .map_err(|_| DeleteReplyError::CannotDeleteFirstReply)?;
 
         {
-            use self::threads::dsl::*;
+            use crate::schema::threads::dsl::*;
 
             // Discard any error:
             let _ = diesel::update(threads.find(dead_reply.thread_id))
@@ -562,26 +504,11 @@ post! {
         Ok(())
     }
 }
-
-#[derive(Insertable, Debug)]
-#[table_name = "replies"]
-pub struct NewReply<'b> {
-    author_id: i32,
-    thread_id: i32,
-    post_date: NaiveDateTime,
-    body:      &'b str,
-    body_html: &'b str,
-    reward:    Option<i32>,
-    reactions: Vec<i32>,
-    image:     Option<String>,
-    thumbnail: Option<String>,
-    filename:  String,
-}
+ */
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
-    // TODO: Rename to body
-    reply:     String,
+    body: String,
     thread_id: String,
 }
 
@@ -590,10 +517,10 @@ pub enum ReplyError {
     ReplyIsEmpty,
     ThreadIsLocked,
     UploadImageError(#[serde(skip)] UploadImageError),
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-    FetchThreadError(#[serde(skip)] FetchThreadError),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
+/*
 post! {
     "/reply",
     #[json_result]
@@ -623,13 +550,14 @@ post! {
         let html_output = parse_post(&conn, reply, thread_id);
 
         {
-            use self::threads::dsl::*;
+            use crate::schema::threads::dsl::*;
+
             diesel::update(threads.find(thread_id))
                 .set(num_replies.eq(num_replies + 1))
                 .get_result::<Thread>(&conn)?;
         }
 
-        let reply: Reply = diesel::insert_into(replies::table)
+        let reply: Reply = diesel::insert_into(crate::schema::replies::table)
             .values(&NewReply {
                 author_id: user.id,
                 thread_id,
@@ -644,13 +572,18 @@ post! {
             })
             .get_result(&conn)?;
 
-        diesel::update(threads::table.find(thread_id))
-            .set(threads::dsl::last_post.eq(reply.id))
-            .get_result::<Thread>(&conn)?;
+        {
+            use crate::schema::threads::dsl::*;
+
+            diesel::update(threads.find(thread_id))
+                .set(last_post.eq(reply.id))
+                .get_result::<Thread>(&conn)?;
+        }
 
         Ok(reply)
     }
 }
+*/
 
 #[derive(Deserialize)]
 pub struct UpdateReplyParams {
@@ -667,9 +600,10 @@ pub enum UpdateReplyError {
     Unprivileged,
     NotYourPost,
     CannotMakeEmpty,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
+/*
 post! {
     "/reply/:post_id",
     #[json_result]
@@ -686,12 +620,14 @@ post! {
         let post = Reply::fetch(&conn, post_id)?;
 
         let reply = if let Some(hidden) = hidden {
+            use crate::schema::replies::dsl::*;
+
             if user.role < Role::Moderator {
                 return Err(UpdateReplyError::Unprivileged);
             }
 
-            Some(diesel::update(replies::table.find(post_id))
-                .set(replies::hidden.eq(hidden))
+            Some(diesel::update(replies.find(post_id))
+                .set(hidden.eq(hidden))
                 .get_result::<Reply>(&conn)?)
         } else {
             None
@@ -720,24 +656,28 @@ post! {
                 Utc::now().naive_utc().format(crate::DATE_FMT)
             );
 
-        let reply = diesel::update(replies::table.find(post_id))
-            .set((
-                replies::dsl::body.eq(body),
-                replies::dsl::body_html.eq(html_output),
-            ))
-            .get_result::<Reply>(&conn)?;
+        Ok({
+            use crate::schema::replies::dsl::*;
 
-        Ok(reply)
+            diesel::update(replies.find(post_id))
+                .set((
+                    body.eq(body),
+                    body_html.eq(html_output),
+                ))
+                .get_result::<Reply>(&conn)?
+        })
     }
 }
+*/
 
 #[derive(Serialize, From)]
 pub enum ReactError {
     NoSuchReply,
     ThisIsYourPost,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
+/*
 post! {
     "/react/:post_id",
     #[json_result]
@@ -748,7 +688,7 @@ post! {
         Form(used_reactions): Form<HashMap<i32, String>>,
     ) -> Json<Result<(), ReactError>> {
         use diesel::result::Error;
-        use crate::threads::replies::dsl::*;
+        use crate::schema::replies::dsl::*;
 
         let conn = pool.get().expect("Could not connect to db");
         let reply = Reply::fetch(&conn, post_id).map_err(|_| ReactError::NoSuchReply)?;
@@ -757,7 +697,7 @@ post! {
             return Err(ReactError::ThisIsYourPost);
         }
 
-        conn.transaction(|| -> Result<i32, diesel::result::Error> {
+        conn.transaction(|| -> Result<i32, Error> {
             let mut new_reactions = reply.reactions;
 
             let author =
@@ -773,7 +713,7 @@ post! {
                 }
 
                 // Set the drops to consumed.
-                use crate::drops_dsl::*;
+                use crate::schema::drops::dsl::*;
 
                 diesel::update(drops.find(reaction))
                     .filter(consumed.eq(false))
@@ -803,6 +743,7 @@ post! {
         Ok(())
     }
 }
+*/
 
 use comrak::{markdown_to_html, ComrakOptions};
 
@@ -822,6 +763,8 @@ lazy_static! {
 
 // TODO: This probably needs to be async
 fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
+    use crate::schema::replies::dsl::*;
+
     lazy_static! {
         static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
     }
@@ -832,9 +775,9 @@ fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
         .collect::<Vec<String>>();
 
     let mut user_cache = UserCache::new(conn);
-    let id_to_author = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
+    let id_to_author = replies
+        .filter(thread_id.eq(thread_id))
+        .order(post_date.asc())
         .load::<Reply>(conn)
         .unwrap()
         .into_iter()
@@ -847,9 +790,9 @@ fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
         })
         .collect::<HashMap<String, String>>();
 
-    let response_divs = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
+    let response_divs = replies
+        .filter(thread_id.eq(thread_id))
+        .order(post_date.asc())
         .load::<Reply>(conn)
         .unwrap()
         .into_iter()
@@ -897,7 +840,7 @@ use sha2::{Digest, Sha256};
 use tokio::task;
 
 pub struct Image {
-    pub filename:  String,
+    pub filename: String,
     pub thumbnail: Option<String>,
 }
 
@@ -1001,7 +944,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     if image_exists(&client, &filename).await {
         let thumbnail = format!("{hash}_thumbnail.{ext}");
         return Ok(Image {
-            filename:  get_url(&filename),
+            filename: get_url(&filename),
             thumbnail: image_exists(&client, &thumbnail)
                 .await
                 .then(move || get_url(&thumbnail)),
@@ -1030,7 +973,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
 
     Ok(Image {
-        filename:  get_url(&filename),
+        filename: get_url(&filename),
         thumbnail: thumbnail.as_deref().map(get_url),
     })
 }

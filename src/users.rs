@@ -10,84 +10,70 @@ use axum::{
 use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
 use derive_more::From;
-use diesel::prelude::*;
-use diesel_derive_enum::DbEnum;
 use ipnetwork::IpNetwork;
 use libpasta::verify_password;
 use marche_proc_macros::json_result;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgConnection, PgExecutor, PgPool, Type};
 use tower_cookies::{Cookie, Cookies, Key};
 
+use crate::post;
+
+use crate::items::ItemDrop;
+
+/*
 use crate::{
     items::{self, Item, ItemDrop},
     post,
     threads::Thread,
-    PgPool,
 };
+*/
 
-table! {
-    use diesel::sql_types::*;
-    use super::RoleMapping;
-
-    users (id) {
-        id -> Integer,
-        name -> Text,
-        password -> Text,
-        bio -> Text,
-        role -> RoleMapping,
-        experience -> BigInt,
-        last_reward -> Timestamp,
-        equip_slot_prof_pic -> Nullable<Integer>,
-        equip_slot_background -> Nullable<Integer>,
-        equip_slot_badges -> Array<Integer>,
-        banned_until -> Nullable<Timestamp>,
-        notes -> Text,
-    }
-}
-
-#[derive(Queryable, Debug)]
+#[derive(FromRow, Debug)]
 pub struct User {
     /// Id of the user
-    pub id:                    i32,
+    pub id: i32,
     /// User name
-    pub name:                  String,
+    pub name: String,
     /// Password hash
-    pub password:              String,
+    pub password: String,
     /// Biography of the user
-    pub bio:                   String,
+    pub bio: String,
     /// Role
-    pub role:                  Role,
+    pub role: Role,
     /// Exprerience
-    pub experience:            i64,
+    pub experience: i64,
     /// Last reward
-    pub last_reward:           NaiveDateTime,
+    pub last_reward: NaiveDateTime,
     /// ProfilePic equipment slot
-    pub equip_slot_prof_pic:   Option<i32>,
+    pub equip_slot_prof_pic: Option<i32>,
     /// ProfileBackground equipment slot
     pub equip_slot_background: Option<i32>,
     /// Badge equipment slots
-    pub equip_slot_badges:     Vec<i32>,
+    pub equip_slot_badges: Vec<i32>,
     /// If the user is banned, and for how long
-    pub banned_until:          Option<NaiveDateTime>,
+    pub banned_until: Option<NaiveDateTime>,
     /// Notes on the user by moderators or admins
-    pub notes:                 String,
+    pub notes: String,
 }
 
 /// Displayable user profile
 #[derive(Clone, Serialize)]
 pub struct ProfileStub {
-    pub id:         i32,
-    pub name:       String,
-    pub picture:    Option<String>,
+    pub id: i32,
+    pub name: String,
+    pub picture: Option<String>,
     pub background: String,
-    pub badges:     Vec<String>,
-    pub level:      LevelInfo,
+    pub badges: Vec<String>,
+    pub level: LevelInfo,
 }
 
 #[derive(
-    Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord, Serialize, Deserialize,
+    Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Type,
 )]
+#[sqlx(type_name = "role")]
+#[sqlx(rename_all = "snake_case")]
 pub enum Role {
     User,
     Moderator,
@@ -96,8 +82,8 @@ pub enum Role {
 
 #[derive(Copy, Clone, Serialize)]
 pub struct LevelInfo {
-    pub level:         u32,
-    pub curr_xp:       u64,
+    pub level: u32,
+    pub curr_xp: u64,
     pub next_level_xp: u64,
 }
 
@@ -142,56 +128,53 @@ impl User {
     pub fn level_info(&self) -> LevelInfo {
         let completion = self.level_completion();
         LevelInfo {
-            level:         self.level(),
-            curr_xp:       completion.start,
+            level: self.level(),
+            curr_xp: completion.start,
             next_level_xp: completion.end,
         }
     }
 
-    pub fn add_experience(&self, conn: &PgConnection, xp: i64) {
-        use self::users::dsl::*;
-
-        // I cannot find a way to do this properly in one sql query.
-        // I need to file a bug report or something.
-
-        let user = diesel::update(users.find(self.id))
-            .set(experience.eq(experience + xp))
-            .get_result::<Self>(conn)
-            .unwrap();
-
-        if user.experience < 0 {
-            diesel::update(users.find(self.id))
-                .set(experience.eq(0))
-                .get_result::<Self>(conn)
-                .unwrap();
-        }
+    pub async fn add_experience(&self, conn: &PgPool, xp: i64) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET experience = GREATEST(experience + $1, 0) WHERE id = $2")
+            .bind(xp)
+            .bind(self.id)
+            .execute(conn)
+            .await?;
+        Ok(())
     }
 
     /// Returns a vec of equipped items.
-    pub fn equipped(&self, conn: &PgConnection) -> Result<Vec<ItemDrop>, diesel::result::Error> {
+    pub async fn equipped(&self, conn: &PgPool) -> Result<Vec<ItemDrop>, sqlx::Error> {
         let mut items = Vec::new();
 
         if let Some(prof_pic) = self.equip_slot_prof_pic {
-            items.push(ItemDrop::fetch(conn, prof_pic)?);
+            ItemDrop::fetch(conn, prof_pic)
+                .await?
+                .map(|item_drop| items.push(item_drop));
         }
 
         if let Some(background) = self.equip_slot_background {
-            items.push(ItemDrop::fetch(conn, background)?);
+            ItemDrop::fetch(conn, background)
+                .await?
+                .map(|item_drop| items.push(item_drop));
         }
 
         for badge in self.equip_slot_badges.iter() {
-            items.push(ItemDrop::fetch(conn, *badge)?);
+            ItemDrop::fetch(conn, *badge)
+                .await?
+                .map(|item_drop| items.push(item_drop));
         }
 
         Ok(items)
     }
 
+    /*
     pub fn inventory(&self, conn: &PgConnection) -> impl Iterator<Item = (Item, ItemDrop)> {
-        use crate::items::drops;
+        use crate::schema::drops::dsl::*;
 
-        let mut inventory = drops::table
-            .filter(drops::dsl::owner_id.eq(self.id))
-            .filter(drops::dsl::consumed.eq(false))
+        let mut inventory = drops
+            .filter(owner_id.eq(self.id))
+            .filter(consumed.eq(false))
             .load::<ItemDrop>(conn)
             .ok()
             .unwrap_or_else(Vec::new)
@@ -232,113 +215,122 @@ impl User {
             .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).unwrap().as_badge(conn))
             .collect()
     }
+    */
 
     /// Attempt to update the last drop time. If we fail, return false.
     /// This will fail if the user has received a new reward since the user has
     /// been fetched, which is by design.
-    pub fn update_last_reward(&self, conn: &PgConnection) -> Result<Self, ()> {
-        use self::users::dsl::{last_reward, users};
-
-        let prev_reward = self.last_reward;
-        diesel::update(users.find(self.id))
-            .set(last_reward.eq(Utc::now().naive_utc()))
-            .filter(last_reward.eq(prev_reward))
-            .get_result::<Self>(conn)
-            .map_err(|_| ())
+    pub async fn update_last_reward(&self, conn: impl PgExecutor<'_>) -> Result<bool, sqlx::Error> {
+        let rows_affected =
+            sqlx::query("UPDATE users SET last_reward = $1 WHERE id = $2 && last_reward = $3")
+                .bind(Utc::now().naive_utc())
+                .bind(self.id)
+                .bind(self.last_reward)
+                .execute(conn)
+                .await?
+                .rows_affected();
+        Ok(rows_affected > 0)
     }
 
-    pub fn profile_stub(&self, conn: &PgConnection) -> ProfileStub {
-        ProfileStub {
-            id:         self.id,
-            name:       self.name.clone(),
-            picture:    self.get_profile_pic(conn),
-            background: self.get_background_style(conn),
-            badges:     self.get_badges(conn),
-            level:      self.level_info(),
+    /*
+        pub fn profile_stub(&self, conn: &PgConnection) -> ProfileStub {
+            ProfileStub {
+                id: self.id,
+                name: self.name.clone(),
+                picture: self.get_profile_pic(conn),
+                background: self.get_background_style(conn),
+                badges: self.get_badges(conn),
+                level: self.level_info(),
+    }
+    }
+        */
+
+    pub async fn fetch(
+        conn: impl PgExecutor<'_>,
+        user_id: i32,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(conn)
+            .await
+    }
+
+    /*
+        pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
+            use crate::schema::users::dsl::*;
+
+            users
+                .filter(id.eq(session.user_id))
+                .first::<Self>(conn)
+                .map_err(|_| ())
         }
-    }
 
-    pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::users::dsl::*;
+        pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> i32 {
+            use crate::schema::replies::dsl::*;
+            use crate::threads::Reply;
 
-        users.find(user_id).first::<Self>(conn)
-    }
+            let last_read = {
+                use crate::schema::reading_history::dsl::*;
 
-    pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
-        use self::users::dsl::*;
+                reading_history
+                    .filter(reader_id.eq(self.id))
+                    .filter(thread_id.eq(thread.id))
+                    .first::<ReadingHistory>(conn)
+                    .ok()
+                    .map(|history| history.last_read)
+            };
 
-        users
-            .filter(id.eq(session.user_id))
-            .first::<Self>(conn)
-            .map_err(|_| ())
-    }
+            match last_read {
+                None => {
+                    // Find the first reply
+                    replies
+                        .filter(thread_id.eq(thread.id))
+                        .order(post_date.asc())
+                        .first::<Reply>(conn)
+                        .unwrap()
+                        .id
+                }
+                Some(last_read) => replies
+                    .filter(thread_id.eq(thread.id))
+                    .filter(id.gt(last_read))
+                    .first::<Reply>(conn)
+                    .map_or_else(|_| last_read, |reply| reply.id),
+            }
+        }
 
-    pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> i32 {
-        let last_read = {
-            use self::reading_history::dsl::*;
+        pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
+            use crate::schema::reading_history::dsl::*;
 
             reading_history
                 .filter(reader_id.eq(self.id))
                 .filter(thread_id.eq(thread.id))
                 .first::<ReadingHistory>(conn)
                 .ok()
-                .map(|history| history.last_read)
-        };
-
-        match last_read {
-            None => {
-                // Find the first reply
-                use crate::threads::{replies::dsl::*, Reply};
-
-                replies
-                    .filter(thread_id.eq(thread.id))
-                    .order(post_date.asc())
-                    .first::<Reply>(conn)
-                    .unwrap()
-                    .id
-            }
-            Some(last_read) => {
-                use crate::threads::{replies::dsl::*, Reply};
-
-                replies
-                    .filter(thread_id.eq(thread.id))
-                    .filter(id.gt(last_read))
-                    .first::<Reply>(conn)
-                    .map_or_else(|_| last_read, |reply| reply.id)
-            }
+                .map_or(false, |history| history.last_read >= thread.last_post)
         }
-    }
 
-    pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
-        use self::reading_history::dsl::*;
+        pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
+            use crate::schema::reading_history::dsl::*;
 
-        reading_history
-            .filter(reader_id.eq(self.id))
-            .filter(thread_id.eq(thread.id))
-            .first::<ReadingHistory>(conn)
-            .ok()
-            .map_or(false, |history| history.last_read >= thread.last_post)
-    }
+            let _ = diesel::insert_into(reading_history)
+                .values(NewReadingHistory {
+                    reader_id: self.id,
+                    thread_id: thread.id,
+                    last_read: thread.last_post,
+                })
+                .on_conflict((reader_id, thread_id))
+                .do_update()
+                .set(last_read.eq(thread.last_post))
+                .execute(conn);
+        }
 
-    pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
-        use self::reading_history::dsl::*;
-        let _ = diesel::insert_into(reading_history)
-            .values(NewReadingHistory {
-                reader_id: self.id,
-                thread_id: thread.id,
-                last_read: thread.last_post,
-            })
-            .on_conflict((reader_id, thread_id))
-            .do_update()
-            .set(last_read.eq(thread.last_post))
-            .execute(conn);
+        pub fn incoming_offers(&self, conn: &PgConnection) -> i64 {
+            items::IncomingOffer::count(&conn, self)
     }
-
-    pub fn incoming_offers(&self, conn: &PgConnection) -> i64 {
-        items::IncomingOffer::count(&conn, self)
-    }
+        */
 }
 
+/*
 #[derive(Deserialize)]
 pub struct UpdateUser {
     role: Role,
@@ -360,7 +352,7 @@ post! {
         Path(user_id): Path<i32>,
         Query(UpdateUser { role: new_role }): Query<UpdateUser>
     ) -> Json<Result<(), UpdateUserError>> {
-        use self::users::dsl::*;
+        use crate::schema::users::dsl::*;
 
         let conn = pool.get().expect("Could not connect to db");
         let user = User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
@@ -392,7 +384,7 @@ post! {
         Path(user_id): Path<i32>,
         Query(BanUser { ban_len }): Query<BanUser>
     ) -> Json<Result<(), UpdateUserError>> {
-        use self::users::dsl::*;
+        use crate::schema::users::dsl::*;
 
         if moderator.role < Role::Moderator ||  moderator.id == user_id {
             return Err(UpdateUserError::Unprivileged);
@@ -431,7 +423,7 @@ post! {
         curr_user: User,
         Form(UpdateBioForm { bio: new_bio }): Form<UpdateBioForm>,
     ) -> Json<Result<(), UpdateBioError>> {
-        use self::users::dsl::*;
+        use crate::schema::users::dsl::*;
 
         if new_bio.len() > MAX_BIO_LEN {
             return Err(UpdateBioError::TooLong);
@@ -466,7 +458,7 @@ post! {
         Path(user_id): Path<i32>,
         Form(AddNoteForm { body }): Form<AddNoteForm>,
     ) -> Json<Result<(), AddNoteError>> {
-        use self::users::dsl::*;
+        use crate::schema::users::dsl::*;
 
         if viewer.role < Role::Moderator {
             return Err(AddNoteError::Unprivileged);
@@ -486,8 +478,11 @@ post! {
     }
 }
 
+*/
+
 /// Name of the cookie we use to store the session Id.
 const USER_SESSION_ID_COOKIE: &str = "session_id";
+// TODO: Move to environmental variable
 const PRIVATE_COOKIE_KEY: &str = "ea63npVp7Vg+ileGuoO0OJbBLOdSkHKkNwu87B8/joU=";
 
 #[async_trait]
@@ -518,18 +513,17 @@ where
             })?;
         let conn = Extension::<PgPool>::from_request(req)
             .await
-            .map_err(|_| UserRejection::InternalDbError)?
-            .get()
-            .expect("Could not connect to db");
-        let session = LoginSession::fetch(&conn, session_id.value()).map_err(|_| {
-            UserRejection::Unauthorized {
+            .map_err(|_| UserRejection::UnknownError)?;
+        let Some(session) = LoginSession::fetch(&conn, session_id.value()).await? else {
+            return Err(UserRejection::Unauthorized {
                 redirect: redirect.clone(),
-            }
-        })?;
-        let user =
-            User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized {
-                redirect: redirect.clone(),
-            })?;
+            });
+        };
+        let user = match User::fetch(&*conn, session.user_id).await {
+            Ok(Some(user)) => user,
+            Ok(None) => return Err(UserRejection::UnknownUser),
+            Err(_) => return Err(UserRejection::Unauthorized { redirect }),
+        };
         if user.is_banned() {
             Err(UserRejection::Banned {
                 until: user.banned_until.unwrap(),
@@ -540,10 +534,20 @@ where
     }
 }
 
+#[derive(From)]
 pub enum UserRejection {
-    InternalDbError,
+    UnknownError,
+    InternalDbError(sqlx::Error),
+    UnknownUser,
     Unauthorized { redirect: String },
     Banned { until: NaiveDateTime },
+}
+
+#[derive(Template)]
+#[template(path = "banned.html")]
+pub struct Banned {
+    judge_type: bool,
+    until: String,
 }
 
 impl IntoResponse for UserRejection {
@@ -551,7 +555,7 @@ impl IntoResponse for UserRejection {
         match self {
             Self::Banned { until } => Banned {
                 judge_type: rand::random(),
-                until:      until.format(crate::DATE_FMT).to_string(),
+                until: until.format(crate::DATE_FMT).to_string(),
             }
             .into_response(),
             Self::Unauthorized { redirect } => {
@@ -562,14 +566,9 @@ impl IntoResponse for UserRejection {
     }
 }
 
-#[derive(Template)]
-#[template(path = "banned.html")]
-pub struct Banned {
-    judge_type: bool,
-    until:      String,
-}
+/*
 pub struct UserCache<'a> {
-    conn:   &'a PgConnection,
+    conn: &'a PgPool,
     cached: HashMap<i32, ProfileStub>,
 }
 
@@ -589,82 +588,56 @@ impl<'a> UserCache<'a> {
         self.cached.get(&id).unwrap()
     }
 }
-
-table! {
-    login_sessions(id) {
-        id -> Integer,
-        session_id -> Varchar,
-        user_id -> Integer,
-        session_start -> Timestamp,
-        ip_addr -> Cidr,
-    }
-}
+*/
 
 /// User login sessions
-#[derive(Queryable)]
+#[derive(FromRow)]
 pub struct LoginSession {
     /// Id of the login session
-    pub id:            i32,
+    pub id: i32,
     /// Auth token
-    pub session_id:    String,
+    pub session_id: String,
     /// UserId of the session
-    pub user_id:       i32,
+    pub user_id: i32,
     /// When the session began
     pub session_start: NaiveDateTime,
     /// The IP address of the connecting client
-    pub ip_addr:       IpNetwork,
-}
-
-#[derive(Insertable)]
-#[table_name = "login_sessions"]
-pub struct NewSession {
-    user_id:       i32,
-    session_id:    String,
-    session_start: NaiveDateTime,
-    ip_addr:       IpNetwork,
+    pub ip_addr: IpNetwork,
 }
 
 #[derive(Serialize, From)]
 pub enum LoginFailure {
     UserOrPasswordIncorrect,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
 impl LoginSession {
     /// Fetch the login session.
-    pub fn fetch(conn: &PgConnection, sess_id: &str) -> Result<Self, ()> {
-        use self::login_sessions::dsl::*;
-
-        let curr_session = login_sessions
-            .filter(session_id.eq(sess_id))
-            .first::<Self>(conn)
-            .ok()
-            .ok_or(())?;
-
-        // The session is automatically invalid if the session is longer than a month
-        // old.
-        if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
-            Err(())
-        } else {
-            Ok(curr_session)
-        }
+    pub async fn fetch(conn: &PgPool, session_id: &str) -> Result<Option<Self>, sqlx::Error> {
+        Ok(sqlx::query_as("SELECT * FROM login_sessions WHERE id = $1")
+            .bind(session_id)
+            .fetch_optional(conn)
+            .await?
+            .filter(|session: &Self| {
+                // The session is automatically invalid if the session is longer than a month
+                // old.
+                session.session_start >= (Utc::now() - Duration::weeks(4)).naive_utc()
+            }))
     }
 
     /// Attempt to login a user
-    pub fn login(
-        conn: &PgConnection,
+    pub async fn login(
+        conn: &PgPool,
         user_name: &str,
         password: &str,
         ip_addr: IpNetwork,
     ) -> Result<Self, LoginFailure> {
         let user_name = user_name.trim();
-        let user = {
-            use self::users::dsl::*;
-
-            users
-                .filter(name.eq(user_name))
-                .first::<User>(conn)
-                .ok()
+        let user: User = {
+            sqlx::query_as("SELECT * FROM users WHERE name = $1")
+                .bind(user_name)
+                .fetch_optional(conn)
+                .await?
                 .ok_or(LoginFailure::UserOrPasswordIncorrect)?
         };
 
@@ -679,18 +652,21 @@ impl LoginSession {
 
         // Found a user, create a new login sessions
         let session_start = Utc::now().naive_utc();
-        let new_session = NewSession {
-            user_id: user.id,
-            session_id: i128::from_be_bytes(key).to_string(),
-            session_start,
-            ip_addr,
-        };
 
-        let session = diesel::insert_into(login_sessions::table)
-            .values(&new_session)
-            .get_result(conn)?;
-
-        Ok(session)
+        Ok(sqlx::query_as(
+            r#"
+                INSERT INTO login_sessions
+                    (user_id, session_id, session_start, ip_addr)
+                VALUES
+                    ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(user.id)
+        .bind(i128::from_be_bytes(key).to_string())
+        .bind(session_start)
+        .bind(ip_addr)
+        .fetch_one(conn)
+        .await?)
     }
 }
 
@@ -712,17 +688,17 @@ post! {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
-        let conn = pool.get().expect("Could not connect to new db");
         let LoginSession { session_id, .. } =
-            LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))?;
+            LoginSession::login(&pool, &login.username, &login.password, IpNetwork::from(ip)).await?;
         private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
         Ok(())
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, From)]
 pub enum LogoutFailure {
-    InternalDbError,
+    UnknownError,
+    InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
 post! {
@@ -732,45 +708,25 @@ post! {
         pool: Extension<PgPool>,
         cookies: Cookies,
     ) -> Json<Result<(), LogoutFailure>> {
-        use self::login_sessions::dsl::*;
-
         let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let signed = cookies.private(&private_key);
-        let curr_session_id = signed
+        let session_id = signed
             .get(USER_SESSION_ID_COOKIE)
-            .ok_or(LogoutFailure::InternalDbError)?;
+            .ok_or(LogoutFailure::UnknownError)?;
 
-        diesel::delete(login_sessions.filter(session_id.eq(curr_session_id.value())))
-            .execute(&pool.get().map_err(|_| LogoutFailure::InternalDbError)?)
-            .map_err(|_| LogoutFailure::InternalDbError)?;
+        sqlx::query("DELETE FROM login_sessions WHERE id = $1")
+            .bind(session_id.value())
+            .execute(&*pool)
+            .await?;
 
         Ok(())
     }
 }
 
-table! {
-    reading_history(id) {
-        id -> Integer,
-        // It is important that the UNIQUE ( reader_id, article_id )
-        // constraint is applied.
-        reader_id -> Integer,
-        thread_id -> Integer,
-        last_read -> Integer,
-    }
-}
-
-#[derive(Queryable)]
+#[derive(FromRow)]
 pub struct ReadingHistory {
-    pub id:        i32,
+    pub id: i32,
     pub reader_id: i32,
     pub thread_id: i32,
     pub last_read: i32,
-}
-
-#[derive(Insertable)]
-#[table_name = "reading_history"]
-pub struct NewReadingHistory {
-    reader_id: i32,
-    thread_id: i32,
-    last_read: i32,
 }

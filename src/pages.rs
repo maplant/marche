@@ -6,7 +6,6 @@ use axum::{
     response::Redirect,
 };
 use chrono::prelude::*;
-use diesel::prelude::*;
 use serde::Serialize;
 
 use crate::{
@@ -60,9 +59,9 @@ get! {
         user: User,
         Path(viewed_tags): Path<String>
     ) -> Result<Index, Redirect> {
-        use crate::threads_dsl::*;
+        use crate::schema::threads::dsl::*;
 
-        let conn = pool.get().expect("Could not connect to db");
+        let conn = &mut pool.get().expect("Could not connect to db");
         let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags);
 
         // If no tags are selected and the user is not privileged, force
@@ -75,7 +74,7 @@ get! {
             .filter(tags.contains(viewed_tags.clone().into_ids().collect::<Vec<_>>()))
             .order((pinned.desc(), last_post.desc()))
             .limit(THREADS_PER_PAGE)
-            .load::<Thread>(&conn)
+            .load::<Thread>(conn)
             .ok()
             .unwrap_or_else(Vec::new)
             .into_iter()
@@ -201,15 +200,14 @@ get! {
     async fn view_thread(
         pool: Extension<PgPool>,
         user: User,
-        Path(thread_id): Path<i32>
+        Path(view_thread_id): Path<i32>
     ) -> Result<ThreadPage, NotFound> {
-        use crate::threads_dsl::*;
-        use crate::replies_dsl;
+        use crate::schema::replies::dsl::*;
 
-        let conn = pool.get().expect("Could not connect to db");
+        let conn = &mut pool.get().expect("Could not connect to db");
         let offers = user.incoming_offers(&conn);
-        let thread = &threads.find(thread_id)
-            .first::<Thread>(&conn)
+        let thread = crate::schema::threads::table.find(thread_id)
+            .first::<Thread>(conn)
             .map_err(|_| NotFound::new(offers))?;
         user.read_thread(&conn, &thread);
 
@@ -218,10 +216,10 @@ get! {
         }
 
         let mut user_cache = UserCache::new(&conn);
-        let posts = replies_dsl::replies
-            .filter(replies_dsl::thread_id.eq(thread_id))
-            .order(replies_dsl::post_date.asc())
-            .load::<Reply>(&conn)
+        let posts = replies
+            .filter(thread_id.eq(view_thread_id))
+            .order(post_date.asc())
+            .load::<Reply>(conn)
             .unwrap()
             .into_iter()
             .map(|t| Post {
@@ -256,7 +254,7 @@ get! {
             .collect::<Vec<_>>();
 
         Ok(ThreadPage {
-            id: thread_id,
+            id: view_thread_id,
             title: thread.title.clone(),
             posts,
             tags: Tags::fetch_from_ids(&conn, thread.tags.iter()).into_names().collect(),
@@ -474,7 +472,7 @@ get! {
         curr_user: User,
         Path(user_id): Path<i32>
     ) -> Result<ProfilePage, NotFound> {
-        use crate::items::drops;
+        use crate::schema::drops;
 
         let conn = pool.get().expect("Could not connect to db");
         let user =
@@ -561,7 +559,7 @@ get! {
         pool: Extension<PgPool>,
         user: User
     ) -> LeaderboardPage {
-        use crate::users_dsl::*;
+        use crate::schema::users::dsl::*;
 
         let conn = pool.get().expect("Could not connect to db");
 

@@ -1,26 +1,7 @@
-#[macro_use]
-extern crate diesel;
-
 pub mod items;
-pub mod pages;
+//pub mod pages;
 pub mod threads;
 pub mod users;
-
-pub mod threads_dsl {
-    pub use crate::threads::threads::dsl::*;
-}
-
-pub mod replies_dsl {
-    pub use crate::threads::replies::dsl::*;
-}
-
-pub mod drops_dsl {
-    pub use crate::items::drops::dsl::*;
-}
-
-pub mod users_dsl {
-    pub use crate::users::users::dsl::*;
-}
 
 use std::{any::Any, collections::HashMap, error::Error as StdError};
 
@@ -38,11 +19,8 @@ use axum::{
     Router,
 };
 use derive_more::{Display, From};
-use diesel::{
-    r2d2::{ConnectionManager, Pool},
-    PgConnection,
-};
 use serde::{de::DeserializeOwned, Serialize};
+use sqlx::PgPool;
 
 pub const DATE_FMT: &str = "%B %-d, %Y at %I:%M %P";
 
@@ -207,8 +185,6 @@ where
     }
 }
 
-pub type PgPool = Pool<ConnectionManager<PgConnection>>;
-
 #[derive(Template)]
 #[template(path = "404.html")]
 pub struct NotFound {
@@ -220,12 +196,14 @@ impl NotFound {
         Self { offers }
     }
 
+    /*
     pub async fn show(pool: Extension<PgPool>, user: users::User) -> Self {
         let conn = pool.get().expect("Could not connect to db");
         Self {
             offers: user.incoming_offers(&conn),
         }
     }
+    */
 }
 
 use std::{fmt, str::FromStr};
