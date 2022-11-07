@@ -34,6 +34,11 @@ async fn main() {
         .await
         .expect("Failed to create database pool");
 
+    sqlx::migrate!()
+        .run(&pool)
+        .await
+        .expect("Migration failed");
+
     let mut app = Router::new();
 
     for endpoint in inventory::iter::<Endpoint>() {
@@ -46,7 +51,7 @@ async fn main() {
     );
 
     let app = app
-//        .route("/:catch/*catch", get(marche_server::NotFound::show))
+        .route("/:catch/*catch", get(marche_server::NotFound::show))
         .nest(
             "/static",
             get_service(ServeDir::new("static")).handle_error(|error: std::io::Error| async move {

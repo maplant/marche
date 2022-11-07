@@ -40,6 +40,7 @@ image = "0.24"
 ipnetwork = "0.19"
 inventory = "0.2"
 sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "postgres", "chrono", "ipnetwork" ] }
+futures = "0.3"
 
 [dependencies.marche-proc-macros]
 path = "proc-macros"

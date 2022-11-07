@@ -8,11 +8,12 @@ use axum::{
 };
 use chrono::{prelude::*, NaiveDateTime};
 use derive_more::From;
+use futures::stream::StreamExt;
 use lazy_static::lazy_static;
 use marche_proc_macros::json_result;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgPool};
+use sqlx::{Connection, FromRow, PgExecutor, PgPool};
 
 use crate::{
     items::{Item, ItemDrop, ItemType},
@@ -21,7 +22,7 @@ use crate::{
     File, MultipartForm, MultipartFormError,
 };
 
-#[derive(FromRow, Debug, Serialize)]
+#[derive(FromRow, Default, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
     pub id: i32,
@@ -117,12 +118,11 @@ pub enum SubmitThreadError {
 pub const MAX_TAG_LEN: usize = 16;
 pub const MAX_NUM_TAGS: usize = 6;
 
-/*
 post! {
     "/thread",
     #[json_result]
     async fn new_thread(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
     ) -> Json<Result<Thread, SubmitThreadError>> {
@@ -137,12 +137,6 @@ post! {
 
         let post_date = Utc::now().naive_utc();
         let (image, thumbnail, filename) = upload_image(file).await?;
-
-        // Parse the body as markdown
-        // This is pretty terrible. We really
-        let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
-
-        let conn = pool.get().expect("Could not connect to db");
 
         let mut tags = Vec::new();
         for tag in parse_tag_list(&thread.tags) {
@@ -160,58 +154,63 @@ post! {
             return Err(SubmitThreadError::TooManyTags);
         }
 
-        // I suppose this could be done in a transaction to make more safe.
-        // Honestly I don't really like this fetch_and_inc interface, I think
-        // it could be done better.
+        let mut transaction = conn.begin().await?;
+
         let mut tag_ids = Vec::new();
         for tag in tags.into_iter() {
-            tag_ids.push(
-                Tag::fetch_from_str_and_inc(&conn, tag)?.id()
-            );
+            if let Some(tag) = Tag::fetch_from_str_and_inc(&mut *transaction, tag).await? {
+                tag_ids.push(tag.id());
+            }
         }
 
-        conn.transaction(|| -> Result<Thread, diesel::result::Error> {
-            use diesel::result::Error::RollbackTransaction;
 
-            let next_thread = diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
-                .first::<i64>(&conn)
-                .map_err(|_| RollbackTransaction)? as i32;
+        let thread: Thread = sqlx::query_as(
+            r#"
+                 INSERT INTO threads
+                     (title, tags, last_post, num_replies, pinned, locked, hidden)
+                  VALUES
+                     ($1, $2, 0, 0, FALSE, FALSE, FALSE)
+            "#,
+        )
+        .bind(title)
+        .bind(tag_ids)
+        .fetch_one(&mut *transaction)
+        .await?;
 
-            let next_thread = next_thread as i32;
+        let item_drop = ItemDrop::drop(&mut transaction, &user)
+            .await?
+            .map(ItemDrop::to_id);
 
-            let first_post: Reply = diesel::insert_into(crate::schema::replies::table)
-                .values(&NewReply {
-                    author_id: user.id,
-                    thread_id: next_thread,
-                    post_date,
-                    body: &body,
-                    body_html: &html_output,
-                    reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-                    reactions: Vec::new(),
-                    image,
-                    thumbnail,
-                    filename,
-                })
-                .get_result(&conn)
-                .map_err(|_| RollbackTransaction)?;
+        let reply: Reply = sqlx::query_as(
+            r#"
+                 INSERT INTO replies
+                     (author_id, thread_id, post_date, body, reward, image, thumbnail, filename, reactions)
+                 VALUES
+                     ($1, $2, $3, $4, $5, $6, $7, $8, [])
+            "#
+        )
+        .bind(user.id)
+        .bind(thread.id)
+        .bind(post_date)
+        .bind(body)
+        .bind(item_drop)
+        .bind(image)
+        .bind(thumbnail)
+        .bind(filename)
+        .fetch_one(&mut *transaction)
+        .await?;
 
-            diesel::insert_into(crate::schema::threads::table)
-                .values(&NewThread {
-                    id: next_thread,
-                    last_post: first_post.id,
-                    title: &title,
-                    tags: tag_ids,
-                    num_replies: 0,
-                    pinned: false,
-                    locked: false,
-                })
-                .get_result(&conn)
-                .map_err(|_| RollbackTransaction)
-        })
-        .map_err(SubmitThreadError::InternalDbError)
+        let thread = sqlx::query_as("UPDATE threads SET last_post = $1 WHERE id = $2")
+            .bind(reply.id)
+            .bind(thread.id)
+            .fetch_one(&mut *transaction)
+            .await?;
+
+        transaction.commit().await?;
+
+        Ok(thread)
     }
 }
-*/
 
 #[derive(Deserialize)]
 struct UpdateThread {
@@ -330,7 +329,10 @@ impl Tag {
     /// It's kind of a weird interface, I'm open to suggestions.
     ///
     /// Assumes that str is not empty.
-    pub async fn fetch_from_str_and_inc(conn: &PgPool, tag: &str) -> Result<Option<Self>, sqlx::Error> {
+    pub async fn fetch_from_str_and_inc(
+        conn: impl PgExecutor<'_>,
+        tag: &str,
+    ) -> Result<Option<Self>, sqlx::Error> {
         let tag_name = clean_tag_name(tag);
 
         if tag_name.is_empty() {
@@ -365,27 +367,25 @@ pub struct Tags {
     pub tags: Vec<Tag>,
 }
 
-/*
 impl Tags {
-    pub fn fetch_from_str(conn: &PgPool, path: &str) -> Self {
+    pub async fn fetch_from_str(conn: &PgPool, path: &str) -> Self {
         let mut seen = HashSet::new();
-        let tags = path
-            .split("/")
-            .filter_map(|s| {
-                Tag::fetch_from_str(&conn, s)
-                    .map(|t| seen.insert(t.id).then(|| t))
-                    .ok()
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
+        let tags = futures::stream::iter(path.split("/"))
+            .filter_map(move |s| async move { Tag::fetch_from_str(conn, s).await.ok().flatten() })
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .filter(move |t| seen.insert(t.id))
+            .collect();
         Tags { tags }
     }
 
-    pub fn fetch_from_ids<'a>(conn: &PgPool, ids: impl Iterator<Item = &'a i32>) -> Self {
+    pub async fn fetch_from_ids<'a>(conn: &PgPool, ids: impl Iterator<Item = &'a i32>) -> Self {
         Self {
-            tags: ids
-                .filter_map(|id| Tag::fetch_from_id(conn, *id).ok())
-                .collect(),
+            tags: futures::stream::iter(ids)
+                .filter_map(|id| async move { Tag::fetch_from_id(conn, *id).await.ok().flatten() })
+                .collect()
+                .await,
         }
     }
 
@@ -403,7 +403,6 @@ impl Tags {
         self.tags.is_empty()
     }
 }
-*/
 
 #[derive(FromRow, Debug, Serialize)]
 pub struct Reply {
@@ -418,8 +417,6 @@ pub struct Reply {
     pub post_date: NaiveDateTime,
     /// Body of the reply
     pub body: String,
-    /// Body of the reply parsed to html (what the user typically sees)
-    pub body_html: String,
     /// Any item that was rewarded for this post
     pub reward: Option<i32>,
     /// Reactions attached to this post
@@ -514,77 +511,77 @@ pub struct ReplyForm {
 
 #[derive(Serialize, From)]
 pub enum ReplyError {
+    NoSuchThread,
     ReplyIsEmpty,
     ThreadIsLocked,
     UploadImageError(#[serde(skip)] UploadImageError),
     InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
-/*
 post! {
     "/reply",
     #[json_result]
     pub async fn new_reply(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         MultipartForm {
             file,
-            form: ReplyForm { thread_id, reply },
+            form: ReplyForm { thread_id, body },
         }: MultipartForm<ReplyForm, MAXIMUM_FILE_SIZE>,
     ) -> Json<Result<Reply, ReplyError>> {
-        let reply = reply.trim();
-        if reply.is_empty() && file.is_none() {
+        let body = body.trim();
+
+        if body.is_empty() && file.is_none() {
             return Err(ReplyError::ReplyIsEmpty);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
-        let thread_id: i32 = thread_id.parse().unwrap();
-        if Thread::fetch(&conn, thread_id)?.locked {
+        let thread_id: i32 = thread_id.parse().map_err(|_| ReplyError::NoSuchThread)?;
+        if Thread::fetch(&conn, thread_id)
+            .await?
+            .ok_or(ReplyError::NoSuchThread)?
+            .locked
+        {
             return Err(ReplyError::ThreadIsLocked);
         }
 
         let post_date = Utc::now().naive_utc();
         let (image, thumbnail, filename) = upload_image(file).await?;
 
-        let html_output = parse_post(&conn, reply, thread_id);
+        let mut transaction = conn.begin().await?;
 
-        {
-            use crate::schema::threads::dsl::*;
+        let reply: Reply = sqlx::query_as(
+            r#"
+                INSERT INTO replies
+                    (author_id, thread_id, post_date, body, reward, image, thumbnail, filename, reactions)
+                VALUES
+                    ($1, $2, $3, $4, $5, $6, $7, $8, [])
+            "#
+        )
+        .bind(user.id)
+        .bind(thread_id)
+        .bind(post_date)
+        .bind(body)
+        .bind(
+            ItemDrop::drop(&mut transaction, &user)
+                .await?
+                .map(ItemDrop::to_id)
+        )
+        .bind(image)
+        .bind(thumbnail)
+        .bind(filename)
+        .fetch_one(&mut *transaction)
+        .await?;
 
-            diesel::update(threads.find(thread_id))
-                .set(num_replies.eq(num_replies + 1))
-                .get_result::<Thread>(&conn)?;
-        }
-
-        let reply: Reply = diesel::insert_into(crate::schema::replies::table)
-            .values(&NewReply {
-                author_id: user.id,
-                thread_id,
-                post_date,
-                body: &reply,
-                body_html: &html_output,
-                reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-                reactions: Vec::new(),
-                image,
-                thumbnail,
-                filename,
-            })
-            .get_result(&conn)?;
-
-        {
-            use crate::schema::threads::dsl::*;
-
-            diesel::update(threads.find(thread_id))
-                .set(last_post.eq(reply.id))
-                .get_result::<Thread>(&conn)?;
-        }
+        sqlx::query("UPDATE threads SET last_post = $1, num_replies = num_replies + 1")
+            .bind(reply.id)
+            .execute(&mut *transaction)
+            .await?;
 
         Ok(reply)
     }
 }
-*/
 
+/*
 #[derive(Deserialize)]
 pub struct UpdateReplyParams {
     hidden: Option<bool>,
@@ -603,7 +600,6 @@ pub enum UpdateReplyError {
     InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
-/*
 post! {
     "/reply/:post_id",
     #[json_result]
@@ -668,7 +664,6 @@ post! {
         })
     }
 }
-*/
 
 #[derive(Serialize, From)]
 pub enum ReactError {
@@ -677,7 +672,6 @@ pub enum ReactError {
     InternalDbError(#[serde(skip)] sqlx::Error),
 }
 
-/*
 post! {
     "/react/:post_id",
     #[json_result]
@@ -761,6 +755,7 @@ lazy_static! {
     };
 }
 
+/*
 // TODO: This probably needs to be async
 fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
     use crate::schema::replies::dsl::*;
@@ -824,6 +819,7 @@ fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
             }
         }).to_string()
 }
+*/
 
 use std::io::Cursor;
 

@@ -6,14 +6,16 @@ use axum::{
     response::Redirect,
 };
 use chrono::prelude::*;
+use futures::{future, stream, StreamExt};
 use serde::Serialize;
+use sqlx::PgPool;
 
 use crate::{
     get,
-    items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
+    items::{/*IncomingOffer,*/ Item, ItemDrop /*ItemThumbnail, OutgoingOffer*/},
     threads::{Reply, Tag, Tags, Thread},
-    users::{LevelInfo, ProfileStub, Role, User, UserCache},
-    NotFound, PgPool,
+    users::{LevelInfo, ProfileStub, Role, User /*, UserCache*/},
+    NotFound,
 };
 
 const THREADS_PER_PAGE: i64 = 25;
@@ -22,26 +24,26 @@ const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 #[derive(Template)]
 #[template(path = "index.html")]
 pub struct Index {
-    tags:        Vec<Tag>,
-    posts:       Vec<ThreadLink>,
-    offers:      i64,
+    tags: Vec<Tag>,
+    posts: Vec<ThreadLink>,
+    offers: i64,
     viewer_role: Role,
 }
 
 #[derive(Serialize)]
 struct ThreadLink {
-    num:            usize,
-    id:             i32,
-    title:          String,
-    date:           String,
+    num: usize,
+    id: i32,
+    title: String,
+    date: String,
     emphasize_date: bool,
-    read:           bool,
-    jump_to:        i32,
-    replies:        String,
-    tags:           Vec<String>,
-    pinned:         bool,
-    locked:         bool,
-    hidden:         bool,
+    read: bool,
+    jump_to: i32,
+    replies: String,
+    tags: Vec<String>,
+    pinned: bool,
+    locked: bool,
+    hidden: bool,
 }
 
 get! {
@@ -55,107 +57,120 @@ get! {
 get! {
     "/t/*tags",
     async fn index(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
-        Path(viewed_tags): Path<String>
+        Path(viewed_tags): Path<String>,
     ) -> Result<Index, Redirect> {
-        use crate::schema::threads::dsl::*;
-
-        let conn = &mut pool.get().expect("Could not connect to db");
-        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags);
+        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags).await;
 
         // If no tags are selected and the user is not privileged, force
         // the user to redirect to /t/en
         if viewed_tags.is_empty() && user.role < Role::Moderator {
             return Err(Redirect::to("/t/en"));
         }
+        let conn = &*conn;
+        let user = &user;
 
-        let posts: Vec<_> = threads
-            .filter(tags.contains(viewed_tags.clone().into_ids().collect::<Vec<_>>()))
-            .order((pinned.desc(), last_post.desc()))
-            .limit(THREADS_PER_PAGE)
-            .load::<Thread>(conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .enumerate()
-            .map(|(i, thread)| {
-                // Format the date:
-                // TODO: Consider moving duration->plaintext into common utility
-                let duration_since_last_post = Utc::now().naive_utc()
-                    - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
-                let duration_min = duration_since_last_post.num_minutes();
-                let duration_hours = duration_since_last_post.num_hours();
-                let duration_days = duration_since_last_post.num_days();
-                let duration_weeks = duration_since_last_post.num_weeks();
-                let duration_string: String = if duration_weeks > 0 {
-                    format!(
-                        "{} week{} ago",
-                        duration_weeks,
-                        if duration_weeks > 1 { "s" } else { "" }
-                    )
-                } else if duration_days > 0 {
-                    format!(
-                        "{} day{} ago",
-                        duration_days,
-                        if duration_days > 1 { "s" } else { "" }
-                    )
-                } else if duration_hours > 0 {
-                    format!(
-                        "{} hour{} ago",
-                        duration_hours,
-                        if duration_hours > 1 { "s" } else { "" }
-                    )
-                } else if duration_min >= 5 {
-                    format!(
-                        "{} minute{} ago",
-                        duration_min,
-                        if duration_min > 1 { "s" } else { "" }
-                    )
-                } else {
-                    String::from("just now!")
-                };
+        let posts = sqlx::query_as(
+            r#"
+                SELECT * FROM threads
+                WHERE
+                    tags @> $1
+                ORDER BY
+                    pinned DESC,
+                    last_post DESC
+                LIMIT $2
+            "#,
+        )
+        .bind(viewed_tags.clone().into_ids().collect::<Vec<_>>())
+        .bind(THREADS_PER_PAGE)
+        .fetch(conn)
+        .filter_map(|t: Result<Thread, _>| future::ready(t.ok()))
+        .enumerate()
+        .then(move |(i, thread)| async move {
+            // Format the date:
+            // TODO: Consider moving duration->plaintext into common utility
+            let duration_since_last_post = Utc::now().naive_utc()
+                - Reply::fetch(&conn, thread.last_post)
+                    .await?
+                    .unwrap()
+                    .post_date;
+            let duration_min = duration_since_last_post.num_minutes();
+            let duration_hours = duration_since_last_post.num_hours();
+            let duration_days = duration_since_last_post.num_days();
+            let duration_weeks = duration_since_last_post.num_weeks();
+            let duration_string: String = if duration_weeks > 0 {
+                format!(
+                    "{} week{} ago",
+                    duration_weeks,
+                    if duration_weeks > 1 { "s" } else { "" }
+                )
+            } else if duration_days > 0 {
+                format!(
+                    "{} day{} ago",
+                    duration_days,
+                    if duration_days > 1 { "s" } else { "" }
+                )
+            } else if duration_hours > 0 {
+                format!(
+                    "{} hour{} ago",
+                    duration_hours,
+                    if duration_hours > 1 { "s" } else { "" }
+                )
+            } else if duration_min >= 5 {
+                format!(
+                    "{} minute{} ago",
+                    duration_min,
+                    if duration_min > 1 { "s" } else { "" }
+                )
+            } else {
+                String::from("just now!")
+            };
 
-                let replies = match thread.num_replies {
-                    0 => format!("No replies"),
-                    1 => format!("1 reply"),
-                    x => format!("{} replies", x - 1),
-                };
+            let replies = match thread.num_replies {
+                0 => format!("No replies"),
+                1 => format!("1 reply"),
+                x => format!("{} replies", x - 1),
+            };
 
-                let read = user.has_read(&conn, &thread);
-                let jump_to = user.next_unread(&conn, &thread);
+            let read = user.has_read(conn, &thread).await?;
+            let jump_to = user.next_unread(conn, &thread).await?;
 
-                ThreadLink {
-                    num: i + 1,
-                    id: thread.id,
-                    title: thread.title,
-                    date: duration_string,
-                    emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
-                    read,
-                    jump_to,
-                    replies,
-                    tags: thread
-                        .tags
-                        .into_iter()
-                        .filter_map(|tid| Tag::fetch_from_id(&conn, tid).ok())
-                        .map(|t| t.name)
-                        .collect(),
-                    pinned: thread.pinned,
-                    locked: thread.locked,
-                    hidden: thread.hidden,
-                }
+            Result::<_, sqlx::Error>::Ok(ThreadLink {
+                num: i + 1,
+                id: thread.id,
+                title: thread.title,
+                date: duration_string,
+                emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
+                read,
+                jump_to,
+                replies,
+                tags: stream::iter(thread.tags.into_iter())
+                    .filter_map(
+                        |tid| async move { Tag::fetch_from_id(conn, tid).await.ok().flatten() },
+                    )
+                    .map(|t| t.name)
+                    .collect()
+                    .await,
+                pinned: thread.pinned,
+                locked: thread.locked,
+                hidden: thread.hidden,
             })
-            .collect();
+        })
+        .filter_map(|t| future::ready(t.ok()))
+        .collect()
+        .await;
 
         Ok(Index {
-            tags:   viewed_tags.tags,
-            posts:  posts,
+            tags: viewed_tags.tags,
+            posts: posts,
             viewer_role: user.role,
-            offers: IncomingOffer::count(&conn, &user),
+            offers: 0, // IncomingOffer::count(&conn, &user),
         })
     }
 }
 
+/*
 #[derive(Template)]
 #[template(path = "thread.html")]
 pub struct ThreadPage {
@@ -650,3 +665,4 @@ get! {
         }
     }
 }
+*/

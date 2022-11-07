@@ -10,6 +10,7 @@ use axum::{
 use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
 use derive_more::From;
+use futures::{StreamExt, TryStreamExt};
 use ipnetwork::IpNetwork;
 use libpasta::verify_password;
 use marche_proc_macros::json_result;
@@ -20,7 +21,10 @@ use tower_cookies::{Cookie, Cookies, Key};
 
 use crate::post;
 
-use crate::items::ItemDrop;
+use crate::{
+    items::{Item, ItemDrop},
+    threads::{Reply, Thread},
+};
 
 /*
 use crate::{
@@ -168,28 +172,33 @@ impl User {
         Ok(items)
     }
 
-    /*
-    pub fn inventory(&self, conn: &PgConnection) -> impl Iterator<Item = (Item, ItemDrop)> {
-        use crate::schema::drops::dsl::*;
-
-        let mut inventory = drops
-            .filter(owner_id.eq(self.id))
-            .filter(consumed.eq(false))
-            .load::<ItemDrop>(conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .map(|drop| {
-                let id = drop.item_id;
-                (Item::fetch(conn, id), drop)
-            })
-            .collect::<Vec<_>>();
+    pub async fn inventory(
+        &self,
+        conn: &PgPool,
+    ) -> Result<impl Iterator<Item = (Item, ItemDrop)>, sqlx::Error> {
+        let mut inventory =
+            sqlx::query_as("SELECT * FROM drops WHERE owner_id = $1 && consumed = FALSE")
+                .bind(self.id)
+                .fetch(conn)
+                .filter_map(|item_drop: Result<ItemDrop, _>| async move {
+                    let Ok(item_drop) = item_drop else {
+                        return  None;
+                    };
+                    Item::fetch(conn, item_drop.item_id)
+                        .await
+                        .ok()
+                        .flatten()
+                        .map(move |item| (item, item_drop))
+                })
+                .collect::<Vec<_>>()
+                .await;
 
         inventory.sort_by(|a, b| a.0.rarity.cmp(&b.0.rarity).reverse());
 
-        inventory.into_iter()
+        Ok(inventory.into_iter())
     }
 
+    /*
     /// Returns the profile picture of the user
     pub fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
         self.equip_slot_prof_pic.map(|drop_id| {
@@ -256,58 +265,62 @@ impl User {
     }
 
     /*
-        pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
-            use crate::schema::users::dsl::*;
+            pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
+                use crate::schema::users::dsl::*;
 
-            users
-                .filter(id.eq(session.user_id))
-                .first::<Self>(conn)
-                .map_err(|_| ())
-        }
+                users
+                    .filter(id.eq(session.user_id))
+                    .first::<Self>(conn)
+                    .map_err(|_| ())
+    }
 
-        pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> i32 {
-            use crate::schema::replies::dsl::*;
-            use crate::threads::Reply;
+        */
 
-            let last_read = {
-                use crate::schema::reading_history::dsl::*;
+    pub async fn next_unread(&self, conn: &PgPool, thread: &Thread) -> Result<i32, sqlx::Error> {
+        let reading_history: Option<ReadingHistory> =
+            sqlx::query_as("SELECT * FROM reading_history WHERE reader_id = $1 && thread_id = $2")
+                .bind(self.id)
+                .bind(thread.id)
+                .fetch_optional(conn)
+                .await?;
 
-                reading_history
-                    .filter(reader_id.eq(self.id))
-                    .filter(thread_id.eq(thread.id))
-                    .first::<ReadingHistory>(conn)
-                    .ok()
-                    .map(|history| history.last_read)
-            };
+        let last_read = match reading_history {
+            None => {
+                // Find the first reply
+                let reply: Reply = sqlx::query_as(
+                    "SELECT * FROM replies WHERE thread_id = $1 ORDER BY post_date ASC",
+                )
+                .bind(thread.id)
+                .fetch_one(conn)
+                .await?;
 
-            match last_read {
-                None => {
-                    // Find the first reply
-                    replies
-                        .filter(thread_id.eq(thread.id))
-                        .order(post_date.asc())
-                        .first::<Reply>(conn)
-                        .unwrap()
-                        .id
-                }
-                Some(last_read) => replies
-                    .filter(thread_id.eq(thread.id))
-                    .filter(id.gt(last_read))
-                    .first::<Reply>(conn)
-                    .map_or_else(|_| last_read, |reply| reply.id),
+                reply.id
             }
-        }
+            Some(ReadingHistory { last_read, .. }) => sqlx::query_as(
+                "SELECT * FROM replies WHERE thread_id = $1 && id > $2 ORDER BY post_date ASC",
+            )
+            .fetch_optional(conn)
+            .await?
+            .map_or_else(|| last_read, |reply: Reply| reply.id),
+        };
 
-        pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
-            use crate::schema::reading_history::dsl::*;
+        Ok(last_read)
+    }
 
-            reading_history
-                .filter(reader_id.eq(self.id))
-                .filter(thread_id.eq(thread.id))
-                .first::<ReadingHistory>(conn)
-                .ok()
-                .map_or(false, |history| history.last_read >= thread.last_post)
-        }
+    pub async fn has_read(&self, conn: &PgPool, thread: &Thread) -> Result<bool, sqlx::Error> {
+        Ok(
+            sqlx::query_as("SELECT * FROM reading_history WHERE reader_id = $1 && thread_id = $2")
+                .bind(self.id)
+                .bind(thread.id)
+                .fetch_optional(conn)
+                .await?
+                .map_or(false, |history: ReadingHistory| {
+                    history.last_read >= thread.last_post
+                }),
+        )
+    }
+
+    /*
 
         pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
             use crate::schema::reading_history::dsl::*;

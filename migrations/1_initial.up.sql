@@ -52,13 +52,12 @@ CREATE TABLE replies (
   thread_id INT NOT NULL,
   post_date TIMESTAMP NOT NULL,
   body TEXT NOT NULL,
-  body_html TEXT NOT NULL,
   reward INT,
   reactions INTEGER[] NOT NULL,
   image TEXT,
   thumbnail TEXT,
   filename TEXT,
-  hidden BOOLEAN NOT NULL
+  hidden BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE tags (

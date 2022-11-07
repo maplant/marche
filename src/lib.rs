@@ -1,5 +1,5 @@
 pub mod items;
-//pub mod pages;
+pub mod pages;
 pub mod threads;
 pub mod users;
 
@@ -192,18 +192,17 @@ pub struct NotFound {
 }
 
 impl NotFound {
-    pub fn new(offers: i64) -> Self {
-        Self { offers }
-    }
-
-    /*
     pub async fn show(pool: Extension<PgPool>, user: users::User) -> Self {
+        /*
         let conn = pool.get().expect("Could not connect to db");
         Self {
             offers: user.incoming_offers(&conn),
+    }
+         */
+        Self {
+            offers: 0
         }
     }
-    */
 }
 
 use std::{fmt, str::FromStr};

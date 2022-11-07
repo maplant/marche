@@ -13,8 +13,7 @@ use rand::{prelude::*, Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use serde::{Deserialize, Serialize};
 use sqlx::{
-    types::Json as Jsonb, Acquire, Connection, FromRow, PgConnection, PgExecutor, PgPool, Postgres,
-    Type,
+    types::Json as Jsonb, Acquire, FromRow, PgConnection, PgExecutor, PgPool, Postgres, Type, Transaction,
 };
 
 use crate::{
@@ -197,6 +196,10 @@ impl ItemDrop {
 
     pub async fn fetch_item(&self, conn: impl PgExecutor<'_>) -> Result<Option<Item>, sqlx::Error> {
         Item::fetch(conn, self.item_id).await
+    }
+
+    pub fn to_id(self) -> i32 {
+        self.id
     }
 
     /// Equips an item. Up to the caller to ensure current user owns the item.
@@ -395,7 +398,10 @@ impl ItemDrop {
          */
 
     /// Possibly selects an item, depending on the last drop.
-    pub async fn drop(conn: &PgPool, user: &User) -> Result<Option<Self>, sqlx::Error> {
+    pub async fn drop(
+        conn: &mut Transaction<'_, Postgres>,
+        user: &User,
+    ) -> Result<Option<Self>, sqlx::Error> {
         // Determine if we have a drop
         if !(user.last_reward < (Utc::now() - *MAX_DROP_PERIOD).naive_utc()
             || user.last_reward < (Utc::now() - *MIN_DROP_PERIOD).naive_utc()
@@ -404,16 +410,18 @@ impl ItemDrop {
             return Ok(None);
         }
 
+        let mut conn = conn.acquire().await?;
+
         let chosen: Item =
             sqlx::query_as("SELECT * FROM items WHERE rarity = $1 && available = TRUE")
                 .bind(Rarity::roll())
-                .fetch_all(conn)
+                .fetch_all(&mut *conn)
                 .await?
                 .into_iter()
                 .choose(&mut thread_rng())
                 .unwrap();
 
-        let mut transaction = conn.begin().await?;
+        let mut transaction = (&mut *conn).begin().await?;
 
         // Give the new item to the user
         let item_drop = sqlx::query_as(
@@ -466,25 +474,26 @@ post! {
         Ok(())
     }
 }
+ */
 
-#[derive(Serialize)]
+#[derive(Serialize, From)]
 pub enum UnequipError {
     NoSuchItem,
     NotYourItem,
+    InternalDbError(#[serde(skip)] sqlx::Error)
 }
 
 post! {
     "/unequip/:item_id",
     #[json_result]
     pub async fn unequip(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(drop_id): Path<i32>
     ) -> Json<Result<(), UnequipError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_|UnequipError::NoSuchItem)?;
+        let drop = ItemDrop::fetch(&*conn, drop_id).await?.ok_or(UnequipError::NoSuchItem)?;
         if drop.owner_id == user.id {
-            drop.unequip(&conn);
+            drop.unequip(&*conn).await?;
         } else {
             return Err(UnequipError::NotYourItem);
         }
@@ -493,6 +502,7 @@ post! {
     }
 }
 
+/*
 // TODO: Take this struct and extract it somewhere
 #[derive(Serialize)]
 pub struct ItemThumbnail {
