@@ -101,6 +101,8 @@ post!(
             .execute(&mut transaction)
             .await?;
 
+        transaction.commit().await?;
+
         tracing::info!(
             "User `{}` has deleted thread {dead_thread_id} titled: `{thread_title}`",
             user.name

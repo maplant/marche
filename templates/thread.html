@@ -64,7 +64,7 @@
               <div class="error-{{post.id}}" style="margin-top: 15px"></div>
             </form>
             {% endif %}
-            <span class="parsed-{{post.id}}">{{post.body}}</span>
+            <span class="post-text">{{post.body|escape|linebreaks|e("none")}}</span>
             <p style="font-size: 80%; color: grey">Posted on {{post.date}} UTC</p>
           </div>
           <div style="display: inline">
@@ -102,7 +102,7 @@
                     hidden={{hidden}}
                     onclick="hideReply({{post.id}}, !{{post.hidden}})"
                     type="submit"
-                    class="action-box"
+                    class="hide-post action-box"
                     {% if post.hidden %}
                     style="filter: brightness(70%)"
                     {% endif %}
@@ -111,7 +111,7 @@
             </button>
             {% endif %}
             {% if viewer_role > Role::Moderator && loop.index > 1 %}
-            <button ondblclick="deleteReply({{post.id}})" type="submit" style="background: red; color: white" class="action-box">
+            <button ondblclick="deleteReply({{post.id}})" type="submit" style="background: red; color: white" class="action-box delete-reply">
               ⚠️ Delete reply
             </button>
             {% endif %}

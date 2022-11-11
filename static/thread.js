@@ -7,31 +7,71 @@ $(document).ready(function() {
 
     // editing replies
     $(".edit-post-form").each(function() {
-        const error_messages = {
-            Unprivileged: "You do not have the privilege to edit this post",
-            NotYourPost: "You do not own this post",
-            CannotMakeEmpty: "You cannot make a post empty",
-            InternalDbError: "There was an internal error, please try again later",
-        };
         const id = $(this).attr("postid");
         $(this).ajaxForm({
             url: `/reply/${id}`,
             type: 'post',
             success: function(response, _, _, _) {
-                if (response.Err !== undefined) {
-                    var error_message = error_messages[response.Err];
-                    var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
-                    $(`.error-${id}`).html(`<div class="error">${error_message}</div>`)
+                if (response.error !== undefined) {
+                    $(`.error-${id}`).html("error")
                 } else {
                     // TODO: Do this properly
-                    location.href = `/thread/${response.Ok.thread_id}?jump_to=${response.Ok.id}`;
+                    location.href = `/thread/${response.ok.thread_id}?jump_to=${response.ok.id}`;
                 }
             },
             error: function(_, status, error) {
-                  $(`.error-${id}`).html(`<div class="error">Error attempting to update post</div>`)
+                  $(`.error-${id}`).html("Error attempting to update post")
             }
         });
-    })
+    });
+
+    // Replace @ with responses
+    const has_reply_preview = new Map();
+    $(".post-text").each(function() {        
+        const REPLY_RE = /@(\d+)/g;
+        let html = $(this).html();
+        $(this).html(html.replaceAll(REPLY_RE, function(match, id, _, _, _) {
+            let post = $(`#${id}`);
+            let author = post.attr("author");
+            if (post.length) {
+                return `<span class="respond-to-preview" reply_id=${id}><b>@${author}</b></span><div class="overlay-on-hover reply-overlay"></div>`;
+            } else {
+                return match;
+            }
+        }));
+    });
+
+    $("span.respond-to-preview").each(function() {
+        var response_div = $(this).parents(".reply");
+        var response_div_clone = response_div.clone();
+        var responder_name = response_div.attr("author");
+        var response_preview_div = $(
+            $.parseHTML(
+                `<div class="response-from-preview action-box" reply_id="{reply_id}"><b>🗣️ ${responder_name}</b></div>`,
+            ),
+        );
+        var response_overlay_div = $(
+            $.parseHTML(
+                `<div class="response-from-preview response-overlay overlay-on-hover" style="display: inline-block;"></div>`,
+            ),
+        );
+        var response_container_div = getResponseContainerDiv($(this));
+
+        cleanCloneDiv(response_div_clone);
+
+        response_preview_div.hover(function() {
+            response_overlay_div[0].replaceChildren(response_div_clone[0]);
+            response_overlay_div.css("visibility", "visible").css("opacity", "1.0");
+        }, function() {
+            response_overlay_div.css("visibility", "hidden").css("opacity", "0.0");
+        });
+        response_preview_div.click(function() {
+            response_div[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        });
+        response_overlay_div[0].appendChild(response_div_clone[0]);
+        response_container_div.parent().append(response_overlay_div);
+        response_container_div.append(response_preview_div);
+    });
 
     $(".reply-to-button").click(function() {
         $("#reply")[0].scrollIntoView({ behavior: "smooth" });
@@ -44,14 +84,8 @@ $(document).ready(function() {
 
     $(".respond-to-preview").hover(function() {
         var overlay_div = getOverlayDiv($(this));
-
         var reply_div_clone = getReplyDiv($(this)).clone();
-
-        // Differences between response to preview and actual reply element
-        reply_div_clone.removeAttr("id");
-        reply_div_clone.find(".reply-to-button").remove();
-        reply_div_clone.find(".react-button").remove();
-
+        cleanCloneDiv(reply_div_clone);
         overlay_div[0].replaceChildren(reply_div_clone[0]);
         overlay_div.css("visibility", "visible").css("opacity", "1.0");
     }, function() {
@@ -72,43 +106,6 @@ $(document).ready(function() {
             );
             return;
         }
-    });
-
-    // Populate response elements
-    $("div.respond-to-preview").each(function() {
-        var response_div = $(this).parents(".reply");
-        var response_div_clone = response_div.clone();
-        var responder_name = response_div.attr("author");
-        var response_preview_div = $(
-            $.parseHTML(
-                `<div class="response-from-preview action-box" reply_id="{reply_id}"><b>🗣️ ${responder_name}</b></div>`,
-            ),
-        );
-        var response_overlay_div = $(
-            $.parseHTML(
-                `<div class="response-from-preview response-overlay overlay-on-hover" style="display: inline-block;"></div>`,
-            ),
-        );
-        var response_container_div = getResponseContainerDiv($(this));
-
-        // Differences between response from preview and actual reply element
-        response_div_clone.find(".response-container").removeAttr("id");
-        response_div_clone.find(".reply-to-button").remove();
-        response_div_clone.find(".react-button").remove();
-        response_div_clone.removeAttr("id");
-
-        response_preview_div.hover(function() {
-            response_overlay_div[0].replaceChildren(response_div_clone[0]);
-            response_overlay_div.css("visibility", "visible").css("opacity", "1.0");
-        }, function() {
-            response_overlay_div.css("visibility", "hidden").css("opacity", "0.0");
-        });
-        response_preview_div.click(function() {
-            response_div[0].scrollIntoView({ behavior: "smooth", block: "center" });
-        });
-        response_overlay_div[0].appendChild(response_div_clone[0]);
-        response_container_div.parent().append(response_overlay_div);
-        response_container_div.append(response_preview_div);
     });
 
     // Check if jump_to exists, and scroll to it if it does
@@ -139,6 +136,16 @@ $(document).ready(function() {
         // alert( event.target.files[0].name );
       });
 });
+
+function cleanCloneDiv(div) {
+    // Differences between response to preview and actual reply element
+    div.removeAttr("id");
+    div.find(".edit-post-button").remove();
+    div.find(".hide-post").remove();
+    div.find(".delete-reply").remove();
+    div.find(".reply-to-button").remove();
+    div.find(".react-button").remove();
+}
 
 function getOverlayDiv(origin) {
     var overlay_div = origin.next("div.reply-overlay");
