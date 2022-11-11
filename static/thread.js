@@ -15,7 +15,7 @@ $(document).ready(function() {
             success: function(response, _, _, _) {
                 if (response.error !== undefined) {
                     $(`.error-${id}`).show();
-                    $(`.error-${id}`).html("error")
+                    $(`.error-${id}`).html(`${response.error}`)
                 } else {
                     // TODO: Do this properly
                     location.href = `/thread/${thread_id}?jump_to=${id}`;
@@ -32,10 +32,11 @@ $(document).ready(function() {
     $(".post-text").each(function() {        
         const REPLY_RE = /@(\d+)/g;
         let html = $(this).html();
+        let curr_id = $(this).parents(".reply").attr("id");
         $(this).html(html.replaceAll(REPLY_RE, function(match, id, _, _, _) {
             let post = $(`#${id}`);
             let author = post.attr("author");
-            if (post.length) {
+            if (id < curr_id && post.length) {
                 return `<span class="respond-to-preview" reply_id=${id}><b>@${author}</b></span><div class="overlay-on-hover reply-overlay"></div>`;
             } else {
                 return match;
@@ -147,6 +148,7 @@ function cleanCloneDiv(div) {
     div.find(".delete-reply").remove();
     div.find(".reply-to-button").remove();
     div.find(".react-button").remove();
+    div.find(".edit-post-form").remove();
 }
 
 function getOverlayDiv(origin) {

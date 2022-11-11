@@ -327,7 +327,7 @@ impl User {
             ON CONFLICT
                 (reader_id, thread_id)
             DO UPDATE SET
-                last_read = $3
+                last_read = EXCLUDED.last_read
             "#,
         )
         .bind(self.id)
