@@ -8,15 +8,17 @@ $(document).ready(function() {
     // editing replies
     $(".edit-post-form").each(function() {
         const id = $(this).attr("postid");
+        const thread_id = $(this).attr("threadid");
         $(this).ajaxForm({
             url: `/reply/${id}`,
             type: 'post',
             success: function(response, _, _, _) {
                 if (response.error !== undefined) {
+                    $(`.error-${id}`).show();
                     $(`.error-${id}`).html("error")
                 } else {
                     // TODO: Do this properly
-                    location.href = `/thread/${response.ok.thread_id}?jump_to=${response.ok.id}`;
+                    location.href = `/thread/${thread_id}?jump_to=${id}`;
                 }
             },
             error: function(_, status, error) {
