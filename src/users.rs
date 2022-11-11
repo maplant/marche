@@ -1,52 +1,34 @@
-use std::{collections::HashMap, ops::Range};
+use std::{
+    collections::HashMap,
+    ops::Range,
+    sync::{Arc, Mutex},
+};
 
 use askama::Template;
 use axum::{
     async_trait,
     extract::{Extension, Form, FromRequest, Path, Query, RequestParts},
     response::{IntoResponse, Redirect, Response},
-    Json,
 };
 use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
-use derive_more::From;
-use diesel::prelude::*;
-use diesel_derive_enum::DbEnum;
+use futures::StreamExt;
 use ipnetwork::IpNetwork;
 use libpasta::verify_password;
 use marche_proc_macros::json_result;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgExecutor, PgPool, Postgres, Row, Transaction, Type};
+use thiserror::Error;
 use tower_cookies::{Cookie, Cookies, Key};
 
 use crate::{
-    items::{self, Item, ItemDrop},
+    items::{Item, ItemDrop},
     post,
-    threads::Thread,
-    PgPool,
+    threads::{Reply, Thread},
 };
 
-table! {
-    use diesel::sql_types::*;
-    use super::RoleMapping;
-
-    users (id) {
-        id -> Integer,
-        name -> Text,
-        password -> Text,
-        bio -> Text,
-        role -> RoleMapping,
-        experience -> BigInt,
-        last_reward -> Timestamp,
-        equip_slot_prof_pic -> Nullable<Integer>,
-        equip_slot_background -> Nullable<Integer>,
-        equip_slot_badges -> Array<Integer>,
-        banned_until -> Nullable<Timestamp>,
-        notes -> Text,
-    }
-}
-
-#[derive(Queryable, Debug)]
+#[derive(FromRow, Debug)]
 pub struct User {
     /// Id of the user
     pub id:                    i32,
@@ -80,14 +62,16 @@ pub struct ProfileStub {
     pub id:         i32,
     pub name:       String,
     pub picture:    Option<String>,
-    pub background: String,
+    pub background: Option<String>,
     pub badges:     Vec<String>,
     pub level:      LevelInfo,
 }
 
 #[derive(
-    Copy, Clone, Debug, Hash, Eq, PartialEq, DbEnum, PartialOrd, Ord, Serialize, Deserialize,
+    Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Serialize, Deserialize, Type,
 )]
+#[sqlx(type_name = "user_role")]
+#[sqlx(rename_all = "snake_case")]
 pub enum Role {
     User,
     Moderator,
@@ -104,6 +88,23 @@ pub struct LevelInfo {
 pub const MAX_NUM_BADGES: usize = 10;
 
 impl User {
+    pub async fn fetch(conn: impl PgExecutor<'_>, user_id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(conn)
+            .await
+    }
+
+    pub async fn fetch_optional(
+        conn: impl PgExecutor<'_>,
+        user_id: i32,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(conn)
+            .await
+    }
+
     /// Returns the raw, total experience of the user
     pub fn experience(&self) -> u64 {
         self.experience as u64
@@ -148,194 +149,204 @@ impl User {
         }
     }
 
-    pub fn add_experience(&self, conn: &PgConnection, xp: i64) {
-        use self::users::dsl::*;
-
-        // I cannot find a way to do this properly in one sql query.
-        // I need to file a bug report or something.
-
-        let user = diesel::update(users.find(self.id))
-            .set(experience.eq(experience + xp))
-            .get_result::<Self>(conn)
-            .unwrap();
-
-        if user.experience < 0 {
-            diesel::update(users.find(self.id))
-                .set(experience.eq(0))
-                .get_result::<Self>(conn)
-                .unwrap();
-        }
+    pub async fn add_experience(
+        &self,
+        conn: &mut Transaction<'_, Postgres>,
+        xp: i64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET experience = GREATEST(experience + $1, 0) WHERE id = $2")
+            .bind(xp)
+            .bind(self.id)
+            .execute(conn)
+            .await?;
+        Ok(())
     }
 
     /// Returns a vec of equipped items.
-    pub fn equipped(&self, conn: &PgConnection) -> Result<Vec<ItemDrop>, diesel::result::Error> {
+    pub async fn equipped(&self, conn: &PgPool) -> Result<Vec<(Item, ItemDrop)>, sqlx::Error> {
         let mut items = Vec::new();
 
         if let Some(prof_pic) = self.equip_slot_prof_pic {
-            items.push(ItemDrop::fetch(conn, prof_pic)?);
+            let item_drop = ItemDrop::fetch(conn, prof_pic).await?;
+            items.push((item_drop.fetch_item(conn).await?, item_drop));
         }
 
         if let Some(background) = self.equip_slot_background {
-            items.push(ItemDrop::fetch(conn, background)?);
+            let item_drop = ItemDrop::fetch(conn, background).await?;
+            items.push((item_drop.fetch_item(conn).await?, item_drop));
         }
 
         for badge in self.equip_slot_badges.iter() {
-            items.push(ItemDrop::fetch(conn, *badge)?);
+            let item_drop = ItemDrop::fetch(conn, *badge).await?;
+            items.push((item_drop.fetch_item(conn).await?, item_drop));
         }
 
         Ok(items)
     }
 
-    pub fn inventory(&self, conn: &PgConnection) -> impl Iterator<Item = (Item, ItemDrop)> {
-        use crate::items::drops;
-
-        let mut inventory = drops::table
-            .filter(drops::dsl::owner_id.eq(self.id))
-            .filter(drops::dsl::consumed.eq(false))
-            .load::<ItemDrop>(conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .map(|drop| {
-                let id = drop.item_id;
-                (Item::fetch(conn, id), drop)
-            })
-            .collect::<Vec<_>>();
+    pub async fn inventory(
+        &self,
+        conn: &PgPool,
+    ) -> Result<impl Iterator<Item = (Item, ItemDrop)>, sqlx::Error> {
+        let mut inventory =
+            sqlx::query_as("SELECT * FROM drops WHERE owner_id = $1 AND consumed = FALSE")
+                .bind(self.id)
+                .fetch(conn)
+                .filter_map(|item_drop: Result<ItemDrop, _>| async move {
+                    let Ok(item_drop) = item_drop else {
+                        return None;
+                    };
+                    Item::fetch(conn, item_drop.item_id)
+                        .await
+                        .ok()
+                        .map(move |item| (item, item_drop))
+                })
+                .collect::<Vec<_>>()
+                .await;
 
         inventory.sort_by(|a, b| a.0.rarity.cmp(&b.0.rarity).reverse());
 
-        inventory.into_iter()
+        Ok(inventory.into_iter())
     }
 
-    /// Returns the profile picture of the user
-    pub fn get_profile_pic(&self, conn: &PgConnection) -> Option<String> {
-        self.equip_slot_prof_pic.map(|drop_id| {
-            ItemDrop::fetch(&conn, drop_id)
-                .unwrap()
-                .as_profile_pic(&conn)
-        })
+    pub async fn get_avatar(&self, conn: &PgPool) -> Result<Option<String>, sqlx::Error> {
+        let Some(drop_id) = self.equip_slot_prof_pic else {
+            return Ok(None);
+        };
+        Ok(ItemDrop::fetch(conn, drop_id)
+            .await?
+            .fetch_item(conn)
+            .await?
+            .as_avatar())
     }
 
-    pub fn get_background_style(&self, conn: &PgConnection) -> String {
-        self.equip_slot_background
-            .map(|drop_id| {
-                ItemDrop::fetch(&conn, drop_id)
-                    .unwrap()
-                    .as_background_style(&conn)
-            })
-            .unwrap_or_else(|| String::from("background: #ddd;"))
+    pub async fn get_profile_background(
+        &self,
+        conn: &PgPool,
+    ) -> Result<Option<String>, sqlx::Error> {
+        let Some(drop_id) = self.equip_slot_background else {
+            return Ok(None);
+        };
+        let item_drop = ItemDrop::fetch(conn, drop_id).await?;
+        Ok(item_drop
+            .fetch_item(conn)
+            .await?
+            .as_profile_background(item_drop.pattern))
     }
 
-    pub fn get_badges(&self, conn: &PgConnection) -> Vec<String> {
-        self.equip_slot_badges
-            .iter()
-            .map(|drop_id| ItemDrop::fetch(&conn, *drop_id).unwrap().as_badge(conn))
-            .collect()
+    pub async fn get_badges(&self, conn: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+        let mut badges = Vec::new();
+        for badge in self.equip_slot_badges.iter() {
+            let Some(item) = ItemDrop::fetch(conn, *badge).await?.fetch_item(&*conn).await?.as_badge() else {
+                continue;
+            };
+            badges.push(item);
+        }
+        Ok(badges)
     }
 
     /// Attempt to update the last drop time. If we fail, return false.
     /// This will fail if the user has received a new reward since the user has
     /// been fetched, which is by design.
-    pub fn update_last_reward(&self, conn: &PgConnection) -> Result<Self, ()> {
-        use self::users::dsl::{last_reward, users};
-
-        let prev_reward = self.last_reward;
-        diesel::update(users.find(self.id))
-            .set(last_reward.eq(Utc::now().naive_utc()))
-            .filter(last_reward.eq(prev_reward))
-            .get_result::<Self>(conn)
-            .map_err(|_| ())
+    pub async fn update_last_reward(&self, conn: impl PgExecutor<'_>) -> Result<bool, sqlx::Error> {
+        let rows_affected =
+            sqlx::query("UPDATE users SET last_reward = $1 WHERE id = $2 AND last_reward = $3")
+                .bind(Utc::now().naive_utc())
+                .bind(self.id)
+                .bind(self.last_reward)
+                .execute(conn)
+                .await?
+                .rows_affected();
+        Ok(rows_affected > 0)
     }
 
-    pub fn profile_stub(&self, conn: &PgConnection) -> ProfileStub {
-        ProfileStub {
+    pub async fn get_profile_stub(&self, conn: &PgPool) -> Result<ProfileStub, sqlx::Error> {
+        Ok(ProfileStub {
             id:         self.id,
             name:       self.name.clone(),
-            picture:    self.get_profile_pic(conn),
-            background: self.get_background_style(conn),
-            badges:     self.get_badges(conn),
+            picture:    self.get_avatar(conn).await?,
+            background: self.get_profile_background(conn).await?,
+            badges:     self.get_badges(conn).await?,
             level:      self.level_info(),
-        }
+        })
     }
 
-    pub fn fetch(conn: &PgConnection, user_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::users::dsl::*;
+    pub async fn next_unread(&self, conn: &PgPool, thread: &Thread) -> Result<i32, sqlx::Error> {
+        let reading_history: Option<ReadingHistory> =
+            sqlx::query_as("SELECT * FROM reading_history WHERE reader_id = $1 AND thread_id = $2")
+                .bind(self.id)
+                .bind(thread.id)
+                .fetch_optional(conn)
+                .await?;
 
-        users.find(user_id).first::<Self>(conn)
-    }
-
-    pub fn from_session(conn: &PgConnection, session: &LoginSession) -> Result<Self, ()> {
-        use self::users::dsl::*;
-
-        users
-            .filter(id.eq(session.user_id))
-            .first::<Self>(conn)
-            .map_err(|_| ())
-    }
-
-    pub fn next_unread(&self, conn: &PgConnection, thread: &Thread) -> i32 {
-        let last_read = {
-            use self::reading_history::dsl::*;
-
-            reading_history
-                .filter(reader_id.eq(self.id))
-                .filter(thread_id.eq(thread.id))
-                .first::<ReadingHistory>(conn)
-                .ok()
-                .map(|history| history.last_read)
-        };
-
-        match last_read {
+        let last_read = match reading_history {
             None => {
                 // Find the first reply
-                use crate::threads::{replies::dsl::*, Reply};
+                let reply: Reply = sqlx::query_as(
+                    "SELECT * FROM replies WHERE thread_id = $1 ORDER BY post_date ASC",
+                )
+                .bind(thread.id)
+                .fetch_one(conn)
+                .await?;
 
-                replies
-                    .filter(thread_id.eq(thread.id))
-                    .order(post_date.asc())
-                    .first::<Reply>(conn)
-                    .unwrap()
-                    .id
+                reply.id
             }
-            Some(last_read) => {
-                use crate::threads::{replies::dsl::*, Reply};
+            Some(ReadingHistory { last_read, .. }) => sqlx::query_as(
+                "SELECT * FROM replies WHERE thread_id = $1 AND id > $2 ORDER BY post_date ASC",
+            )
+            .bind(thread.id)
+            .bind(last_read)
+            .fetch_optional(conn)
+            .await?
+            .map_or_else(|| last_read, |reply: Reply| reply.id),
+        };
 
-                replies
-                    .filter(thread_id.eq(thread.id))
-                    .filter(id.gt(last_read))
-                    .first::<Reply>(conn)
-                    .map_or_else(|_| last_read, |reply| reply.id)
-            }
-        }
+        Ok(last_read)
     }
 
-    pub fn has_read(&self, conn: &PgConnection, thread: &Thread) -> bool {
-        use self::reading_history::dsl::*;
-
-        reading_history
-            .filter(reader_id.eq(self.id))
-            .filter(thread_id.eq(thread.id))
-            .first::<ReadingHistory>(conn)
-            .ok()
-            .map_or(false, |history| history.last_read >= thread.last_post)
+    pub async fn has_read(&self, conn: &PgPool, thread: &Thread) -> Result<bool, sqlx::Error> {
+        Ok(
+            sqlx::query_as("SELECT * FROM reading_history WHERE reader_id = $1 AND thread_id = $2")
+                .bind(self.id)
+                .bind(thread.id)
+                .fetch_optional(conn)
+                .await?
+                .map_or(false, |history: ReadingHistory| {
+                    history.last_read >= thread.last_post
+                }),
+        )
     }
 
-    pub fn read_thread(&self, conn: &PgConnection, thread: &Thread) {
-        use self::reading_history::dsl::*;
-        let _ = diesel::insert_into(reading_history)
-            .values(NewReadingHistory {
-                reader_id: self.id,
-                thread_id: thread.id,
-                last_read: thread.last_post,
-            })
-            .on_conflict((reader_id, thread_id))
-            .do_update()
-            .set(last_read.eq(thread.last_post))
-            .execute(conn);
+    pub async fn read_thread(&self, conn: &PgPool, thread: &Thread) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO reading_history
+                (reader_id, thread_id, last_read)
+            VALUES
+                ($1, $2, $3)
+            ON CONFLICT
+                (reader_id, thread_id)
+            DO UPDATE SET
+                last_read = $3
+            "#,
+        )
+        .bind(self.id)
+        .bind(thread.id)
+        .bind(thread.last_post)
+        .execute(conn)
+        .await?;
+
+        Ok(())
     }
 
-    pub fn incoming_offers(&self, conn: &PgConnection) -> i64 {
-        items::IncomingOffer::count(&conn, self)
+    pub async fn incoming_offers(&self, conn: &PgPool) -> Result<i64, sqlx::Error> {
+        Ok(
+            sqlx::query("SELECT COUNT(*) FROM trade_requests WHERE receiver_id = $1")
+                .bind(self.id)
+                .fetch_one(conn)
+                .await?
+                .get(0),
+        )
     }
 }
 
@@ -344,38 +355,46 @@ pub struct UpdateUser {
     role: Role,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Error, Serialize)]
 pub enum UpdateUserError {
+    #[error("You are not privileged enough")]
     Unprivileged,
+    #[error("There is no such user")]
     NoSuchUser,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-post! {
+post!(
     "/user/:user_id",
     #[json_result]
     async fn update_user(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         moderator: User,
         Path(user_id): Path<i32>,
-        Query(UpdateUser { role: new_role }): Query<UpdateUser>
+        Query(UpdateUser { role }): Query<UpdateUser>,
     ) -> Json<Result<(), UpdateUserError>> {
-        use self::users::dsl::*;
+        let user = User::fetch_optional(&*conn, user_id)
+            .await?
+            .ok_or(UpdateUserError::NoSuchUser)?;
 
-        let conn = pool.get().expect("Could not connect to db");
-        let user = User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
-
-        if user.role >= moderator.role || new_role >= moderator.role {
+        if user.role >= moderator.role || role >= moderator.role {
             return Err(UpdateUserError::Unprivileged);
         }
 
-        let _ = diesel::update(users.find(user_id))
-            .set(role.eq(new_role))
-            .get_result::<User>(&conn)?;
+        sqlx::query("UPDATE users SET role = $1 WHERE id = $2")
+            .bind(role)
+            .bind(user_id)
+            .execute(&*conn)
+            .await?;
 
         Ok(())
     }
-}
+);
 
 #[derive(Deserialize)]
 pub struct BanUser {
@@ -383,111 +402,120 @@ pub struct BanUser {
     ban_len: Option<u32>,
 }
 
-post! {
+post!(
     "/ban/:user_id",
     #[json_result]
     async fn ban_user(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         moderator: User,
         Path(user_id): Path<i32>,
-        Query(BanUser { ban_len }): Query<BanUser>
+        Query(BanUser { ban_len }): Query<BanUser>,
     ) -> Json<Result<(), UpdateUserError>> {
-        use self::users::dsl::*;
-
-        if moderator.role < Role::Moderator ||  moderator.id == user_id {
+        if moderator.role < Role::Moderator || moderator.id == user_id {
             return Err(UpdateUserError::Unprivileged);
         }
+        User::fetch_optional(&*conn, user_id)
+            .await?
+            .ok_or(UpdateUserError::NoSuchUser)?;
 
-        let conn = pool.get().expect("Could not connect to db");
-        User::fetch(&conn, user_id).map_err(|_| UpdateUserError::NoSuchUser)?;
-
-        let ban = ban_len.map(|days| (Utc::now() + Duration::days(days as i64)).naive_utc());
-            let _ = diesel::update(users.find(user_id))
-                .set(banned_until.eq(ban))
-                .get_result::<User>(&conn)?;
+        sqlx::query("UPDATE users SET banned_until = $1 WHERE id = $2")
+            .bind(ban_len.map(|days| (Utc::now() + Duration::days(days as i64)).naive_utc()))
+            .bind(user_id)
+            .execute(&*conn)
+            .await?;
 
         Ok(())
     }
-}
+);
 
 #[derive(Deserialize)]
 pub struct UpdateBioForm {
     bio: String,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum UpdateBioError {
+    #[error("Bio is too long (maximum {MAX_BIO_LEN} characters allowed)")]
     TooLong,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 pub const MAX_BIO_LEN: usize = 300;
 
-post! {
+post!(
     "/bio",
     #[json_result]
     async fn update_bio(
-        pool: Extension<PgPool>,
-        curr_user: User,
-        Form(UpdateBioForm { bio: new_bio }): Form<UpdateBioForm>,
+        conn: Extension<PgPool>,
+        user: User,
+        Form(UpdateBioForm { bio }): Form<UpdateBioForm>,
     ) -> Json<Result<(), UpdateBioError>> {
-        use self::users::dsl::*;
-
-        if new_bio.len() > MAX_BIO_LEN {
+        if bio.len() > MAX_BIO_LEN {
             return Err(UpdateBioError::TooLong);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-        diesel::update(users.find(curr_user.id))
-            .set(bio.eq(new_bio))
-            .get_result::<User>(&conn)?;
+        sqlx::query("UPDATE users SET bio = $1 WHERE id = $2")
+            .bind(bio)
+            .bind(user.id)
+            .execute(&*conn)
+            .await?;
 
         Ok(())
     }
-}
+);
 
 #[derive(Deserialize)]
 pub struct AddNoteForm {
     body: String,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Error, Serialize)]
 pub enum AddNoteError {
+    #[error("You are not privileged enough")]
     Unprivileged,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-post! {
+post!(
     "/add_note/:user_id",
     #[json_result]
     pub async fn submit(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         viewer: User,
         Path(user_id): Path<i32>,
         Form(AddNoteForm { body }): Form<AddNoteForm>,
     ) -> Json<Result<(), AddNoteError>> {
-        use self::users::dsl::*;
-
         if viewer.role < Role::Moderator {
             return Err(AddNoteError::Unprivileged);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
         let viewer_name = viewer.name;
         let body = html_escape::encode_text(&body);
-
         let new_note = format!("<p>“{body}” — {viewer_name}</p>");
 
-        let _: User = diesel::update(users.find(user_id))
-            .set(notes.eq(notes.concat(new_note)))
-            .get_result(&conn)?;
+        sqlx::query("UPDATE users SET notes = notes || $1 WHERE id = $1")
+            .bind(new_note)
+            .bind(user_id)
+            .execute(&*conn)
+            .await?;
 
         Ok(())
     }
-}
+);
 
 /// Name of the cookie we use to store the session Id.
 const USER_SESSION_ID_COOKIE: &str = "session_id";
+// TODO: Move to environmental variable
 const PRIVATE_COOKIE_KEY: &str = "ea63npVp7Vg+ileGuoO0OJbBLOdSkHKkNwu87B8/joU=";
 
 #[async_trait]
@@ -518,18 +546,17 @@ where
             })?;
         let conn = Extension::<PgPool>::from_request(req)
             .await
-            .map_err(|_| UserRejection::InternalDbError)?
-            .get()
-            .expect("Could not connect to db");
-        let session = LoginSession::fetch(&conn, session_id.value()).map_err(|_| {
-            UserRejection::Unauthorized {
+            .map_err(|_| UserRejection::UnknownError)?;
+        let Some(session) = LoginSession::fetch(&conn, session_id.value()).await? else {
+            return Err(UserRejection::Unauthorized {
                 redirect: redirect.clone(),
-            }
-        })?;
-        let user =
-            User::from_session(&conn, &session).map_err(|_| UserRejection::Unauthorized {
-                redirect: redirect.clone(),
-            })?;
+            });
+        };
+        let user = match User::fetch_optional(&*conn, session.user_id).await {
+            Ok(Some(user)) => user,
+            Ok(None) => return Err(UserRejection::UnknownUser),
+            Err(_) => return Err(UserRejection::Unauthorized { redirect }),
+        };
         if user.is_banned() {
             Err(UserRejection::Banned {
                 until: user.banned_until.unwrap(),
@@ -540,10 +567,25 @@ where
     }
 }
 
+#[derive(Debug, Error)]
 pub enum UserRejection {
-    InternalDbError,
+    #[error("An unknown error occurred")]
+    UnknownError,
+    #[error("Internal database error: {0}")]
+    InternalDbError(#[from] sqlx::Error),
+    #[error("Unknown user")]
+    UnknownUser,
+    #[error("Unauthorized user")]
     Unauthorized { redirect: String },
+    #[error("Banned until {until}")]
     Banned { until: NaiveDateTime },
+}
+
+#[derive(Template)]
+#[template(path = "banned.html")]
+pub struct Banned {
+    judge_type: bool,
+    until:      String,
 }
 
 impl IntoResponse for UserRejection {
@@ -562,46 +604,37 @@ impl IntoResponse for UserRejection {
     }
 }
 
-#[derive(Template)]
-#[template(path = "banned.html")]
-pub struct Banned {
-    judge_type: bool,
-    until:      String,
-}
+#[derive(Clone)]
 pub struct UserCache<'a> {
-    conn:   &'a PgConnection,
-    cached: HashMap<i32, ProfileStub>,
+    conn:   &'a PgPool,
+    cached: Arc<Mutex<HashMap<i32, Arc<ProfileStub>>>>,
 }
 
 impl<'a> UserCache<'a> {
-    pub fn new(conn: &'a PgConnection) -> Self {
+    pub fn new(conn: &'a PgPool) -> Self {
         UserCache {
             conn,
-            cached: Default::default(),
+            cached: Arc::new(Mutex::new(Default::default())),
         }
     }
 
-    pub fn get(&mut self, id: i32) -> &ProfileStub {
-        if !self.cached.contains_key(&id) {
-            let user = User::fetch(self.conn, id).unwrap();
-            self.cached.insert(id, user.profile_stub(self.conn));
+    pub async fn get(&self, id: i32) -> Result<Arc<ProfileStub>, sqlx::Error> {
+        if let Some(result) = self.cached.lock().unwrap().get(&id) {
+            return Ok(result.clone());
         }
-        self.cached.get(&id).unwrap()
-    }
-}
-
-table! {
-    login_sessions(id) {
-        id -> Integer,
-        session_id -> Varchar,
-        user_id -> Integer,
-        session_start -> Timestamp,
-        ip_addr -> Cidr,
+        let profile_stub = Arc::new(
+            User::fetch(self.conn, id)
+                .await?
+                .get_profile_stub(self.conn)
+                .await?,
+        );
+        self.cached.lock().unwrap().insert(id, profile_stub.clone());
+        Ok(profile_stub)
     }
 }
 
 /// User login sessions
-#[derive(Queryable)]
+#[derive(FromRow)]
 pub struct LoginSession {
     /// Id of the login session
     pub id:            i32,
@@ -615,56 +648,47 @@ pub struct LoginSession {
     pub ip_addr:       IpNetwork,
 }
 
-#[derive(Insertable)]
-#[table_name = "login_sessions"]
-pub struct NewSession {
-    user_id:       i32,
-    session_id:    String,
-    session_start: NaiveDateTime,
-    ip_addr:       IpNetwork,
-}
-
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum LoginFailure {
+    #[error("username or password is incorrect")]
     UserOrPasswordIncorrect,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 impl LoginSession {
     /// Fetch the login session.
-    pub fn fetch(conn: &PgConnection, sess_id: &str) -> Result<Self, ()> {
-        use self::login_sessions::dsl::*;
-
-        let curr_session = login_sessions
-            .filter(session_id.eq(sess_id))
-            .first::<Self>(conn)
-            .ok()
-            .ok_or(())?;
-
-        // The session is automatically invalid if the session is longer than a month
-        // old.
-        if curr_session.session_start < (Utc::now() - Duration::weeks(4)).naive_utc() {
-            Err(())
-        } else {
-            Ok(curr_session)
-        }
+    pub async fn fetch(conn: &PgPool, session_id: &str) -> Result<Option<Self>, sqlx::Error> {
+        Ok(
+            sqlx::query_as("SELECT * FROM login_sessions WHERE session_id = $1")
+                .bind(session_id)
+                .fetch_optional(conn)
+                .await?
+                .filter(|session: &Self| {
+                    // The session is automatically invalid if the session is longer than a month
+                    // old.
+                    session.session_start >= (Utc::now() - Duration::weeks(4)).naive_utc()
+                }),
+        )
     }
 
     /// Attempt to login a user
-    pub fn login(
-        conn: &PgConnection,
+    pub async fn login(
+        conn: &PgPool,
         user_name: &str,
         password: &str,
         ip_addr: IpNetwork,
     ) -> Result<Self, LoginFailure> {
         let user_name = user_name.trim();
-        let user = {
-            use self::users::dsl::*;
-
-            users
-                .filter(name.eq(user_name))
-                .first::<User>(conn)
-                .ok()
+        let user: User = {
+            sqlx::query_as("SELECT * FROM users WHERE name = $1")
+                .bind(user_name)
+                .fetch_optional(conn)
+                .await?
                 .ok_or(LoginFailure::UserOrPasswordIncorrect)?
         };
 
@@ -679,18 +703,23 @@ impl LoginSession {
 
         // Found a user, create a new login sessions
         let session_start = Utc::now().naive_utc();
-        let new_session = NewSession {
-            user_id: user.id,
-            session_id: i128::from_be_bytes(key).to_string(),
-            session_start,
-            ip_addr,
-        };
 
-        let session = diesel::insert_into(login_sessions::table)
-            .values(&new_session)
-            .get_result(conn)?;
-
-        Ok(session)
+        Ok(sqlx::query_as(
+            r#"
+                INSERT INTO login_sessions
+                    (user_id, session_id, session_start, ip_addr)
+                VALUES
+                    ($1, $2, $3, $4)
+                RETURNING
+                    *
+            "#,
+        )
+        .bind(user.id)
+        .bind(i128::from_be_bytes(key).to_string())
+        .bind(session_start)
+        .bind(ip_addr)
+        .fetch_one(conn)
+        .await?)
     }
 }
 
@@ -712,17 +741,23 @@ post! {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
-        let conn = pool.get().expect("Could not connect to new db");
         let LoginSession { session_id, .. } =
-            LoginSession::login(&conn, &login.username, &login.password, IpNetwork::from(ip))?;
+            LoginSession::login(&pool, &login.username, &login.password, IpNetwork::from(ip)).await?;
         private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
         Ok(())
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Error)]
 pub enum LogoutFailure {
-    InternalDbError,
+    #[error("an unknown error occurred")]
+    UnknownError,
+    #[error("internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
@@ -732,45 +767,25 @@ post! {
         pool: Extension<PgPool>,
         cookies: Cookies,
     ) -> Json<Result<(), LogoutFailure>> {
-        use self::login_sessions::dsl::*;
-
         let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let signed = cookies.private(&private_key);
-        let curr_session_id = signed
+        let session_id = signed
             .get(USER_SESSION_ID_COOKIE)
-            .ok_or(LogoutFailure::InternalDbError)?;
+            .ok_or(LogoutFailure::UnknownError)?;
 
-        diesel::delete(login_sessions.filter(session_id.eq(curr_session_id.value())))
-            .execute(&pool.get().map_err(|_| LogoutFailure::InternalDbError)?)
-            .map_err(|_| LogoutFailure::InternalDbError)?;
+        sqlx::query("DELETE FROM login_sessions WHERE id = $1")
+            .bind(session_id.value())
+            .execute(&*pool)
+            .await?;
 
         Ok(())
     }
 }
 
-table! {
-    reading_history(id) {
-        id -> Integer,
-        // It is important that the UNIQUE ( reader_id, article_id )
-        // constraint is applied.
-        reader_id -> Integer,
-        thread_id -> Integer,
-        last_read -> Integer,
-    }
-}
-
-#[derive(Queryable)]
+#[derive(FromRow)]
 pub struct ReadingHistory {
     pub id:        i32,
     pub reader_id: i32,
     pub thread_id: i32,
     pub last_read: i32,
-}
-
-#[derive(Insertable)]
-#[table_name = "reading_history"]
-pub struct NewReadingHistory {
-    reader_id: i32,
-    thread_id: i32,
-    last_read: i32,
 }

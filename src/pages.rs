@@ -1,26 +1,82 @@
-use std::collections::HashSet;
+use std::{collections::HashMap, sync::Arc};
 
 use askama::Template;
 use axum::{
     extract::{Extension, Path},
-    response::Redirect,
+    http::StatusCode,
+    response::{IntoResponse, Redirect, Response},
 };
 use chrono::prelude::*;
-use diesel::prelude::*;
+use futures::{future, stream, StreamExt, TryStreamExt};
 use serde::Serialize;
+use sqlx::PgPool;
+use thiserror::Error;
 
 use crate::{
     get,
-    items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
+    items::{IncomingOffer, ItemDrop, ItemThumbnail, OutgoingOffer},
     threads::{Reply, Tag, Tags, Thread},
     users::{LevelInfo, ProfileStub, Role, User, UserCache},
-    NotFound, PgPool,
 };
 
 const THREADS_PER_PAGE: i64 = 25;
 const MINUTES_TIMESTAMP_IS_EMPHASIZED: i64 = 60 * 24;
 
 #[derive(Template)]
+#[template(path = "error.html")]
+pub struct ErrorPage {
+    offers: usize,
+    code:   u16,
+    reason: &'static str,
+}
+
+#[derive(Error, Debug)]
+pub enum ServerError {
+    #[error("Not found")]
+    NotFound,
+    #[error("Unauthorized")]
+    Unauthorized,
+    #[error("Internal database error: {0}")]
+    InternalDbError(#[from] sqlx::Error),
+}
+
+impl IntoResponse for ServerError {
+    fn into_response(self) -> Response {
+        let status_code = match self {
+            ServerError::NotFound => StatusCode::NOT_FOUND,
+            ServerError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ServerError::InternalDbError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        (
+            status_code,
+            ErrorPage {
+                offers: 0,
+                code:   status_code.as_u16(),
+                reason: status_code.canonical_reason().unwrap_or("????"),
+            },
+        )
+            .into_response()
+    }
+}
+
+#[derive(Debug, Template)]
+#[template(path = "items.html")]
+pub struct Items {
+    offers: usize,
+}
+
+get!(
+    "/items",
+    pub async fn mint(user: User) -> Result<Items, ServerError> {
+        if user.role != Role::Admin {
+            Err(ServerError::Unauthorized)
+        } else {
+            Ok(Items { offers: 0 })
+        }
+    }
+);
+
+#[derive(Debug, Template)]
 #[template(path = "index.html")]
 pub struct Index {
     tags:        Vec<Tag>,
@@ -29,7 +85,7 @@ pub struct Index {
     viewer_role: Role,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 struct ThreadLink {
     num:            usize,
     id:             i32,
@@ -56,103 +112,114 @@ get! {
 get! {
     "/t/*tags",
     async fn index(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
-        Path(viewed_tags): Path<String>
+        Path(viewed_tags): Path<String>,
     ) -> Result<Index, Redirect> {
-        use crate::threads_dsl::*;
-
-        let conn = pool.get().expect("Could not connect to db");
-        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags);
+        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags).await;
 
         // If no tags are selected and the user is not privileged, force
         // the user to redirect to /t/en
         if viewed_tags.is_empty() && user.role < Role::Moderator {
             return Err(Redirect::to("/t/en"));
         }
+        let conn = &*conn;
+        let user = &user;
 
-        let posts: Vec<_> = threads
-            .filter(tags.contains(viewed_tags.clone().into_ids().collect::<Vec<_>>()))
-            .order((pinned.desc(), last_post.desc()))
-            .limit(THREADS_PER_PAGE)
-            .load::<Thread>(&conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
-            .into_iter()
-            .enumerate()
-            .map(|(i, thread)| {
-                // Format the date:
-                // TODO: Consider moving duration->plaintext into common utility
-                let duration_since_last_post = Utc::now().naive_utc()
-                    - Reply::fetch(&conn, thread.last_post).unwrap().post_date;
-                let duration_min = duration_since_last_post.num_minutes();
-                let duration_hours = duration_since_last_post.num_hours();
-                let duration_days = duration_since_last_post.num_days();
-                let duration_weeks = duration_since_last_post.num_weeks();
-                let duration_string: String = if duration_weeks > 0 {
-                    format!(
-                        "{} week{} ago",
-                        duration_weeks,
-                        if duration_weeks > 1 { "s" } else { "" }
-                    )
-                } else if duration_days > 0 {
-                    format!(
-                        "{} day{} ago",
-                        duration_days,
-                        if duration_days > 1 { "s" } else { "" }
-                    )
-                } else if duration_hours > 0 {
-                    format!(
-                        "{} hour{} ago",
-                        duration_hours,
-                        if duration_hours > 1 { "s" } else { "" }
-                    )
-                } else if duration_min >= 5 {
-                    format!(
-                        "{} minute{} ago",
-                        duration_min,
-                        if duration_min > 1 { "s" } else { "" }
-                    )
-                } else {
-                    String::from("just now!")
-                };
+        let posts = sqlx::query_as(
+            r#"
+                SELECT * FROM threads
+                WHERE
+                    tags @> $1
+                ORDER BY
+                    pinned DESC,
+                    last_post DESC
+                LIMIT $2
+            "#,
+        )
+        .bind(viewed_tags.clone().into_ids().collect::<Vec<_>>())
+        .bind(THREADS_PER_PAGE)
+        .fetch(conn)
+        .filter_map(|t: Result<Thread, _>| future::ready(t.ok()))
+        .enumerate()
+        .then(move |(i, thread)| async move {
+            // Format the date:
+            // TODO: Consider moving duration->plaintext into common utility
+            let duration_since_last_post = Utc::now().naive_utc()
+                - Reply::fetch(&conn, thread.last_post)
+                    .await?
+                    .post_date;
+            let duration_min = duration_since_last_post.num_minutes();
+            let duration_hours = duration_since_last_post.num_hours();
+            let duration_days = duration_since_last_post.num_days();
+            let duration_weeks = duration_since_last_post.num_weeks();
+            let duration_string: String = if duration_weeks > 0 {
+                format!(
+                    "{} week{} ago",
+                    duration_weeks,
+                    if duration_weeks > 1 { "s" } else { "" }
+                )
+            } else if duration_days > 0 {
+                format!(
+                    "{} day{} ago",
+                    duration_days,
+                    if duration_days > 1 { "s" } else { "" }
+                )
+            } else if duration_hours > 0 {
+                format!(
+                    "{} hour{} ago",
+                    duration_hours,
+                    if duration_hours > 1 { "s" } else { "" }
+                )
+            } else if duration_min >= 5 {
+                format!(
+                    "{} minute{} ago",
+                    duration_min,
+                    if duration_min > 1 { "s" } else { "" }
+                )
+            } else {
+                String::from("just now!")
+            };
 
-                let replies = match thread.num_replies {
-                    0 => format!("No replies"),
-                    1 => format!("1 reply"),
-                    x => format!("{} replies", x - 1),
-                };
+            let replies = match thread.num_replies {
+                0 => format!("No replies"),
+                1 => format!("1 reply"),
+                x => format!("{} replies", x - 1),
+            };
 
-                let read = user.has_read(&conn, &thread);
-                let jump_to = user.next_unread(&conn, &thread);
+            let read = user.has_read(conn, &thread).await?;
+            let jump_to = user.next_unread(conn, &thread).await?;
 
-                ThreadLink {
-                    num: i + 1,
-                    id: thread.id,
-                    title: thread.title,
-                    date: duration_string,
-                    emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
-                    read,
-                    jump_to,
-                    replies,
-                    tags: thread
-                        .tags
-                        .into_iter()
-                        .filter_map(|tid| Tag::fetch_from_id(&conn, tid).ok())
-                        .map(|t| t.name)
-                        .collect(),
-                    pinned: thread.pinned,
-                    locked: thread.locked,
-                    hidden: thread.hidden,
-                }
+            sqlx::Result::Ok(ThreadLink {
+                num: i + 1,
+                id: thread.id,
+                title: thread.title,
+                date: duration_string,
+                emphasize_date: duration_min < MINUTES_TIMESTAMP_IS_EMPHASIZED,
+                read,
+                jump_to,
+                replies,
+                tags: stream::iter(thread.tags.into_iter())
+                    .filter_map(
+                        |tid| async move { Tag::fetch_from_id(conn, tid).await.ok().flatten() },
+                    )
+                    .map(|t| t.name)
+                    .collect()
+                    .await,
+                pinned: thread.pinned,
+                locked: thread.locked,
+                hidden: thread.hidden,
             })
-            .collect();
+        })
+        .filter_map(|t| future::ready(t.ok()))
+        .collect()
+        .await;
 
         Ok(Index {
-            tags:   viewed_tags.tags,
-            posts:  posts,
+            tags: viewed_tags.tags,
+            posts: posts,
             viewer_role: user.role,
-            offers: IncomingOffer::count(&conn, &user),
+            offers: user.incoming_offers(&*conn).await.unwrap_or(0),
         })
     }
 }
@@ -172,22 +239,13 @@ pub struct ThreadPage {
 }
 
 #[derive(Serialize)]
-struct Reward {
-    thumbnail:   String,
-    name:        String,
-    description: String,
-    rarity:      String,
-}
-
-#[derive(Serialize)]
 struct Post {
     id:        i32,
-    author:    ProfileStub,
+    author:    Arc<ProfileStub>,
     body:      String,
-    body_html: String,
     date:      String,
     reactions: Vec<ItemThumbnail>,
-    reward:    Option<Reward>,
+    reward:    Option<ItemThumbnail>,
     can_react: bool,
     can_edit:  bool,
     hidden:    bool,
@@ -196,78 +254,91 @@ struct Post {
     filename:  String,
 }
 
-get! {
+get!(
     "/thread/:thread_id",
     async fn view_thread(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
-        Path(thread_id): Path<i32>
-    ) -> Result<ThreadPage, NotFound> {
-        use crate::threads_dsl::*;
-        use crate::replies_dsl;
+        Path(thread_id): Path<i32>,
+    ) -> Result<ThreadPage, ServerError> {
+        let thread = Thread::fetch_optional(&*conn, thread_id)
+            .await?
+            .ok_or(ServerError::NotFound)?;
 
-        let conn = pool.get().expect("Could not connect to db");
-        let offers = user.incoming_offers(&conn);
-        let thread = &threads.find(thread_id)
-            .first::<Thread>(&conn)
-            .map_err(|_| NotFound::new(offers))?;
-        user.read_thread(&conn, &thread);
+        user.read_thread(&conn, &thread).await?;
 
         if thread.hidden && user.role == Role::User {
-            return Err(NotFound::new(offers));
+            return Err(ServerError::NotFound);
         }
 
-        let mut user_cache = UserCache::new(&conn);
-        let posts = replies_dsl::replies
-            .filter(replies_dsl::thread_id.eq(thread_id))
-            .order(replies_dsl::post_date.asc())
-            .load::<Reply>(&conn)
-            .unwrap()
-            .into_iter()
-            .map(|t| Post {
-                id:        t.id,
-                author:    user_cache.get(t.author_id).clone(),
-                body:      t.body,
-                body_html: t.body_html,
-                // TODO: we need to add a user setting to format this to the local time.
-                date:      t.post_date.format(crate::DATE_FMT).to_string(),
-                reactions: t
-                    .reactions
-                    .into_iter()
-                    .map(|d| ItemDrop::fetch(&conn, d).unwrap().thumbnail(&conn))
-                    .collect(),
-                reward:    t.reward.map(|r| {
-                    let drop = ItemDrop::fetch(&conn, r).unwrap();
-                    let item = drop.fetch_item(&conn);
-                    Reward {
-                        name:        item.name,
-                        description: item.description,
-                        thumbnail:   drop.thumbnail_html(&conn),
-                        rarity:      item.rarity.to_string(),
+        let conn = &*conn;
+        let user_cache = UserCache::new(conn);
+        let posts =
+            sqlx::query_as("SELECT * FROM replies WHERE thread_id = $1 ORDER BY post_date ASC")
+                .bind(thread_id)
+                .fetch(conn)
+                .filter_map(|post| async move { post.ok() })
+                .then(move |post: Reply| {
+                    let user_cache = user_cache.clone();
+                    async move {
+                        let date = post.post_date.format(crate::DATE_FMT).to_string();
+                        let reactions = stream::iter(post.reactions.into_iter())
+                            .filter_map(|drop_id| async move {
+                                ItemDrop::fetch(conn, drop_id).await.ok()
+                            })
+                            .filter_map(|item_drop| async move {
+                                item_drop.get_thumbnail(conn).await.ok()
+                            })
+                            .collect()
+                            .await;
+                        let can_edit = post.author_id == user.id; // TODO: Add time limit for replies
+                        let can_react = post.author_id != user.id;
+                        let author = user_cache.get(post.author_id).await?;
+                        let reward = if let Some(reward) = post.reward {
+                            Some(
+                                ItemDrop::fetch(conn, reward)
+                                    .await?
+                                    .get_thumbnail(conn)
+                                    .await?,
+                            )
+                        } else {
+                            None
+                        };
+                        Result::<_, sqlx::Error>::Ok(Post {
+                            id: post.id,
+                            author,
+                            date,
+                            reactions,
+                            reward,
+                            can_edit,
+                            can_react,
+                            body: post.body,
+                            hidden: post.hidden,
+                            image: post.image,
+                            thumbnail: post.thumbnail,
+                            filename: post.filename,
+                        })
                     }
-                }),
-                can_edit:  t.author_id == user.id, // TODO: Add time limit for replies
-                can_react: t.author_id != user.id,
-                hidden:    t.hidden,
-                image:     t.image,
-                thumbnail: t.thumbnail,
-                filename:  t.filename,
-            })
-            .collect::<Vec<_>>();
+                })
+                .try_collect()
+                .await?;
 
         Ok(ThreadPage {
             id: thread_id,
             title: thread.title.clone(),
             posts,
-            tags: Tags::fetch_from_ids(&conn, thread.tags.iter()).into_names().collect(),
+            tags: Tags::fetch_from_ids(conn, thread.tags.iter())
+                .await
+                .into_names()
+                .collect(),
             pinned: thread.pinned,
             locked: thread.locked,
             hidden: thread.hidden,
-            offers: IncomingOffer::count(&conn, &user),
+            offers: user.incoming_offers(conn).await?,
             viewer_role: user.role,
         })
     }
-}
+);
 
 #[derive(Template, Debug)]
 #[template(path = "author.html")]
@@ -275,14 +346,14 @@ pub struct AuthorPage {
     offers: i64,
 }
 
-get! {
+get!(
     "/author",
-    async fn author_page(pool: Extension<PgPool>, user: User) -> AuthorPage {
-        AuthorPage {
-            offers: IncomingOffer::count(&pool.get().expect("Could not connect to db"), &user),
-        }
+    async fn author_page(conn: Extension<PgPool>, user: User) -> Result<AuthorPage, ServerError> {
+        Ok(AuthorPage {
+            offers: user.incoming_offers(&*conn).await?,
+        })
     }
-}
+);
 
 #[derive(Template)]
 #[template(path = "item.html")]
@@ -304,20 +375,22 @@ pub enum AvailableEquipAction {
     Unequip,
 }
 
-get! {
+get!(
     "/item/:drop_id",
     pub async fn show(
-        pool: Extension<PgPool>,
-        user: User, Path(drop_id):
-        Path<i32>
-    ) -> Result<ItemPage, NotFound> {
-        let conn = pool.get().expect("Could not connect to db");
-        // TODO: Fix NotFound
-        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_| NotFound::new(0))?;
-        let item = Item::fetch(&conn, drop.item_id);
-        let owner = User::fetch(&conn, drop.owner_id).unwrap();
+        conn: Extension<PgPool>,
+        user: User,
+        Path(drop_id): Path<i32>,
+    ) -> Result<ItemPage, ServerError> {
+        let drop = ItemDrop::fetch_optional(&*conn, drop_id)
+            .await?
+            .ok_or(ServerError::NotFound)?;
+        let item = drop.fetch_item(&*conn).await?;
+        let owner = User::fetch(&*conn, drop.owner_id).await?;
+        let inventory = user.equipped(&*conn).await?;
+        let thumbnail = item.get_thumbnail_html(drop.pattern);
         let equip_action = (user.id == drop.owner_id && item.is_equipable()).then(|| {
-            if drop.is_equipped(&conn) {
+            if inventory.iter().any(|(_, equipped)| equipped == &drop) {
                 AvailableEquipAction::Unequip
             } else {
                 AvailableEquipAction::Equip
@@ -325,19 +398,19 @@ get! {
         });
 
         Ok(ItemPage {
+            thumbnail,
+            equip_action,
             id: drop_id,
             name: item.name,
             description: item.description,
             pattern: drop.pattern as u16,
             rarity: item.rarity.to_string(),
-            thumbnail: drop.thumbnail_html(&conn),
             owner_id: owner.id,
             owner_name: owner.name.to_string(),
-            equip_action,
-            offers: IncomingOffer::count(&conn, &user),
+            offers: user.incoming_offers(&*conn).await?,
         })
     }
-}
+);
 
 #[derive(Template)]
 #[template(path = "react.html")]
@@ -353,36 +426,40 @@ pub struct ReactPage {
     filename:  String,
 }
 
-get! {
+get!(
     "/react/:post_id",
     async fn react_page(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
-        Path(post_id): Path<i32>
-    ) -> ReactPage {
-        let conn = pool.get().expect("Could not connect to db");
-        let post = Reply::fetch(&conn, post_id).unwrap();
-        let author = User::fetch(&conn, post.author_id)
-            .unwrap()
-            .profile_stub(&conn);
+        Path(post_id): Path<i32>,
+    ) -> Result<ReactPage, ServerError> {
+        let post = Reply::fetch(&*conn, post_id).await?;
+        let author = User::fetch(&*conn, post.author_id)
+            .await?
+            .get_profile_stub(&*conn)
+            .await?;
+
         let inventory: Vec<_> = user
             .inventory(&conn)
-            .filter_map(|(item, drop)| item.is_reaction().then(|| drop.thumbnail(&conn)))
+            .await?
+            .into_iter()
+            .filter(|(item, _)| item.is_reaction())
+            .map(|(item, drop)| ItemThumbnail::new(&item, &drop))
             .collect();
 
-        ReactPage {
+        Ok(ReactPage {
             thread_id: post.thread_id,
             post_id,
             author,
             body: post.body,
             inventory,
-            offers: IncomingOffer::count(&conn, &user),
+            offers: user.incoming_offers(&*conn).await?,
             image: post.image,
             thumbnail: post.thumbnail,
             filename: post.filename,
-        }
+        })
     }
-}
+);
 
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -400,42 +477,33 @@ get! {
 #[derive(Template)]
 #[template(path = "update_bio.html")]
 pub struct UpdateBioPage {
-    name:       String,
-    picture:    Option<String>,
-    badges:     Vec<String>,
-    background: String,
-    bio:        String,
-    offers:     usize,
+    name:   String,
+    bio:    String,
+    stub:   ProfileStub,
+    offers: usize,
 }
 
 get! {
     "/bio",
-    async fn update_bio_page(pool: Extension<PgPool>, user: User) -> UpdateBioPage {
-        let conn = pool.get().expect("Could not connect to db");
-        UpdateBioPage {
-            picture:    user.get_profile_pic(&conn),
-            badges:     user.get_badges(&conn),
-            background: user.get_background_style(&conn),
-            offers:     user.incoming_offers(&conn) as usize,
-            bio:        user.bio,
+    async fn update_bio_page(conn: Extension<PgPool>, user: User) -> Result<UpdateBioPage, ServerError> {
+        Ok(UpdateBioPage {
+            stub:       user.get_profile_stub(&*conn).await?,
+            offers:     user.incoming_offers(&*conn).await? as usize,
             name:       user.name,
-        }
+            bio:        user.bio,
+        })
     }
 }
 
 #[derive(Template)]
 #[template(path = "profile.html")]
 pub struct ProfilePage {
-    id:            i32,
-    name:          String,
-    picture:       Option<String>,
     bio:           String,
     level:         LevelInfo,
     role:          Role,
+    stub:          ProfileStub,
     equipped:      Vec<ItemThumbnail>,
     inventory:     Vec<ItemThumbnail>,
-    badges:        Vec<String>,
-    background:    String,
     is_banned:     bool,
     is_curr_user:  bool,
     ban_timestamp: String,
@@ -467,53 +535,31 @@ get! {
     }
 }
 
-get! {
+get!(
     "/profile/:user_id",
     async fn show_user_profile(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         curr_user: User,
-        Path(user_id): Path<i32>
-    ) -> Result<ProfilePage, NotFound> {
-        use crate::items::drops;
+        Path(user_id): Path<i32>,
+    ) -> Result<ProfilePage, ServerError> {
+        let user = User::fetch_optional(&*conn, user_id)
+            .await?
+            .ok_or(ServerError::NotFound)?;
 
-        let conn = pool.get().expect("Could not connect to db");
-        let user =
-            User::fetch(&conn, user_id).map_err(|_| NotFound::new(curr_user.incoming_offers(&conn)))?;
-
-        let mut is_equipped = HashSet::new();
-
-        let equipped = user
-            .equipped(&conn)
-            .unwrap()
+        let equipped: HashMap<_, _> = user
+            .equipped(&*conn)
+            .await?
             .into_iter()
-            .map(|drop| {
-                // TODO: extract this to function.
-                is_equipped.insert(drop.id);
-                drop.thumbnail(&conn)
-            })
-            .collect::<Vec<_>>();
+            .map(|(item, item_drop)| (item_drop.id, ItemThumbnail::new(&item, &item_drop)))
+            .collect();
 
-        let mut inventory = drops::table
-            .filter(drops::dsl::owner_id.eq(user.id))
-            .filter(drops::dsl::consumed.eq(false))
-            .load::<ItemDrop>(&conn)
-            .ok()
-            .unwrap_or_else(Vec::new)
+        let inventory: Vec<_> = user
+            .inventory(&*conn)
+            .await?
             .into_iter()
-            .filter_map(|drop| {
-                (!is_equipped.contains(&drop.id)).then(|| {
-                    let id = drop.item_id;
-                    (drop, Item::fetch(&conn, id).rarity)
-                })
-            })
-            .collect::<Vec<_>>();
-
-        inventory.sort_by(|a, b| a.1.cmp(&b.1).reverse());
-
-        let inventory = inventory
-            .into_iter()
-            .map(|(drop, _)| drop.thumbnail(&conn))
-            .collect::<Vec<_>>();
+            .filter(|(_, item_drop)| !equipped.contains_key(&item_drop.id))
+            .map(|(item, item_drop)| ItemThumbnail::new(&item, &item_drop))
+            .collect();
 
         let ban_timestamp = user
             .banned_until
@@ -521,18 +567,14 @@ get! {
             .unwrap_or_else(String::new);
 
         Ok(ProfilePage {
-            id: user_id,
             is_banned: user.is_banned(),
             ban_timestamp,
-            picture: user.get_profile_pic(&conn),
-            offers: crate::items::IncomingOffer::count(&conn, &curr_user),
+            offers: user.incoming_offers(&*conn).await?,
+            stub: user.get_profile_stub(&*conn).await?,
             level: user.level_info(),
-            badges: user.get_badges(&conn),
-            background: user.get_background_style(&conn),
-            name: user.name,
             bio: user.bio,
             role: user.role,
-            equipped,
+            equipped: equipped.into_iter().map(|(_, thumb)| thumb).collect(),
             inventory,
             is_curr_user: user.id == curr_user.id,
             notes: user.notes,
@@ -540,7 +582,7 @@ get! {
             viewer_name: curr_user.name,
         })
     }
-}
+);
 
 #[derive(Template)]
 #[template(path = "leaderboard.html")]
@@ -550,41 +592,40 @@ pub struct LeaderboardPage {
 }
 
 struct UserRank {
-    rank:    usize,
-    bio:     String,
-    profile: ProfileStub,
+    rank: usize,
+    bio:  String,
+    stub: ProfileStub,
 }
 
-get! {
+get!(
     "/leaderboard",
     async fn show_leaderboard(
-        pool: Extension<PgPool>,
-        user: User
-    ) -> LeaderboardPage {
-        use crate::users_dsl::*;
+        conn: Extension<PgPool>,
+        user: User,
+    ) -> Result<LeaderboardPage, ServerError> {
+        let conn = &*conn;
+        let user_profiles =
+            sqlx::query_as("SELECT * FROM users ORDER BY experience DESC LIMIT 100")
+                .fetch(conn)
+                .enumerate()
+                .filter_map(|(i, t): (_, Result<User, _>)| future::ready(t.ok().map(|t| (i, t))))
+                .then(|(i, u)| async move {
+                    sqlx::Result::Ok(UserRank {
+                        rank: i + 1,
+                        bio:  u.bio.clone(),
+                        stub: u.get_profile_stub(conn).await?,
+                    })
+                })
+                .filter_map(|t| future::ready(t.ok()))
+                .collect()
+                .await;
 
-        let conn = pool.get().expect("Could not connect to db");
-
-        let user_profiles = users
-            .order(experience.desc())
-            .limit(100)
-            .load::<User>(&conn)
-            .unwrap()
-            .into_iter()
-            .enumerate()
-            .map(|(i, u)| UserRank {
-                rank:    i + 1,
-                bio:     u.bio.clone(),
-                profile: u.profile_stub(&conn),
-            })
-            .collect();
-
-        LeaderboardPage {
+        Ok(LeaderboardPage {
             users:  user_profiles,
-            offers: IncomingOffer::count(&conn, &user),
-        }
+            offers: user.incoming_offers(conn).await?,
+        })
     }
-}
+);
 
 #[derive(Template)]
 #[template(path = "offer.html")]
@@ -596,32 +637,34 @@ pub struct TradeRequestPage {
     offers:             i64,
 }
 
-get! {
+get!(
     "/offer/:receiver_id",
     async fn show_offer(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         sender: User,
-        Path(receiver_id): Path<i32>
-    ) -> TradeRequestPage {
-        let conn = pool.get().expect("Could not connect to db");
-        let receiver = User::fetch(&conn, receiver_id).unwrap();
+        Path(receiver_id): Path<i32>,
+    ) -> Result<TradeRequestPage, ServerError> {
+        let receiver = User::fetch_optional(&*conn, receiver_id)
+            .await?
+            .ok_or(ServerError::NotFound)?;
 
-        TradeRequestPage {
-            sender:             sender.profile_stub(&conn),
-            // Got to put this somewhere, but don't know where
+        Ok(TradeRequestPage {
+            sender:             sender.get_profile_stub(&*conn).await?,
             sender_inventory:   sender
-                .inventory(&conn)
-                .map(|(_, d)| d.thumbnail(&conn))
+                .inventory(&*conn)
+                .await?
+                .map(|(i, d)| ItemThumbnail::new(&i, &d))
                 .collect(),
-            receiver:           receiver.profile_stub(&conn),
+            receiver:           receiver.get_profile_stub(&*conn).await?,
             receiver_inventory: receiver
-                .inventory(&conn)
-                .map(|(_, d)| d.thumbnail(&conn))
+                .inventory(&*conn)
+                .await?
+                .map(|(i, d)| ItemThumbnail::new(&i, &d))
                 .collect(),
-            offers:             IncomingOffer::count(&conn, &sender),
-        }
+            offers:             sender.incoming_offers(&*conn).await?,
+        })
     }
-}
+);
 
 #[derive(Template)]
 #[template(path = "offers.html")]
@@ -632,23 +675,21 @@ pub struct TradeRequestsPage {
     offers:          i64,
 }
 
-get! {
+get!(
     "/offers/",
     async fn show_offers(
-        pool: Extension<PgPool>,
-        user: User
-    ) -> TradeRequestsPage {
-        let conn = pool.get().expect("Could not connect to db");
-        let mut user_cache = UserCache::new(&conn);
-        // TODO: filter out trade requests that are no longer valid.
-        let incoming_offers: Vec<_> = IncomingOffer::retrieve(&conn, &mut user_cache, &user);
-        let outgoing_offers: Vec<_> = OutgoingOffer::retrieve(&conn, &mut user_cache, &user);
+        conn: Extension<PgPool>,
+        user: User,
+    ) -> Result<TradeRequestsPage, ServerError> {
+        let user_cache = UserCache::new(&*conn);
+        let incoming_offers = IncomingOffer::retrieve(&*conn, &user_cache, &user).await;
+        let outgoing_offers = OutgoingOffer::retrieve(&*conn, &user_cache, &user).await;
 
-        TradeRequestsPage {
-            user: user.profile_stub(&conn),
-            offers: incoming_offers.len() as i64,
+        Ok(TradeRequestsPage {
+            user: user.get_profile_stub(&*conn).await?,
+            offers: user.incoming_offers(&*conn).await?,
             incoming_offers,
             outgoing_offers,
-        }
+        })
     }
-}
+);

@@ -60,7 +60,7 @@
       $("form").ajaxForm({
           type: 'post',
           success: function(response, _, _, _) {
-              if (response.Err !== undefined) {
+              if (response.error !== undefined) {
                   $('#error').show();
                   $('#error').html('Failed to equip this item');
               } else {

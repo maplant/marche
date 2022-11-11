@@ -7,11 +7,8 @@ use axum::{
     routing::{get, get_service},
     Router,
 };
-use diesel::{
-    r2d2::{ConnectionManager, Pool},
-    PgConnection,
-};
-use marche_server::Endpoint;
+use marche_server::{pages::ServerError, Endpoint};
+use sqlx::postgres::PgPoolOptions;
 use tower_cookies::CookieManagerLayer;
 use tower_http::{services::ServeDir, trace::TraceLayer};
 
@@ -31,11 +28,13 @@ async fn main() {
         return;
     };
 
-    let manager = ConnectionManager::<PgConnection>::new(db_url);
-    let pool = Pool::builder()
-        .max_size(5)
-        .build(manager)
+    let pool = PgPoolOptions::new()
+        .max_connections(5)
+        .connect(&db_url)
+        .await
         .expect("Failed to create database pool");
+
+    sqlx::migrate!().run(&pool).await.expect("Migration failed");
 
     let mut app = Router::new();
 
@@ -49,7 +48,10 @@ async fn main() {
     );
 
     let app = app
-        .route("/:catch/*catch", get(marche_server::NotFound::show))
+        .route(
+            "/:catch/*catch",
+            get(|| async move { ServerError::NotFound }),
+        )
         .nest(
             "/static",
             get_service(ServeDir::new("static")).handle_error(|error: std::io::Error| async move {

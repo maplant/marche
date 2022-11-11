@@ -4,42 +4,22 @@ use std::collections::{HashMap, HashSet};
 use axum::{
     body::Bytes,
     extract::{Extension, Form, Path, Query},
-    Json,
 };
 use chrono::{prelude::*, NaiveDateTime};
-use derive_more::From;
-use diesel::prelude::*;
-use lazy_static::lazy_static;
+use futures::stream::StreamExt;
 use marche_proc_macros::json_result;
-use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
+use sqlx::{FromRow, PgExecutor, PgPool};
+use thiserror::Error;
 
 use crate::{
-    items::{Item, ItemDrop, ItemType},
+    items::ItemDrop,
     post,
-    users::{Role, User, UserCache},
-    File, MultipartForm, MultipartFormError, PgPool,
+    users::{Role, User},
+    File, MultipartForm, MultipartFormError,
 };
 
-table! {
-    threads(id) {
-        id -> Integer,
-        last_post -> Integer,
-        title -> Text,
-        tags -> Array<Integer>,
-        num_replies -> Integer,
-        pinned -> Bool,
-        locked -> Bool,
-        hidden -> Bool,
-    }
-}
-
-use diesel::sql_types::{BigInt, Text};
-
-sql_function!(fn nextval(x: Text) -> BigInt);
-sql_function!(fn pg_get_serial_sequence(table: Text, column: Text) -> Text);
-
-#[derive(Queryable, Debug, Serialize)]
+#[derive(FromRow, Default, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
     pub id:          i32,
@@ -59,39 +39,41 @@ pub struct Thread {
     pub hidden:      bool,
 }
 
-#[derive(Insertable)]
-#[table_name = "threads"]
-pub struct NewThread<'t> {
-    id:          i32,
-    title:       &'t str,
-    tags:        Vec<i32>,
-    last_post:   i32,
-    num_replies: i32,
-    pinned:      bool,
-    locked:      bool,
-}
-
-#[derive(Serialize)]
-pub enum FetchThreadError {
-    NoSuchThread,
-}
-
 impl Thread {
-    pub fn fetch(conn: &PgConnection, thread_id: i32) -> Result<Self, FetchThreadError> {
-        use self::threads::dsl::*;
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM threads WHERE id = $1")
+            .bind(id)
+            .fetch_one(conn)
+            .await
+    }
 
-        threads
-            .filter(id.eq(thread_id))
-            .first::<Self>(conn)
-            .map_err(|_| FetchThreadError::NoSuchThread)
+    pub async fn fetch_optional(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM threads WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
     }
 }
 
-post! {
+#[derive(Error, Serialize, Debug)]
+pub enum DeleteThreadError {
+    #[error("You are not privileged enough")]
+    Unprivileged,
+    #[error("No such thread exists")]
+    NoSuchThread,
+    #[error("Internal database error {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+}
+
+post!(
     "/delete_thread/:dead_thread_id",
     #[json_result]
     pub async fn delete_thread(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(dead_thread_id): Path<i32>,
     ) -> Json<Result<(), DeleteThreadError>> {
@@ -99,29 +81,25 @@ post! {
             return Err(DeleteThreadError::Unprivileged);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
         // Fetch the thread title for logging purposes
-        let thread_title = Thread::fetch(&conn, dead_thread_id)
-            .map_err(|_| DeleteThreadError::NoSuchThread)?
+        let thread_title = Thread::fetch_optional(&*conn, dead_thread_id)
+            .await?
+            .ok_or(DeleteThreadError::NoSuchThread)?
             .title;
 
-        let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
-            // Delete the thread:
-            {
-                use self::threads::dsl::*;
-                diesel::delete(threads.filter(id.eq(dead_thread_id))).execute(&conn)?;
-            }
-            // Delete any reply on the thread:
-            {
-                use self::replies::dsl::*;
-                diesel::delete(replies.filter(thread_id.eq(dead_thread_id)))
-                    .execute(&conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?;
-            }
+        let mut transaction = conn.begin().await?;
 
-            Ok(())
-        });
+        // Delete the thread:
+        sqlx::query("DELETE FROM threads WHERE id = $1")
+            .bind(dead_thread_id)
+            .execute(&mut transaction)
+            .await?;
+
+        // Delete all replies to the thread:
+        sqlx::query("DELETE FROM replies WHERE thread_id = $1")
+            .bind(dead_thread_id)
+            .execute(&mut transaction)
+            .await?;
 
         tracing::info!(
             "User `{}` has deleted thread {dead_thread_id} titled: `{thread_title}`",
@@ -130,7 +108,7 @@ post! {
 
         Ok(())
     }
-}
+);
 
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
@@ -139,14 +117,24 @@ pub struct ThreadForm {
     body:  String,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum SubmitThreadError {
+    #[error("title or body is empty")]
     TitleOrBodyIsEmpty,
+    #[error("there is a tag that exceeds the maximum length ({MAX_TAG_LEN} characters")]
     TagTooLong,
+    #[error("there are too many tags (maximum {MAX_NUM_TAGS} allowed)")]
     TooManyTags,
-    UploadImageError(UploadImageError),
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-    MultipartFormError(MultipartFormError),
+    #[error("error uploading image {0}")]
+    UploadImageError(#[from] UploadImageError),
+    #[error("internal db error {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+    #[error("multipart form error {0}")]
+    MultipartFormError(#[from] MultipartFormError),
 }
 
 pub const MAX_TAG_LEN: usize = 16;
@@ -156,7 +144,7 @@ post! {
     "/thread",
     #[json_result]
     async fn new_thread(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
     ) -> Json<Result<Thread, SubmitThreadError>> {
@@ -171,12 +159,6 @@ post! {
 
         let post_date = Utc::now().naive_utc();
         let (image, thumbnail, filename) = upload_image(file).await?;
-
-        // Parse the body as markdown
-        // This is pretty terrible. We really
-        let html_output = markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
-
-        let conn = pool.get().expect("Could not connect to db");
 
         let mut tags = Vec::new();
         for tag in parse_tag_list(&thread.tags) {
@@ -194,55 +176,63 @@ post! {
             return Err(SubmitThreadError::TooManyTags);
         }
 
-        // I suppose this could be done in a transaction to make more safe.
-        // Honestly I don't really like this fetch_and_inc interface, I think
-        // it could be done better.
+        let mut transaction = conn.begin().await?;
+
         let mut tag_ids = Vec::new();
         for tag in tags.into_iter() {
-            tag_ids.push(
-                Tag::fetch_from_str_and_inc(&conn, tag)?.id()
-            );
+            if let Some(tag) = Tag::fetch_from_str_and_inc(&mut *transaction, tag).await? {
+                tag_ids.push(tag.id());
+            }
         }
 
-        conn.transaction(|| -> Result<Thread, diesel::result::Error> {
-            use diesel::result::Error::RollbackTransaction;
 
-            let next_thread = diesel::select(nextval(pg_get_serial_sequence("threads", "id")))
-                .first::<i64>(&conn)
-                .map_err(|_| RollbackTransaction)? as i32;
+        let thread: Thread = sqlx::query_as(
+            r#"
+                 INSERT INTO threads
+                     (title, tags, last_post, num_replies, pinned, locked, hidden)
+                 VALUES
+                     ($1, $2, 0, 0, FALSE, FALSE, FALSE)
+                 RETURNING *
+            "#,
+        )
+        .bind(title)
+        .bind(tag_ids)
+        .fetch_one(&mut *transaction)
+        .await?;
 
-            let next_thread = next_thread as i32;
+        let item_drop = ItemDrop::drop(&mut transaction, &user)
+            .await?
+            .map(ItemDrop::to_id);
 
-            let first_post: Reply = diesel::insert_into(replies::table)
-                .values(&NewReply {
-                    author_id: user.id,
-                    thread_id: next_thread,
-                    post_date,
-                    body: &body,
-                    body_html: &html_output,
-                    reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-                    reactions: Vec::new(),
-                    image,
-                    thumbnail,
-                    filename,
-                })
-                .get_result(&conn)
-                .map_err(|_| RollbackTransaction)?;
+        let reply: Reply = sqlx::query_as(
+            r#"
+                 INSERT INTO replies
+                     (author_id, thread_id, post_date, body, reward, image, thumbnail, filename, reactions)
+                 VALUES
+                     ($1, $2, $3, $4, $5, $6, $7, $8, '{}')
+                 RETURNING *
+            "#
+        )
+        .bind(user.id)
+        .bind(thread.id)
+        .bind(post_date)
+        .bind(body)
+        .bind(item_drop)
+        .bind(image)
+        .bind(thumbnail)
+        .bind(filename)
+        .fetch_one(&mut *transaction)
+        .await?;
 
-            diesel::insert_into(threads::table)
-                .values(&NewThread {
-                    id: next_thread,
-                    last_post: first_post.id,
-                    title: &title,
-                    tags: tag_ids,
-                    num_replies: 0,
-                    pinned: false,
-                    locked: false,
-                })
-                .get_result(&conn)
-                .map_err(|_| RollbackTransaction)
-        })
-        .map_err(SubmitThreadError::InternalDbError)
+        let thread = sqlx::query_as("UPDATE threads SET last_post = $1 WHERE id = $2 RETURNING *")
+            .bind(reply.id)
+            .bind(thread.id)
+            .fetch_one(&mut *transaction)
+            .await?;
+
+        transaction.commit().await?;
+
+        Ok(thread)
     }
 }
 
@@ -253,88 +243,75 @@ struct UpdateThread {
     hidden: Option<bool>,
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 enum UpdateThreadError {
+    #[error("You are not privileged enough")]
     Unprivileged,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-post! {
+post!(
     "/thread/:thread_id",
     #[json_result]
     async fn update_thread_flags(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(thread_id): Path<i32>,
         Query(UpdateThread {
-            locked: set_locked,
-            pinned: set_pinned,
-            hidden: set_hidden,
-        }): Query<UpdateThread>
+            locked,
+            pinned,
+            hidden,
+        }): Query<UpdateThread>,
     ) -> Json<Result<(), UpdateThreadError>> {
-        use self::threads::dsl::*;
-
         if user.role < Role::Moderator {
             return Err(UpdateThreadError::Unprivileged);
         }
 
-        if set_locked.is_none() && set_pinned.is_none() && set_hidden.is_none() {
+        if locked.is_none() && pinned.is_none() && hidden.is_none() {
             return Ok(());
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
         // TODO: Come up with some pattern to chain these
 
-        if let Some(set_locked) = set_locked {
-            diesel::update(threads.find(thread_id))
-                .set(locked.eq(set_locked))
-                .get_result::<Thread>(&conn)?;
-         }
-
-        if let Some(set_pinned) = set_pinned {
-            diesel::update(threads.find(thread_id))
-                .set(pinned.eq(set_pinned))
-                .get_result::<Thread>(&conn)?;
+        if let Some(locked) = locked {
+            sqlx::query("UPDATE threads SET locked = $1 WHERE id = $2")
+                .bind(locked)
+                .bind(thread_id)
+                .execute(&*conn)
+                .await?;
         }
 
-        if let Some(set_hidden) = set_hidden {
-            diesel::update(threads.find(thread_id))
-                .set(hidden.eq(set_hidden))
-                .get_result::<Thread>(&conn)?;
+        if let Some(pinned) = pinned {
+            sqlx::query("UPDATE threads SET pinned = $1 WHERE id = $2")
+                .bind(pinned)
+                .bind(thread_id)
+                .execute(&*conn)
+                .await?;
+        }
+
+        if let Some(hidden) = hidden {
+            sqlx::query("UPDATE threads SET hidden = $1 WHERE id = $2")
+                .bind(hidden)
+                .bind(thread_id)
+                .execute(&*conn)
+                .await?;
         }
 
         Ok(())
     }
-}
+);
 
-#[derive(Serialize, From)]
-pub enum DeleteThreadError {
-    Unprivileged,
-    NoSuchThread,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-}
-
-table! {
-    tags(id) {
-        id -> Integer,
-        name -> Text,
-        num_tagged -> Integer,
-    }
-}
-
-#[derive(Debug, Queryable, Serialize, Clone)]
+#[derive(Debug, FromRow, Serialize, Clone)]
 pub struct Tag {
     pub id:         i32,
     pub name:       String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
-}
-
-#[derive(Insertable)]
-#[table_name = "tags"]
-pub struct NewTag<'n> {
-    name: &'n str,
 }
 
 impl Tag {
@@ -343,30 +320,30 @@ impl Tag {
     }
 
     /// Returns the most popular tags.
-    pub fn popular(conn: &PgConnection) -> Vec<Self> {
-        use self::tags::dsl::*;
-
-        tags.order(num_tagged.desc())
-            .limit(10)
-            .load::<Self>(conn)
-            .unwrap_or_default()
+    pub async fn popular(conn: &PgPool) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM tags ORDER BY num_tagged DESC LIMIT 10")
+            .fetch_all(conn)
+            .await
     }
 
-    pub fn fetch_from_id(conn: &PgConnection, tag_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::tags::dsl::*;
-
-        tags.find(tag_id).first::<Self>(conn)
+    pub async fn fetch_from_id(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM tags WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
     }
 
-    pub fn fetch_from_str(conn: &PgConnection, tag: &str) -> Result<Self, diesel::result::Error> {
-        use self::tags::dsl::*;
+    pub async fn fetch_from_str(conn: &PgPool, tag: &str) -> Result<Option<Self>, sqlx::Error> {
+        let tag_name = clean_tag_name(tag);
 
-        if tag.trim().is_empty() {
-            return Err(diesel::result::Error::NotFound);
+        if tag_name.is_empty() {
+            return Ok(None);
         }
 
-        tags.filter(name.eq(clean_tag_name(tag)))
-            .first::<Self>(conn)
+        sqlx::query_as("SELECT * FROM tags WHERE name = $1")
+            .bind(tag_name)
+            .fetch_optional(conn)
+            .await
     }
 
     /// Fetches a tag, creating it if it doesn't already exist. num_tagged is
@@ -375,24 +352,27 @@ impl Tag {
     /// It's kind of a weird interface, I'm open to suggestions.
     ///
     /// Assumes that str is not empty.
-    pub fn fetch_from_str_and_inc(
-        conn: &PgConnection,
+    pub async fn fetch_from_str_and_inc(
+        conn: impl PgExecutor<'_>,
         tag: &str,
-    ) -> Result<Self, diesel::result::Error> {
-        use self::tags::dsl::*;
+    ) -> Result<Option<Self>, sqlx::Error> {
+        let tag_name = clean_tag_name(tag);
 
-        if tag.trim().is_empty() {
-            return Err(diesel::result::Error::NotFound);
+        if tag_name.is_empty() {
+            return Ok(None);
         }
 
-        diesel::insert_into(tags)
-            .values(&NewTag {
-                name: &clean_tag_name(tag),
-            })
-            .on_conflict(name)
-            .do_update()
-            .set(num_tagged.eq(num_tagged + 1))
-            .get_result(conn)
+        sqlx::query_as(
+            r#"
+                INSERT INTO tags (name)
+                VALUES ($1)
+                ON CONFLICT (name) DO UPDATE SET num_tagged = tags.num_tagged + 1
+                RETURNING *
+            "#,
+        )
+        .bind(tag_name)
+        .fetch_optional(conn)
+        .await
     }
 }
 
@@ -411,25 +391,24 @@ pub struct Tags {
 }
 
 impl Tags {
-    pub fn fetch_from_str(conn: &PgConnection, path: &str) -> Self {
+    pub async fn fetch_from_str(conn: &PgPool, path: &str) -> Self {
         let mut seen = HashSet::new();
-        let tags = path
-            .split("/")
-            .filter_map(|s| {
-                Tag::fetch_from_str(&conn, s)
-                    .map(|t| seen.insert(t.id).then(|| t))
-                    .ok()
-                    .flatten()
-            })
-            .collect::<Vec<_>>();
+        let tags = futures::stream::iter(path.split("/"))
+            .filter_map(move |s| async move { Tag::fetch_from_str(conn, s).await.ok().flatten() })
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .filter(move |t| seen.insert(t.id))
+            .collect();
         Tags { tags }
     }
 
-    pub fn fetch_from_ids<'a>(conn: &PgConnection, ids: impl Iterator<Item = &'a i32>) -> Self {
+    pub async fn fetch_from_ids<'a>(conn: &PgPool, ids: impl Iterator<Item = &'a i32>) -> Self {
         Self {
-            tags: ids
-                .filter_map(|id| Tag::fetch_from_id(conn, *id).ok())
-                .collect(),
+            tags: futures::stream::iter(ids)
+                .filter_map(|id| async move { Tag::fetch_from_id(conn, *id).await.ok().flatten() })
+                .collect()
+                .await,
         }
     }
 
@@ -448,24 +427,7 @@ impl Tags {
     }
 }
 
-table! {
-    replies(id) {
-        id -> Integer,
-        author_id -> Integer,
-        thread_id -> Integer,
-        post_date -> Timestamp,
-        body -> Text,
-        body_html -> Text,
-        reward -> Nullable<Integer>,
-        reactions -> Array<Integer>,
-        image -> Nullable<Text>,
-        thumbnail -> Nullable<Text>,
-        filename -> Text,
-        hidden -> Bool,
-    }
-}
-
-#[derive(Queryable, Debug, Serialize)]
+#[derive(FromRow, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
     pub id:        i32,
@@ -478,8 +440,6 @@ pub struct Reply {
     pub post_date: NaiveDateTime,
     /// Body of the reply
     pub body:      String,
-    /// Body of the reply parsed to html (what the user typically sees)
-    pub body_html: String,
     /// Any item that was rewarded for this post
     pub reward:    Option<i32>,
     /// Reactions attached to this post
@@ -495,63 +455,81 @@ pub struct Reply {
 }
 
 impl Reply {
-    pub fn fetch(conn: &PgConnection, reply_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::replies::dsl::*;
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM replies WHERE id = $1")
+            .bind(id)
+            .fetch_one(conn)
+            .await
+    }
 
-        replies.find(reply_id).first::<Reply>(conn)
+    pub async fn fetch_optional(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM replies WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
     }
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 pub enum DeleteReplyError {
+    #[error("You are not privileged enough")]
     Unprivileged,
+    #[error("No such reply exists")]
     NoSuchReply,
+    #[error("You cannot delete the first reply in a thread")]
     CannotDeleteFirstReply,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-post! {
+post!(
     "/delete_reply/:dead_reply_id",
     #[json_result]
     async fn delete_reply(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(dead_reply_id): Path<i32>,
     ) -> Json<Result<(), DeleteReplyError>> {
-        use self::replies::dsl::*;
-
         if user.role < Role::Moderator {
             return Err(DeleteReplyError::Unprivileged);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-        let dead_reply =
-            Reply::fetch(&conn, dead_reply_id).map_err(|_| DeleteReplyError::NoSuchReply)?;
+        let dead_reply = Reply::fetch_optional(&*conn, dead_reply_id)
+            .await?
+            .ok_or(DeleteReplyError::NoSuchReply)?;
 
         // Get the post before this one in case last_post is the dead reply
-        let prev_reply = replies
-            .filter(thread_id.eq(dead_reply.thread_id))
-            .filter(id.lt(dead_reply_id))
-            .order(id.desc())
-            .first::<Reply>(&conn)
-            .map_err(|_| DeleteReplyError::CannotDeleteFirstReply)?;
+        let prev_reply: Reply = sqlx::query_as(
+            "SELECT * FROM replies WHERE thread_id = $1 AND id < $2 ORDER BY id DESC",
+        )
+        .bind(dead_reply.thread_id)
+        .bind(dead_reply_id)
+        .fetch_optional(&*conn)
+        .await?
+        .ok_or(DeleteReplyError::CannotDeleteFirstReply)?;
 
-        {
-            use self::threads::dsl::*;
+        sqlx::query("UPDATE threads SET last_post = $1 WHERE id = $2 AND last_post = $3")
+            .bind(prev_reply.id)
+            .bind(dead_reply.thread_id)
+            .bind(dead_reply_id)
+            .execute(&*conn)
+            .await?;
 
-            // Discard any error:
-            let _ = diesel::update(threads.find(dead_reply.thread_id))
-                .filter(last_post.eq(dead_reply_id))
-                .set(last_post.eq(prev_reply.id))
-                .get_result::<Thread>(&conn);
+        // Reduce the number of replies by one:
+        sqlx::query("UPDATE threads SET num_replies = num_replies - 1 WHERE id = $1")
+            .bind(dead_reply.thread_id)
+            .execute(&*conn)
+            .await?;
 
-            // Reduce the number of replies by one:
-            diesel::update(threads.find(dead_reply.thread_id))
-                .set(num_replies.eq(num_replies - 1))
-                .get_result::<Thread>(&conn)?;
-        }
-
-        diesel::delete(replies.find(dead_reply_id)).execute(&conn)?;
+        // Delete the reply:
+        sqlx::query("DELETE FROM replies WHERE id = $1")
+            .bind(dead_reply_id)
+            .execute(&*conn)
+            .await?;
 
         tracing::info!(
             "User `{}` has deleted reply {dead_reply_id} in thread {}",
@@ -561,92 +539,105 @@ post! {
 
         Ok(())
     }
-}
-
-#[derive(Insertable, Debug)]
-#[table_name = "replies"]
-pub struct NewReply<'b> {
-    author_id: i32,
-    thread_id: i32,
-    post_date: NaiveDateTime,
-    body:      &'b str,
-    body_html: &'b str,
-    reward:    Option<i32>,
-    reactions: Vec<i32>,
-    image:     Option<String>,
-    thumbnail: Option<String>,
-    filename:  String,
-}
+);
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
-    // TODO: Rename to body
-    reply:     String,
+    body:      String,
     thread_id: String,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum ReplyError {
+    #[error("no such thread")]
+    NoSuchThread,
+    #[error("reply cannot be empty")]
     ReplyIsEmpty,
+    #[error("thread is locked")]
     ThreadIsLocked,
-    UploadImageError(#[serde(skip)] UploadImageError),
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-    FetchThreadError(#[serde(skip)] FetchThreadError),
+    #[error("error uploading image: {0}")]
+    UploadImageError(
+        #[from]
+        #[serde(skip)]
+        UploadImageError,
+    ),
+    #[error("internal db error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
     "/reply",
     #[json_result]
     pub async fn new_reply(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         MultipartForm {
             file,
-            form: ReplyForm { thread_id, reply },
+            form: ReplyForm { thread_id, body },
         }: MultipartForm<ReplyForm, MAXIMUM_FILE_SIZE>,
     ) -> Json<Result<Reply, ReplyError>> {
-        let reply = reply.trim();
-        if reply.is_empty() && file.is_none() {
+        let body = body.trim();
+
+        if body.is_empty() && file.is_none() {
             return Err(ReplyError::ReplyIsEmpty);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
-        let thread_id: i32 = thread_id.parse().unwrap();
-        if Thread::fetch(&conn, thread_id)?.locked {
+        let thread_id: i32 = thread_id.parse().map_err(|_| ReplyError::NoSuchThread)?;
+        if Thread::fetch_optional(&conn, thread_id)
+            .await?
+            .ok_or(ReplyError::NoSuchThread)?
+            .locked
+        {
             return Err(ReplyError::ThreadIsLocked);
         }
 
         let post_date = Utc::now().naive_utc();
         let (image, thumbnail, filename) = upload_image(file).await?;
 
-        let html_output = parse_post(&conn, reply, thread_id);
+        let mut transaction = conn.begin().await?;
 
-        {
-            use self::threads::dsl::*;
-            diesel::update(threads.find(thread_id))
-                .set(num_replies.eq(num_replies + 1))
-                .get_result::<Thread>(&conn)?;
-        }
+        let reply: Reply = sqlx::query_as(
+            r#"
+                INSERT INTO replies
+                    (author_id, thread_id, post_date, body, reward, image, thumbnail, filename, reactions)
+                VALUES
+                    ($1, $2, $3, $4, $5, $6, $7, $8, '{}')
+                RETURNING *
+            "#
+        )
+        .bind(user.id)
+        .bind(thread_id)
+        .bind(post_date)
+        .bind(body)
+        .bind(
+            ItemDrop::drop(&mut transaction, &user)
+                .await?
+                .map(ItemDrop::to_id)
+        )
+        .bind(image)
+        .bind(thumbnail)
+        .bind(filename)
+        .fetch_one(&mut *transaction)
+        .await?;
 
-        let reply: Reply = diesel::insert_into(replies::table)
-            .values(&NewReply {
-                author_id: user.id,
-                thread_id,
-                post_date,
-                body: &reply,
-                body_html: &html_output,
-                reward: ItemDrop::drop(&conn, &user).map(|d| d.id),
-                reactions: Vec::new(),
-                image,
-                thumbnail,
-                filename,
-            })
-            .get_result(&conn)?;
+        let thread: Thread = sqlx::query_as(
+            r#"
+            UPDATE threads SET
+                last_post = $1,
+                num_replies = num_replies + 1
+            RETURNING *
+            "#)
+            .bind(reply.id)
+            .fetch_one(&mut *transaction)
+            .await?;
 
-        diesel::update(threads::table.find(thread_id))
-            .set(threads::dsl::last_post.eq(reply.id))
-            .get_result::<Thread>(&conn)?;
+        transaction.commit().await?;
+
+        user.read_thread(&*conn, &thread).await?;
 
         Ok(reply)
     }
@@ -662,49 +653,57 @@ pub struct UpdateReplyForm {
     body: Option<String>,
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 pub enum UpdateReplyError {
+    #[error("You are not privileged enough")]
     Unprivileged,
-    NotYourPost,
+    #[error("Post does not exist")]
+    NoSuchReply,
+    #[error("This is not your post")]
+    NotYourReply,
+    #[error("You cannot make a post empty")]
     CannotMakeEmpty,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
     "/reply/:post_id",
     #[json_result]
     pub async fn update_reply(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(post_id): Path<i32>,
         Query(UpdateReplyParams {
             hidden,
         }): Query<UpdateReplyParams>,
         Form(UpdateReplyForm { body }): Form<UpdateReplyForm>,
-    ) -> Json<Result<Reply, UpdateReplyError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let post = Reply::fetch(&conn, post_id)?;
+    ) -> Json<Result<(), UpdateReplyError>> {
+        let post = Reply::fetch_optional(&*conn, post_id)
+            .await?
+            .ok_or(UpdateReplyError::NoSuchReply)?;
 
-        let reply = if let Some(hidden) = hidden {
+        if let Some(hidden) = hidden {
             if user.role < Role::Moderator {
                 return Err(UpdateReplyError::Unprivileged);
             }
+            sqlx::query("UPDATE replies SET hidden = $1 WHERE id = $2")
+                .bind(hidden)
+                .bind(post_id)
+                .execute(&*conn)
+                .await?;
+        }
 
-            Some(diesel::update(replies::table.find(post_id))
-                .set(replies::hidden.eq(hidden))
-                .get_result::<Reply>(&conn)?)
-        } else {
-            None
-        };
-
-        let body = if let Some(body) = body {
-            body
-        } else {
-            return Ok(reply.unwrap_or(post));
+        let Some(body) = body else {
+            return Ok(());
         };
 
         if post.author_id != user.id && user.role < Role::Moderator {
-            return Err(UpdateReplyError::NotYourPost);
+            return Err(UpdateReplyError::NotYourReply);
         }
 
         let body = body.trim();
@@ -713,174 +712,91 @@ post! {
             return Err(UpdateReplyError::CannotMakeEmpty);
         }
 
-        // TODO: check if time period to edit has expired.
-        let html_output = parse_post(&conn, body, post.thread_id)
-            + &format!(
-                r#" <span style="font-size: 80%; color: grey">Edited on {}</span>"#,
-                Utc::now().naive_utc().format(crate::DATE_FMT)
-            );
-
-        let reply = diesel::update(replies::table.find(post_id))
-            .set((
-                replies::dsl::body.eq(body),
-                replies::dsl::body_html.eq(html_output),
-            ))
-            .get_result::<Reply>(&conn)?;
-
-        Ok(reply)
-    }
-}
-
-#[derive(Serialize, From)]
-pub enum ReactError {
-    NoSuchReply,
-    ThisIsYourPost,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-}
-
-post! {
-    "/react/:post_id",
-    #[json_result]
-    pub async fn react(
-        pool: Extension<PgPool>,
-        user: User,
-        Path(post_id): Path<i32>,
-        Form(used_reactions): Form<HashMap<i32, String>>,
-    ) -> Json<Result<(), ReactError>> {
-        use diesel::result::Error;
-        use crate::threads::replies::dsl::*;
-
-        let conn = pool.get().expect("Could not connect to db");
-        let reply = Reply::fetch(&conn, post_id).map_err(|_| ReactError::NoSuchReply)?;
-
-        if reply.author_id == user.id {
-            return Err(ReactError::ThisIsYourPost);
-        }
-
-        conn.transaction(|| -> Result<i32, diesel::result::Error> {
-            let mut new_reactions = reply.reactions;
-
-            let author =
-                User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
-
-            // Verify that all of the reactions are owned by the user:
-            for (reaction, selected) in used_reactions.into_iter() {
-                let drop = ItemDrop::fetch(&conn, reaction)
-                    .map_err(|_| Error::RollbackTransaction)?;
-                let item = Item::fetch(&conn, drop.item_id);
-                if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
-                    return Err(Error::RollbackTransaction);
-                }
-
-                // Set the drops to consumed.
-                use crate::drops_dsl::*;
-
-                diesel::update(drops.find(reaction))
-                    .filter(consumed.eq(false))
-                    .set(consumed.eq(true))
-                    .get_result::<ItemDrop>(&conn)
-                    .map_err(|_| Error::RollbackTransaction)?;
-
-                new_reactions.push(reaction);
-                match item.item_type {
-                    ItemType::Reaction { xp_value, .. } => {
-                        author.add_experience(&conn, xp_value as i64)
-                    }
-                    _ => unreachable!(),
-                }
-            }
-
-            // Update the post with the new reactions:
-            // TODO: Move into Reply struct
-            diesel::update(replies.find(post_id))
-                .set(reactions.eq(new_reactions))
-                .get_result::<Reply>(&conn)
-                .map_err(|_| Error::RollbackTransaction)?;
-
-            Ok(reply.thread_id)
-        })?;
+        sqlx::query("UPDATE replies SET body = $1 WHERE id = $2")
+            .bind(body)
+            .bind(post_id)
+            .execute(&*conn)
+            .await?;
 
         Ok(())
     }
 }
 
-use comrak::{markdown_to_html, ComrakOptions};
-
-lazy_static! {
-    static ref MARKDOWN_OPTIONS: ComrakOptions = {
-        let mut options = ComrakOptions::default();
-        options.extension.strikethrough = true;
-        options.extension.table = true;
-        options.extension.autolink = true;
-        options.extension.tasklist = true;
-        options.render.hardbreaks = true;
-        options.render.escape = true;
-        options.parse.smart = true;
-        options
-    };
+#[derive(Serialize, Error, Debug)]
+pub enum ReactError {
+    #[error("No such reply exists")]
+    NoSuchReply,
+    #[error("You don't own these reactions")]
+    NotYourItems,
+    #[error("You have already consumed one of these reactions")]
+    AlreadyConsumed,
+    #[error("You cannot react to your own post")]
+    ThisIsYourPost,
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-// TODO: This probably needs to be async
-fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
-    lazy_static! {
-        static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
-    }
+post!(
+    "/react/:post_id",
+    #[json_result]
+    pub async fn react(
+        conn: Extension<PgPool>,
+        user: User,
+        Path(post_id): Path<i32>,
+        Form(used_reactions): Form<HashMap<i32, String>>,
+    ) -> Json<Result<(), ReactError>> {
+        let reply = Reply::fetch_optional(&conn, post_id)
+            .await?
+            .ok_or(ReactError::NoSuchReply)?;
 
-    let referenced_reply_ids = REPLY_RE
-        .captures_iter(&body)
-        .map(|captured_group| captured_group["reply_id"].to_string())
-        .collect::<Vec<String>>();
+        if reply.author_id == user.id {
+            return Err(ReactError::ThisIsYourPost);
+        }
 
-    let mut user_cache = UserCache::new(conn);
-    let id_to_author = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
-        .load::<Reply>(conn)
-        .unwrap()
-        .into_iter()
-        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
-        .map(|reply| {
-            (
-                reply.id.to_string(),
-                user_cache.get(reply.author_id).clone().name,
-            )
-        })
-        .collect::<HashMap<String, String>>();
+        let mut transaction = conn.begin().await?;
+        let mut new_reactions = Vec::new();
+        let author = User::fetch(&mut transaction, reply.author_id).await?;
 
-    let response_divs = replies::dsl::replies
-        .filter(replies::dsl::thread_id.eq(thread_id))
-        .order(replies::dsl::post_date.asc())
-        .load::<Reply>(conn)
-        .unwrap()
-        .into_iter()
-        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
-            format!(
-                r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
-                reply_id = reply.id.to_string(),
-                author_name = user_cache.get(reply.author_id).clone().name,
-            )
-        })
-        .collect::<String>();
-
-    // TODO: replace markdown parser with our own
-    // Parse the body as markdown
-    let html_output =
-        response_divs + &markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
-
-    // Swap out "respond" command sequences for @ mentions
-    REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
-            let reply_id = &captured_group["reply_id"];
-            if id_to_author.contains_key(reply_id) {
-                format!(
-                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
-                    reply_id = reply_id,
-                    author_name = id_to_author[reply_id],
-                )
-            } else {
-                captured_group[0].to_string()
+        // Verify that all of the reactions are owned by the user:
+        for (reaction, selected) in used_reactions.into_iter() {
+            let item_drop = ItemDrop::fetch(&mut transaction, reaction).await?;
+            let item = item_drop.fetch_item(&mut transaction).await?;
+            if selected != "on" || item_drop.owner_id != user.id || !item.is_reaction() {
+                return Err(ReactError::NotYourItems);
             }
-        }).to_string()
-}
+
+            // Set the drops to consumed:
+            if sqlx::query("UPDATE drops SET consumed = TRUE WHERE id = $1 AND consumed = FALSE")
+                .bind(reaction)
+                .execute(&mut transaction)
+                .await?
+                .rows_affected()
+                != 1
+            {
+                return Err(ReactError::AlreadyConsumed);
+            }
+
+            new_reactions.push(reaction);
+            author
+                .add_experience(&mut transaction, item.get_experience().unwrap() as i64)
+                .await?;
+        }
+
+        sqlx::query("UPDATE replies SET reactions = reactions || $1 WHERE id = $2")
+            .bind(new_reactions)
+            .bind(post_id)
+            .execute(&mut transaction)
+            .await?;
+
+        transaction.commit().await?;
+
+        Ok(())
+    }
+);
 
 use std::io::Cursor;
 
@@ -943,12 +859,28 @@ pub struct ImageUploadResult {
 }
 */
 
-#[derive(Debug, Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum UploadImageError {
+    #[error("invalid file type")]
     InvalidExtension,
-    ImageError(#[serde(skip)] image::ImageError),
-    InternalServerError(#[serde(skip)] tokio::task::JoinError),
-    InternalBlockStorageError(#[serde(skip)] SdkError<PutObjectError>),
+    #[error("error decoding image: {0}")]
+    ImageError(
+        #[from]
+        #[serde(skip)]
+        image::ImageError,
+    ),
+    #[error("internal server error: {0}")]
+    InternalServerError(
+        #[from]
+        #[serde(skip)]
+        tokio::task::JoinError,
+    ),
+    #[error("internal block storage error: {0}")]
+    InternalBlockStorageError(
+        #[from]
+        #[serde(skip)]
+        SdkError<PutObjectError>,
+    ),
 }
 
 // TODO: move return type to struct

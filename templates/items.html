@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Item manager{% endblock %}
+
+{% block content %}
+<li class="menu-item" style="display: grid; padding: 15px">
+  <form action="/mint" method="post" enctype="multipart/form-data">
+    Mint a new item
+    <div class="table" style="width: 100%">
+      <div class="row">
+        <div class="heavy-cell">
+          Name:
+        </div>
+        <div class="heavy-cell">
+          <input type="text" name="name" id="name" style="width: 100%; box-sizing: border-box; padding: 5px">
+        </div>
+      </div class="row">
+      <div class="row">
+        <div class="heavy-cell" style="vertical-align: top">
+          Description:
+        </div>
+        <div class="heavy-cell">
+            <textarea name="descr" id="descr" rows="5" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea>
+        </div>
+      </div class="row"> 
+      <div class="row">
+        <div class="heavy-cell">
+          Rarity:
+        </div>
+        <div class="heavy-cell">
+          <select name="rarity">
+            <option value="common">Common</option>
+            <option value="uncommon">Uncommon</option>
+            <option value="rare">Rare</option>
+            <option value="ultra_rare">Ultra-rare</option>
+            <option value="legendary">Legendary</option>
+            <option value="unique">Unique</option>
+          </select>
+        </div>
+      </div class="row"> 
+    </div>
+  </form>
+</li>
+{% endblock %}

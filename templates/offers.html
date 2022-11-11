@@ -1,3 +1,4 @@
+{%- import "macros.html" as macros -%}
 {% extends "base.html" %}
 
 {% block title %}Trade Offers{% endblock %}
@@ -25,14 +26,10 @@
       <div class="cell" style="width: 50%">For:</div>
     </div>
     <div class="row">
-      <div class="profile" style="{{offer.sender.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{offer.sender.id}}" style="color: white; text-decoration: none">{{offer.sender.name}}</a></p>
-        {% let picture = offer.sender.picture.as_ref() %}
-        {% include "profile-pic.html" %}
-      </div>
+      {% call macros::profile_stub(offer.sender) %}
       <div class="cell">
         {% for item in offer.sender_items %}
-        {% include "item-thumbnail.html" %}
+        {% call macros::item_thumbnail(item) %}
         {% endfor %}
         {% match offer.note %}
         {% when Some with (note) %}
@@ -45,14 +42,10 @@
         {% when None %}
         {% endmatch %}
       </div>
-      <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{user.id}}" style="color: white; text-decoration: none">{{user.name}}</a></p>
-        {% let picture = user.picture.as_ref() %}
-        {% include "profile-pic.html" %}
-      </div>
-      <div class="cell" >
+      {% call macros::profile_stub(user) %}
+      <div class="cell">
         {% for item in offer.receiver_items %}
-        {% include "item-thumbnail.html" %}
+        {% call macros::item_thumbnail(item) %}
         {% endfor %}
       </div>
     </div>
@@ -97,14 +90,10 @@
       <div class="cell" style="width: 50%">For:</div>
     </div>
     <div class="row">
-      <div class="profile" style="{{user.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{user.id}}" style="color: white; text-decoration: none">{{user.name}}</a></p>
-        {% let picture = user.picture.as_ref() %}
-        {% include "profile-pic.html" %}
-      </div>
+      {% call macros::profile_stub(user) %}
       <div class="cell">
         {% for item in offer.sender_items %}
-        {% include "item-thumbnail.html" %}
+        {% call macros::item_thumbnail(item) %}
         {% endfor %}
         {% match offer.note %}
         {% when Some with (note) %}
@@ -117,14 +106,10 @@
         {% when None %}
         {% endmatch %}
       </div>
-      <div class="profile" style="{{offer.receiver.background}} text-align: center; vertical-align: top; min-width: 180px">
-        <p><a href="/profile/{{offer.receiver.id}}" style="color: white; text-decoration: none">{{offer.receiver.name}}</a></p>
-        {% let picture = offer.receiver.picture.as_ref() %}
-        {% include "profile-pic.html" %}
-      </div>
+      {% call macros::profile_stub(offer.receiver) %}
       <div class="cell">
         {% for item in offer.receiver_items %}
-        {% include "item-thumbnail.html" %}
+        {% call macros::item_thumbnail(item) %}
         {% endfor %}
       </div>
     </div>
@@ -153,8 +138,8 @@
           type: 'post',
           success: function(response, _, _, _) {
               console.log(response);
-              if (response.Err !== undefined) {
-                  $(`#error-${offer_id}`).html(`<div class="error">${response.Err}</div>`);
+              if (response.error !== undefined) {
+                  $(`#error-${offer_id}`).html(`${response.error}`);
                   $(`#accept-${offer_id}`).prop("disabled", false);
                   $(`#decline-${offer_id}`).prop("disabled", false);
               } else {
@@ -163,7 +148,7 @@
               }
           },
           error: function(_, _, _) {
-              $(`#error-${offer_id}`).html(`<div class="error">Unable to decline offer</div>`);
+              $(`#error-${offer_id}`).html("Unable to decline offer");
               $(`#accept-${offer_id}`).prop("disabled", false);
               $(`#decline-${offer_id}`).prop("disabled", false);
           }
@@ -177,8 +162,8 @@
           url: `/decline/${offer_id}`,
           type: 'post',
           success: function(response, _, _, _) {
-              if (response.Err !== undefined) {
-                  $(`#error-${offer_id}`).html(`<div class="error">${response.Err}</div>`);
+              if (response.error !== undefined) {
+                  $(`#error-${offer_id}`).html("${response.error}");
                   $(`#accept-${offer_id}`).prop("disabled", false);
                   $(`#decline-${offer_id}`).prop("disabled", false);
               } else {
@@ -187,7 +172,7 @@
               }
           },
           error: function(_, status, error) {
-              $(`#error-${offer_id}`).html(`<div class="error">Unable to decline offer, status: ${status}, error: ${error}</div>`);
+              $(`#error-${offer_id}`).html("Unable to decline offer, status: ${status}, error: ${error}");
               $(`#accept-${offer_id}`).prop("disabled", false);
               $(`#decline-${offer_id}`).prop("disabled", false);
           }
@@ -200,8 +185,8 @@
           url: `/decline/${offer_id}`,
           type: 'post',
           success: function(response, _, _, _) {
-              if (response.Err !== undefined) {
-                  $(`#error-${offer_id}`).html(`<div class="error">${response.Err}</div>`);
+              if (response.error !== undefined) {
+                  $(`#error-${offer_id}`).html("${response.error}");
                   $(`#rescind-${offer_id}`).prop("disabled", false);
               } else {
                   $(`#rescind-${offer_id}`).html("❌ Rescinded");
@@ -209,7 +194,7 @@
               }
           },
           error: function(_, status, error) {
-              $(`#error-${offer_id}`).html(`<div class="error">Unable to decline offer, status: ${status}, error: ${error}</div>`);
+              $(`#error-${offer_id}`).html("Unable to decline offer, status: ${status}, error: ${error}");
               $(`#rescind-${offer_id}`).prop("disabled", false);
           }
       });

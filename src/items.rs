@@ -1,37 +1,28 @@
-use std::{cmp::PartialEq, collections::HashMap};
+use std::{cmp::PartialEq, collections::HashMap, sync::Arc};
 
-use axum::{
-    extract::{Extension, Form, Path},
-    Json,
-};
+use axum::extract::{Extension, Form, Path};
 use chrono::{Duration, Utc};
-use derive_more::From;
-use diesel::{
-    pg::Pg,
-    prelude::*,
-    serialize::Output,
-    sql_types::Jsonb,
-    types::{FromSql, ToSql},
-};
-use diesel_derive_enum::DbEnum;
+use futures::{future, StreamExt};
 use lazy_static::lazy_static;
 use maplit::hashmap;
 use marche_proc_macros::json_result;
-use rand::{
-    prelude::{thread_rng, IteratorRandom},
-    Rng, SeedableRng,
-};
+use rand::{prelude::*, Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use serde::{Deserialize, Serialize};
+use sqlx::{
+    types::Json as Jsonb, Acquire, FromRow, PgExecutor, PgPool, Postgres, Transaction, Type,
+};
+use thiserror::Error;
 
 use crate::{
     post,
     users::{ProfileStub, User, UserCache},
-    PgPool,
 };
 
 /// Rarity of an item.
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, DbEnum)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Type)]
+#[sqlx(type_name = "rarity")]
+#[sqlx(rename_all = "snake_case")]
 pub enum Rarity {
     /// Corresponds to a ~84% chance of being dropped:
     Common,
@@ -86,8 +77,7 @@ impl Rarity {
 /// The type of an item. Determines if the item has any associated actions or is
 /// purely cosmetic, and further if the item is cosmetic how many can be
 /// equipped
-#[derive(Clone, Debug, Serialize, Deserialize, FromSqlRow, AsExpression)]
-#[sql_type = "Jsonb"]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum ItemType {
     /// An item with no use
     Useless,
@@ -107,23 +97,7 @@ pub enum ItemType {
     Badge { value: String },
 }
 
-impl ToSql<Jsonb, Pg> for ItemType {
-    fn to_sql<W: std::io::Write>(&self, out: &mut Output<'_, W, Pg>) -> diesel::serialize::Result {
-        out.write_all(&[1])?;
-        serde_json::to_writer(out, self)
-            .map(|_| diesel::serialize::IsNull::No)
-            .map_err(Into::into)
-    }
-}
-
-impl FromSql<Jsonb, Pg> for ItemType {
-    fn from_sql(bytes: Option<&[u8]>) -> diesel::deserialize::Result<Self> {
-        serde_json::from_slice(&bytes.unwrap_or(&[])[1..]).map_err(|_| "Invalid Json".into())
-    }
-}
-
-#[derive(Clone, Debug, FromSqlRow, AsExpression)]
-#[sql_type = "Jsonb"]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttributeMap {
     map: HashMap<String, AttrInfo>,
 }
@@ -134,40 +108,8 @@ struct AttrInfo {
     seed:   usize,
 }
 
-impl ToSql<Jsonb, Pg> for AttributeMap {
-    fn to_sql<W: std::io::Write>(&self, out: &mut Output<'_, W, Pg>) -> diesel::serialize::Result {
-        out.write_all(&[1])?;
-        serde_json::to_writer(out, &self.map)
-            .map(|_| diesel::serialize::IsNull::No)
-            .map_err(Into::into)
-    }
-}
-
-impl FromSql<Jsonb, Pg> for AttributeMap {
-    fn from_sql(bytes: Option<&[u8]>) -> diesel::deserialize::Result<Self> {
-        serde_json::from_slice(&bytes.unwrap_or(&[])[1..])
-            .map(|map| Self { map })
-            .map_err(|_| "Invalid Json".into())
-    }
-}
-
-table! {
-    use diesel::sql_types::*;
-    use super::RarityMapping;
-
-    items(id) {
-        id -> Integer,
-        name -> Text,
-        description -> Text,
-        available -> Bool,
-        rarity -> RarityMapping,
-        item_type -> Jsonb,
-        attributes -> Jsonb,
-    }
-}
-
 /// An item that can be dropped
-#[derive(Queryable, Debug)]
+#[derive(FromRow, Debug)]
 pub struct Item {
     /// Id of the available item
     pub id:          i32,
@@ -180,50 +122,129 @@ pub struct Item {
     /// Rarity of the item
     pub rarity:      Rarity,
     /// Type of the item
-    #[diesel(sql_type = "ItemType")]
-    pub item_type:   ItemType,
+    pub item_type:   Jsonb<ItemType>,
     /// Attribute rarity
-    #[diesel(sql_type = "AttributeMap")]
-    pub attributes:  AttributeMap,
+    pub attributes:  Jsonb<AttributeMap>,
 }
 
 impl Item {
-    pub fn fetch(conn: &PgConnection, item_id: i32) -> Self {
-        use self::items::dsl::*;
+    pub async fn fetch(conn: impl PgExecutor<'_>, item_id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM items WHERE id = $1")
+            .bind(item_id)
+            .fetch_one(conn)
+            .await
+    }
 
-        items
-            .filter(id.eq(item_id))
-            .load::<Self>(conn)
-            .unwrap()
-            .into_iter()
-            .next()
-            .unwrap()
+    pub async fn fetch_optional(
+        conn: impl PgExecutor<'_>,
+        item_id: i32,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM items WHERE id = $1")
+            .bind(item_id)
+            .fetch_optional(conn)
+            .await
     }
 
     pub fn is_reaction(&self) -> bool {
-        matches!(self.item_type, ItemType::Reaction { .. })
+        matches!(*self.item_type, ItemType::Reaction { .. })
     }
 
     pub fn is_equipable(&self) -> bool {
         matches!(
-            self.item_type,
+            *self.item_type,
             ItemType::Avatar { .. } | ItemType::ProfileBackground { .. } | ItemType::Badge { .. }
         )
     }
-}
 
-table! {
-    drops(id) {
-        id -> Integer,
-        owner_id -> Integer,
-        item_id -> Integer,
-        pattern -> SmallInt,
-        consumed -> Bool,
+    pub fn as_avatar(&self) -> Option<String> {
+        match self.item_type {
+            Jsonb(ItemType::Avatar { ref filename }) => Some(filename.clone()),
+            _ => None,
+        }
+    }
+
+    pub fn as_profile_background(&self, pattern: i32) -> Option<String> {
+        match self.item_type {
+            Jsonb(ItemType::ProfileBackground { ref colors }) => {
+                let mut style = format!(
+                    r#"background: linear-gradient({}deg"#,
+                    // Convert patten to unsigned integer and then convert to a
+                    // degree value.
+                    (pattern as u32) as f32 / (u16::MAX as f32) * 360.0,
+                );
+                for color in colors {
+                    style += ", ";
+                    style += &color;
+                }
+                style += ");";
+                Some(style)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn as_badge(&self) -> Option<String> {
+        match self.item_type {
+            Jsonb(ItemType::Badge { ref value }) => Some(format!("<div>{value}</div>")),
+            _ => None,
+        }
+    }
+
+    pub fn get_experience(&self) -> Option<i32> {
+        match self.item_type {
+            Jsonb(ItemType::Reaction { xp_value, .. }) => Some(xp_value),
+            _ => None,
+        }
+    }
+
+    pub fn get_thumbnail_html(&self, pattern: i32) -> String {
+        let Attributes {
+            div_animation,
+            transform,
+            filter,
+            animation,
+        } = Attributes::fetch(self, pattern);
+        match self.item_type.0 {
+            ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
+            ItemType::Avatar { ref filename } => format!(
+                r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
+                filename
+            ),
+            ItemType::ProfileBackground { .. } => {
+                format!(
+                    r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
+                    self.as_profile_background(pattern).unwrap()
+                )
+            }
+            ItemType::Reaction { ref filename, .. } => format!(
+                r#"
+                <div style="animation: start, {div_animation};">
+                    <img src="/static/{filename}.png"
+                         style="width: 50px;
+                                height: auto;
+                                transform: {transform};
+                                animation: start, {animation};
+                                 filter: {filter};">
+                </div>
+                "#
+            ),
+            ItemType::Badge { ref value } => format!(
+                r#"
+                <div style="font-size: 200%;
+                            text-shadow: 1px 0 white,
+                                         0 1px white,
+                                         -1px 0 white,
+                                         0 -1px white;">
+                    {value}
+                </div>
+                "#
+            ),
+        }
     }
 }
 
 /// A dropped item associated with a user
-#[derive(Queryable, Debug)]
+#[derive(FromRow, Debug)]
 pub struct ItemDrop {
     /// Id of the dropped item
     pub id:       i32,
@@ -232,7 +253,7 @@ pub struct ItemDrop {
     /// ItemId of the item
     pub item_id:  i32,
     /// Unique pattern Id for the item
-    pub pattern:  i16,
+    pub pattern:  i32,
     /// Indicates if the drop has been consumed
     pub consumed: bool,
 }
@@ -246,277 +267,215 @@ impl PartialEq for ItemDrop {
 lazy_static::lazy_static! {
     /// The minimum amount of time you are aloud to receive a single drop during.
     static ref MIN_DROP_PERIOD: Duration = Duration::minutes(30);
-    /// The maximum amount of time since the last drop until the drop is garanteed.
+    /// The maximum amount of time since the last drop until the drop is guaranteed.
     static ref MAX_DROP_PERIOD: Duration = Duration::hours(23);
 }
 
 /// Chance of drop is equal to 1/DROP_CHANCE
 pub const DROP_CHANCE: u32 = 2;
 
-#[derive(Insertable)]
-#[table_name = "drops"]
-pub struct NewDrop {
-    owner_id: i32,
-    item_id:  i32,
-    pattern:  i16,
-    consumed: bool,
-}
-
 impl ItemDrop {
-    pub fn fetch(conn: &PgConnection, drop_id: i32) -> Result<Self, diesel::result::Error> {
-        use self::drops::dsl::*;
-
-        drops.find(drop_id).first::<Self>(conn)
+    pub async fn fetch_optional(
+        conn: impl PgExecutor<'_>,
+        drop_id: i32,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM drops WHERE id = $1")
+            .bind(drop_id)
+            .fetch_optional(conn)
+            .await
     }
 
-    pub fn fetch_item(&self, conn: &PgConnection) -> Item {
-        Item::fetch(conn, self.item_id)
+    pub async fn fetch(conn: impl PgExecutor<'_>, drop_id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM drops WHERE id = $1")
+            .bind(drop_id)
+            .fetch_one(conn)
+            .await
+    }
+
+    pub async fn fetch_item(&self, conn: impl PgExecutor<'_>) -> Result<Item, sqlx::Error> {
+        Item::fetch(conn, self.item_id).await
+    }
+
+    pub fn to_id(self) -> i32 {
+        self.id
     }
 
     /// Equips an item. Up to the caller to ensure current user owns the item.
-    pub fn equip(&self, conn: &PgConnection) {
-        use crate::users::users::dsl::*;
-
-        let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
-            use diesel::result::Error::RollbackTransaction;
-
-            let user = User::fetch(conn, self.owner_id).map_err(|_| RollbackTransaction)?;
-            let item_desc = Item::fetch(conn, self.item_id);
-            let user = match item_desc.item_type {
-                ItemType::Avatar { .. } => diesel::update(users.find(user.id))
-                    .set(equip_slot_prof_pic.eq(Some(self.id)))
-                    .get_result::<User>(conn)
-                    .map_err(|_| RollbackTransaction)?,
-                ItemType::ProfileBackground { .. } => diesel::update(users.find(user.id))
-                    .set(equip_slot_background.eq(Some(self.id)))
-                    .get_result::<User>(conn)
-                    .map_err(|_| RollbackTransaction)?,
-                ItemType::Badge { .. } => {
-                    let mut badges = user.equip_slot_badges.clone();
-                    if !badges.contains(&self.id) && badges.len() < crate::users::MAX_NUM_BADGES {
-                        badges.push(self.id);
-                    }
-                    diesel::update(users.find(user.id))
-                        .set(equip_slot_badges.eq(badges))
-                        .get_result::<User>(conn)
-                        .map_err(|_| RollbackTransaction)?
-                }
-                _ => return Err(RollbackTransaction),
-            };
-            if user.id == self.owner_id {
-                Ok(())
-            } else {
-                Err(RollbackTransaction)
+    pub async fn equip(&self, conn: &PgPool) -> Result<(), EquipError> {
+        let mut transaction = conn.begin().await?;
+        // TODO: Fix unwraps
+        let user = User::fetch(&mut transaction, self.owner_id).await?;
+        let item = Item::fetch(&mut transaction, self.item_id).await?;
+        let user: User = match *item.item_type {
+            ItemType::Avatar { .. } => {
+                sqlx::query_as("UPDATE users SET equip_slot_prof_pic = $1 WHERE id = $2")
+                    .bind(self.id)
+                    .bind(user.id)
+                    .fetch_one(&mut transaction)
+                    .await?
             }
-        });
+            ItemType::ProfileBackground { .. } => {
+                sqlx::query_as("UPDATE users SET equip_slot_background = $1 WHERE id = $2")
+                    .bind(self.id)
+                    .bind(user.id)
+                    .fetch_one(&mut transaction)
+                    .await?
+            }
+            ItemType::Badge { .. } => {
+                let mut badges = user.equip_slot_badges.clone();
+                if !badges.contains(&self.id) && badges.len() < crate::users::MAX_NUM_BADGES {
+                    badges.push(self.id);
+                }
+                sqlx::query_as("UPDATE users SET equip_slot_badges = $1 WHERE id = $2")
+                    .bind(badges)
+                    .bind(user.id)
+                    .fetch_one(&mut transaction)
+                    .await?
+            }
+            _ => return Err(EquipError::Unequipable),
+        };
+        if user.id == self.owner_id {
+            transaction.commit().await?;
+            Ok(())
+        } else {
+            Err(EquipError::NotYourItem)
+        }
     }
 
     /// Unequips an item. Up to the caller to ensure current user owns the item.
-    pub fn unequip(&self, conn: &PgConnection) {
-        use crate::users::users::dsl::*;
-
-        // No need for a transaction here
-        let user = User::fetch(conn, self.owner_id).unwrap();
-        let item_desc = Item::fetch(conn, self.item_id);
-        match item_desc.item_type {
-            ItemType::Avatar { .. } => {
-                let _ = diesel::update(users.find(user.id))
-                    .filter(equip_slot_prof_pic.eq(Some(self.id)))
-                    .set(equip_slot_prof_pic.eq(Option::<i32>::None))
-                    .get_result::<User>(conn);
-            }
-            ItemType::ProfileBackground { .. } => {
-                let _ = diesel::update(users.find(user.id))
-                    .filter(equip_slot_background.eq(Some(self.id)))
-                    .set(equip_slot_background.eq(Option::<i32>::None))
-                    .get_result::<User>(conn);
-            }
-            ItemType::Badge { .. } => {
-                let badges = user
-                    .equip_slot_badges
-                    .iter()
-                    .cloned()
-                    .filter(|drop_id| *drop_id != self.id)
-                    .collect::<Vec<_>>();
-                let _ = diesel::update(users.find(user.id))
-                    .set(equip_slot_badges.eq(badges))
-                    .get_result::<User>(conn);
-            }
-            _ => (),
-        }
-    }
-
-    pub fn is_equipped(&self, conn: &PgConnection) -> bool {
-        User::fetch(conn, self.owner_id)
-            .unwrap()
-            .equipped(conn)
-            .unwrap()
-            .contains(&self)
-    }
-
-    pub fn thumbnail_html(&self, conn: &PgConnection) -> String {
-        let item = Item::fetch(&conn, self.item_id);
-        let attrs = Attributes::fetch(&item, self);
-        match item.item_type {
-            ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
-            ItemType::Avatar { filename } => format!(
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
-                filename
-            ),
-            ItemType::ProfileBackground { .. } => {
-                // This is kind of redundant (we fetch Item twice), whatever
-                format!(
-                    r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
-                    self.as_background_style(conn)
-                )
-            }
-            ItemType::Reaction { filename, .. } => format!(
-                r#"
-<div style="animation: start, {div_animation};">
-    <img src="/static/{filename}.png" 
-         style="width: 50px; 
-                height: auto; 
-                transform: {transform}; 
-                animation: start, {animation}; 
-                filter: {filter};">
-</div>"#,
-                filename = filename,
-                div_animation = attrs.div_animation,
-                transform = attrs.transform,
-                animation = attrs.animation,
-                filter = attrs.filter,
-            ),
-            ItemType::Badge { value } => format!(
-                r#"<div style="font-size: 200%;
-                               text-shadow: 1px 0 white,
-                                            0 1px white,
-                                           -1px 0 white,
-                                            0 -1px white;
-                              ">{value}</div>"#
-            ),
-        }
-    }
-
-    // TODO: Get rid of this in favor of something better.
-    pub fn thumbnail(&self, conn: &PgConnection) -> ItemThumbnail {
-        let item = Item::fetch(&conn, self.item_id);
-        ItemThumbnail {
-            id:          self.id,
-            name:        item.name.clone(),
-            rarity:      item.rarity.to_string(),
-            thumbnail:   self.thumbnail_html(conn),
-            description: item.description,
-        }
-    }
-
-    pub fn as_profile_pic(&self, conn: &PgConnection) -> String {
-        let item = Item::fetch(&conn, self.item_id);
-        match item.item_type {
-            ItemType::Avatar { filename } => filename,
-            _ => panic!("Item is not a profile picture"),
-        }
-    }
-
-    pub fn as_background_style(&self, conn: &PgConnection) -> String {
-        let item = Item::fetch(&conn, self.item_id);
-        match item.item_type {
-            ItemType::ProfileBackground { colors } => {
-                let mut style = format!(
-                    r#"background: linear-gradient({}deg"#,
-                    // Convert patten to unsigned integer and then convert to a
-                    // degree value.
-                    (self.pattern as u16) as f32 / (u16::MAX as f32) * 360.0,
-                );
-                for color in colors {
-                    style += ", ";
-                    style += &color;
+    pub fn unequip<'a, 'c>(
+        &'a self,
+        conn: impl Acquire<'c, Database = Postgres> + Send + 'a,
+    ) -> impl std::future::Future<Output = Result<(), sqlx::Error>> + Send + 'a {
+        async move {
+            let mut conn = conn.acquire().await?;
+            let user = User::fetch(&mut *conn, self.owner_id).await?;
+            let item = Item::fetch(&mut *conn, self.item_id).await?;
+            match *item.item_type {
+                ItemType::Avatar { .. } => {
+                    sqlx::query("UPDATE users SET equip_slot_prof_pic = $1 WHERE id = $2 AND equip_slot_prof_pic = $3")
+                    .bind(Option::<i32>::None)
+                    .bind(user.id)
+                    .bind(self.id)
+                    .execute(&mut *conn).await?;
                 }
-                style += ");";
-                style
+                ItemType::ProfileBackground { .. } => {
+                    sqlx::query("UPDATE users SET equip_slot_background = $1 WHERE id = $2 AND equip_slot_background = $3")
+                    .bind(Option::<i32>::None)
+                    .bind(user.id)
+                    .bind(self.id)
+                    .execute(&mut *conn).await?;
+                }
+                ItemType::Badge { .. } => {
+                    let badges = user
+                        .equip_slot_badges
+                        .iter()
+                        .cloned()
+                        .filter(|drop_id| *drop_id != self.id)
+                        .collect::<Vec<_>>();
+                    sqlx::query("UPDATE users SET equip_slot_badges = $1 WHERE id = $2")
+                        .bind(badges)
+                        .bind(user.id)
+                        .execute(&mut *conn)
+                        .await?;
+                }
+                _ => (),
             }
-            _ => panic!("Item is not a profile picture"),
+            Ok(())
         }
     }
 
-    pub fn as_badge(&self, conn: &PgConnection) -> String {
-        let item = Item::fetch(&conn, self.item_id);
-        match item.item_type {
-            ItemType::Badge { value } => format!("<div>{}</div>", value),
-            _ => panic!("Item is not a badge"),
-        }
+    /*
+        pub async fn is_equiped(&self, conn: &PgPool) -> Result<bool, sqlx::Error> {
+            Ok(User::fetch(conn, self.owner_id)
+                .await?
+                .equipped(conn)
+                .await?
+                .contains(&self))
     }
+        */
 
     /// Possibly selects an item, depending on the last drop.
-    pub fn drop(conn: &PgConnection, user: &User) -> Option<Self> {
+    pub async fn drop(
+        conn: &mut Transaction<'_, Postgres>,
+        user: &User,
+    ) -> Result<Option<Self>, sqlx::Error> {
         // Determine if we have a drop
-        conn.transaction(|| {
-            let item: Option<Self> = (user.last_reward
-                < (Utc::now() - *MAX_DROP_PERIOD).naive_utc()
-                || user.last_reward < (Utc::now() - *MIN_DROP_PERIOD).naive_utc()
-                    && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
-                .then(|| {
-                    use self::items::dsl::*;
+        if !(user.last_reward < (Utc::now() - *MAX_DROP_PERIOD).naive_utc()
+            || user.last_reward < (Utc::now() - *MIN_DROP_PERIOD).naive_utc()
+                && rand::random::<u32>() <= (u32::MAX / DROP_CHANCE))
+        {
+            return Ok(None);
+        }
 
-                    // If we have a drop, select a random rarity.
-                    let rolled = Rarity::roll();
+        let conn = conn.acquire().await?;
 
-                    // Query available items from the given rarity and randomly choose one.
-                    items
-                        .filter(rarity.eq(rolled))
-                        .filter(available.eq(true))
-                        .load::<Item>(conn)
-                        .ok()
-                        .unwrap_or_else(Vec::new)
-                        .into_iter()
-                        .choose(&mut thread_rng())
-                        .and_then(|chosen| {
-                            // Give the new item to the user
-                            diesel::insert_into(drops::table)
-                                .values(NewDrop {
-                                    owner_id: user.id,
-                                    item_id:  chosen.id,
-                                    pattern:  rand::random(),
-                                    consumed: false,
-                                })
-                                .get_result(conn)
-                                .ok()
-                        })
-                })
-                .flatten();
+        let chosen: Option<Item> =
+            sqlx::query_as("SELECT * FROM items WHERE rarity = $1 AND available = TRUE")
+                .bind(Rarity::roll())
+                .fetch_all(&mut *conn)
+                .await?
+                .into_iter()
+                .choose(&mut thread_rng());
+        let Some(chosen) = chosen else { return Ok(None); };
 
-            if item.is_some() {
-                // Update the last reward. This will fail if the user has seen a reward
-                // since the start of this function.
-                user.update_last_reward(conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)
-                    .map(move |_| item)
-            } else {
-                Ok(item)
-            }
-        })
-        .ok()
-        .flatten()
+        let mut transaction = (&mut *conn).begin().await?;
+
+        // Give the new item to the user
+        let item_drop = sqlx::query_as(
+            "INSERT INTO drops (owner_id, item_id, pattern, consumed) VALUES ($1, $2, $3, FALSE)",
+        )
+        .bind(user.id)
+        .bind(chosen.id)
+        .bind(rand::random::<i32>())
+        .fetch_one(&mut transaction)
+        .await?;
+
+        // Update the last reward. This will fail if the user has seen a reward
+        // since the start of this function.
+        if user.update_last_reward(&mut transaction).await? {
+            // Row was update, commit the transaction
+            transaction.commit().await?;
+            Ok(Some(item_drop))
+        } else {
+            transaction.rollback().await?;
+            Ok(None)
+        }
+    }
+
+    pub async fn get_thumbnail(&self, conn: &PgPool) -> Result<ItemThumbnail, sqlx::Error> {
+        let item = self.fetch_item(conn).await?;
+        Ok(ItemThumbnail::new(&item, self))
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Error)]
 pub enum EquipError {
+    #[error("no such item exists")]
     NoSuchItem,
+    #[error("that is not your item")]
     NotYourItem,
+    #[error("that item cannot be equiped")]
+    Unequipable,
+    #[error("internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
     "/equip/:item_id",
     #[json_result]
     async fn equip(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(drop_id): Path<i32>
     ) -> Json<Result<(), EquipError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_| EquipError::NoSuchItem)?;
+        let drop = ItemDrop::fetch_optional(&*conn, drop_id).await?.ok_or(EquipError::NoSuchItem)?;
         if drop.owner_id == user.id {
-            drop.equip(&conn);
+            drop.equip(&*conn).await?;
         } else {
             return Err(EquipError::NotYourItem);
         }
@@ -524,24 +483,31 @@ post! {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Error)]
 pub enum UnequipError {
+    #[error("no such item exists")]
     NoSuchItem,
+    #[error("that is not your item")]
     NotYourItem,
+    #[error("internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
     "/unequip/:item_id",
     #[json_result]
     pub async fn unequip(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(drop_id): Path<i32>
     ) -> Json<Result<(), UnequipError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let drop = ItemDrop::fetch(&conn, drop_id).map_err(|_|UnequipError::NoSuchItem)?;
+        let drop = ItemDrop::fetch_optional(&*conn, drop_id).await?.ok_or(UnequipError::NoSuchItem)?;
         if drop.owner_id == user.id {
-            drop.unequip(&conn);
+            drop.unequip(&*conn).await?;
         } else {
             return Err(UnequipError::NotYourItem);
         }
@@ -556,8 +522,20 @@ pub struct ItemThumbnail {
     pub id:          i32,
     pub name:        String,
     pub rarity:      String,
-    pub thumbnail:   String,
+    pub html:        String,
     pub description: String,
+}
+
+impl ItemThumbnail {
+    pub fn new(item: &Item, item_drop: &ItemDrop) -> Self {
+        ItemThumbnail {
+            id:          item_drop.id,
+            name:        item.name.clone(),
+            rarity:      item.rarity.to_string(),
+            html:        item.get_thumbnail_html(item_drop.pattern),
+            description: item.description.clone(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
@@ -640,13 +618,12 @@ pub struct Attributes {
 }
 
 impl Attributes {
-    fn fetch(item: &Item, item_drop: &ItemDrop) -> Self {
-        let attributes = item.attributes.clone().map;
+    fn fetch(item: &Item, pattern: i32) -> Self {
+        let attributes = item.attributes.0.clone().map;
         let mut attr_res = HashMap::new();
 
         for (attr_name, AttrInfo { rarity, seed }) in attributes.into_iter() {
-            let mut rng =
-                XorShiftRng::seed_from_u64((item_drop.pattern as u64) << 32 | seed as u64); // TODO: make pattern a u64?
+            let mut rng = XorShiftRng::seed_from_u64((pattern as u64) << 32 | seed as u64);
 
             if rng.gen_ratio(1, rarity) {
                 let attr = ATTRIBUTES.get(&*attr_name).unwrap();
@@ -682,19 +659,8 @@ impl Attributes {
     }
 }
 
-table! {
-    trade_requests(id) {
-        id -> Integer,
-        sender_id -> Integer,
-        sender_items -> Array<Integer>,
-        receiver_id -> Integer,
-        receiver_items -> Array<Integer>,
-        note -> Nullable<Text>,
-    }
-}
-
 /// A trade between two users.
-#[derive(Serialize, Queryable)]
+#[derive(Debug, Serialize, FromRow)]
 pub struct TradeRequest {
     /// Id of the trade
     pub id:             i32,
@@ -710,119 +676,105 @@ pub struct TradeRequest {
     pub note:           Option<String>,
 }
 
-#[derive(Serialize)]
-pub enum FetchTradeRequestError {
-    NoSuchTradeRequest,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-}
-
-impl From<diesel::result::Error> for FetchTradeRequestError {
-    fn from(err: diesel::result::Error) -> Self {
-        match err {
-            diesel::result::Error::NotFound => Self::NoSuchTradeRequest,
-            x => Self::InternalDbError(x),
-        }
-    }
-}
-
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum TradeResponseError {
+    #[error("no such item exists")]
+    NoSuchItem,
+    #[error("no such trade exists")]
     NoSuchTrade,
+    #[error("not your trade")]
     NotYourTrade,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-}
-
-impl From<FetchTradeRequestError> for TradeResponseError {
-    fn from(err: FetchTradeRequestError) -> Self {
-        match err {
-            FetchTradeRequestError::NoSuchTradeRequest => Self::NoSuchTrade,
-            FetchTradeRequestError::InternalDbError(err) => Self::InternalDbError(err),
-        }
-    }
+    #[error("a conflicting trade has already been executed")]
+    ConflictingTradeExecuted,
+    #[error("internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 impl TradeRequest {
-    pub fn fetch(conn: &PgConnection, req_id: i32) -> Result<Self, FetchTradeRequestError> {
-        use self::trade_requests::dsl::*;
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM trade_requests WHERE id = $1")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
+    }
 
-        match trade_requests.find(req_id).first::<Self>(conn) {
-            Ok(x) => Ok(x),
-            Err(diesel::result::Error::NotFound) => Err(FetchTradeRequestError::NoSuchTradeRequest),
-            Err(x) => Err(FetchTradeRequestError::InternalDbError(x)),
+    pub async fn accept(&self, conn: &PgPool) -> Result<(), TradeResponseError> {
+        let mut transaction = conn.begin().await?;
+
+        for sender_item in &self.sender_items {
+            ItemDrop::fetch_optional(&mut transaction, *sender_item)
+                .await?
+                .ok_or(TradeResponseError::NoSuchItem)?
+                .unequip(&mut transaction)
+                .await?;
+
+            sqlx::query("UPDATE drops SET owner_id = $1 WHERE id = $2 AND owner_id = $3")
+                .bind(self.receiver_id)
+                .bind(*sender_item)
+                .bind(self.sender_id)
+                .execute(&mut transaction)
+                .await?;
         }
-    }
 
-    pub fn accept(&self, conn: &PgConnection) -> Result<(), TradeResponseError> {
-        use self::drops::dsl::*;
+        for receiver_item in &self.receiver_items {
+            ItemDrop::fetch_optional(&mut *transaction, *receiver_item)
+                .await?
+                .ok_or(TradeResponseError::NoSuchItem)?
+                .unequip(&mut transaction)
+                .await?;
 
-        conn.transaction(|| -> Result<(), diesel::result::Error> {
-            for sender_item in &self.sender_items {
-                diesel::update(drops.find(sender_item))
-                    .set(owner_id.eq(self.receiver_id))
-                    .filter(owner_id.eq(self.sender_id))
-                    .get_result::<ItemDrop>(conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
-                    .unequip(conn);
-            }
-            for receiver_item in &self.receiver_items {
-                diesel::update(drops.find(receiver_item))
-                    .set(owner_id.eq(self.sender_id))
-                    .filter(owner_id.eq(self.receiver_id))
-                    .get_result::<ItemDrop>(conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
-                    .unequip(conn);
-            }
+            sqlx::query("UPDATE drops SET owner_id = $1 WHERE id = $2 AND owner_id = $3")
+                .bind(self.sender_id)
+                .bind(*receiver_item)
+                .bind(self.receiver_id)
+                .execute(&mut transaction)
+                .await?;
+        }
 
-            // Check if any item no longer belongs to their respective owner:
-            for sender_item in &self.sender_items {
-                if drops
-                    .filter(id.eq(sender_item))
-                    .filter(consumed.eq(false)) // Consumed items may not be traded
-                    .first::<ItemDrop>(conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
-                    .owner_id
-                    != self.receiver_id
-                {
-                    return Err(diesel::result::Error::RollbackTransaction);
-                }
+        // Check if any item no longer belongs to their respective owner.
+        // Consumed items may not be traded.
+
+        for sender_item in &self.sender_items {
+            let item_drop: ItemDrop =
+                sqlx::query_as("SELECT * FROM drops WHERE id = $1 AND consumed = FALSE")
+                    .bind(*sender_item)
+                    .fetch_one(&mut transaction)
+                    .await?;
+            if item_drop.owner_id != self.receiver_id {
+                transaction.rollback().await?;
+                return Err(TradeResponseError::ConflictingTradeExecuted);
             }
-            for receiver_item in &self.receiver_items {
-                if drops
-                    .filter(id.eq(receiver_item))
-                    .filter(consumed.eq(false))
-                    .first::<ItemDrop>(conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?
-                    .owner_id
-                    != self.sender_id
-                {
-                    return Err(diesel::result::Error::RollbackTransaction);
-                }
+        }
+
+        for receiver_item in &self.receiver_items {
+            let item_drop: ItemDrop =
+                sqlx::query_as("SELECT * FROM drops WHERE id = $1 AND consumed = FALSE")
+                    .bind(*receiver_item)
+                    .fetch_one(&mut transaction)
+                    .await?;
+            if item_drop.owner_id != self.sender_id {
+                transaction.rollback().await?;
+                return Err(TradeResponseError::ConflictingTradeExecuted);
             }
-            // delete the transaction
-            let _ = self.decline(&conn);
-            Ok(())
-        })?;
+        }
+
+        // Delete the transaction
+        self.decline(&mut *transaction).await?;
 
         Ok(())
     }
 
-    pub fn decline(&self, conn: &PgConnection) -> Result<(), TradeResponseError> {
-        use self::trade_requests::dsl::*;
-
-        diesel::delete(trade_requests.find(self.id)).execute(conn)?;
-
+    pub async fn decline(&self, conn: impl PgExecutor<'_>) -> Result<(), TradeResponseError> {
+        sqlx::query("DELETE FROM trade_requests WHERE id = $1")
+            .bind(self.id)
+            .execute(conn)
+            .await?;
         Ok(())
     }
-}
-
-#[derive(Insertable)]
-#[table_name = "trade_requests"]
-pub struct NewTradeRequest {
-    sender_id:      i32,
-    sender_items:   Vec<i32>,
-    receiver_id:    i32,
-    receiver_items: Vec<i32>,
-    note:           Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -833,16 +785,32 @@ pub struct TradeRequestForm {
     trade:       HashMap<String, String>,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum SubmitOfferError {
+    #[error("you cannot trade with yourself")]
     CannotTradeWithSelf,
+    #[error("item is no longer owned by one of the parties")]
     ItemNoLongerOwned,
+    #[error("no such user")]
     NoSuchUser,
+    #[error("invalid trade")]
     InvalidTrade,
+    #[error("note is too long")]
     NoteTooLong,
+    #[error("trade is empty")]
     TradeIsEmpty,
-    InternalDbError(#[serde(skip)] diesel::result::Error),
-    InvalidForm(#[serde(skip)] std::num::ParseIntError),
+    #[error("internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+    #[error("invalid form: {0}")]
+    InvalidForm(
+        #[from]
+        #[serde(skip)]
+        std::num::ParseIntError,
+    ),
 }
 
 const MAX_NOTE_LENGTH: usize = 150;
@@ -851,22 +819,20 @@ post! {
     "/offer/",
     #[json_result]
     pub async fn submit_offer(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         sender: User,
         Form(TradeRequestForm { receiver_id, note, trade }): Form<TradeRequestForm>,
     ) -> Json<Result<TradeRequest, SubmitOfferError>> {
         let mut sender_items = Vec::new();
         let mut receiver_items = Vec::new();
 
-        let receiver_id: i32 = receiver_id.parse().map_err(|_|SubmitOfferError::NoSuchUser)?;
+        let receiver_id: i32 = receiver_id.parse()?;
 
         if sender.id == receiver_id {
             return Err(SubmitOfferError::CannotTradeWithSelf);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
-        if User::fetch(&conn, receiver_id).is_err() {
+        if User::fetch_optional(&*conn, receiver_id).await?.is_none() {
             return Err(SubmitOfferError::NoSuchUser);
         }
 
@@ -874,7 +840,10 @@ post! {
             let item: i32 = item.parse()?;
             let trader: i32 = trader.parse()?;
 
-            let drop = ItemDrop::fetch(&conn, item)?;
+            let Some(drop) = ItemDrop::fetch_optional(&*conn, item).await? else {
+                return Err(SubmitOfferError::InvalidTrade);
+            };
+
             if trader != drop.owner_id {
                 return Err(SubmitOfferError::ItemNoLongerOwned);
             }
@@ -904,15 +873,23 @@ post! {
             })
             .transpose()?;
 
-        Ok(diesel::insert_into(trade_requests::table)
-            .values(&NewTradeRequest {
-                sender_id: sender.id,
-                sender_items,
-                receiver_id,
-                receiver_items,
-                note,
-            })
-           .get_result::<TradeRequest>(&conn)?)
+        Ok(
+            sqlx::query_as(
+                r#"
+                INSERT INTO trade_requests
+                    (sender_id, sender_items, receiver_id, receiver_items, note)
+                VALUES
+                    ($1, $2, $3, $4, $5)
+                "#
+            )
+                .bind(sender.id)
+                .bind(sender_items)
+                .bind(receiver_id)
+                .bind(receiver_items)
+                .bind(note)
+                .fetch_one(&*conn)
+                .await?
+        )
     }
 }
 
@@ -920,14 +897,15 @@ post! {
     "/accept/:trade_id",
     #[json_result]
     async fn accept(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(trade_id): Path<i32>
     ) -> Json<Result<(), TradeResponseError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let req = TradeRequest::fetch(&conn, trade_id)?;
+        let req = TradeRequest::fetch(&*conn, trade_id)
+            .await?
+            .ok_or(TradeResponseError::NoSuchTrade)?;
         if req.receiver_id == user.id {
-            req.accept(&conn)
+            req.accept(&*conn).await
         } else {
             Err(TradeResponseError::NotYourTrade)
         }
@@ -938,14 +916,15 @@ post! {
     "/decline/:trade_id",
     #[json_result]
     async fn decline_offer(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(trade_id): Path<i32>,
     ) -> Json<Result<(), TradeResponseError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let req = TradeRequest::fetch(&conn, trade_id)?;
+        let req = TradeRequest::fetch(&*conn, trade_id)
+            .await?
+            .ok_or(TradeResponseError::NoSuchTrade)?;
         if req.sender_id == user.id || req.receiver_id == user.id {
-            req.decline(&conn)
+            req.decline(&*conn).await
         } else {
             Err(TradeResponseError::NotYourTrade)
         }
@@ -955,52 +934,52 @@ post! {
 #[derive(Serialize)]
 pub struct IncomingOffer {
     pub id:             i32,
-    pub sender:         ProfileStub,
+    pub sender:         Arc<ProfileStub>,
     pub sender_items:   Vec<ItemThumbnail>,
     pub receiver_items: Vec<ItemThumbnail>,
     pub note:           Option<String>,
 }
 
 impl IncomingOffer {
-    pub fn retrieve(
-        conn: &PgConnection,
-        user_cache: &mut UserCache,
+    pub async fn retrieve(
+        conn: &PgPool,
+        user_cache: &UserCache<'_>,
         user: &User,
     ) -> Vec<IncomingOffer> {
-        use self::trade_requests::dsl::*;
-
-        return trade_requests
-            .filter(receiver_id.eq(user.id))
-            .load::<TradeRequest>(conn)
-            .unwrap()
-            .into_iter()
-            .map(|trade| -> IncomingOffer {
-                IncomingOffer {
-                    id:             trade.id,
-                    sender:         user_cache.get(trade.sender_id).clone(),
-                    sender_items:   trade
-                        .sender_items
-                        .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
-                        .collect(),
-                    receiver_items: trade
-                        .receiver_items
-                        .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
-                        .collect(),
-                    note:           trade.note,
+        sqlx::query_as("SELECT * FROM trade_requests WHERE receiver_id = $1")
+            .bind(user.id)
+            .fetch(conn)
+            .filter_map(|trade: Result<TradeRequest, _>| future::ready(trade.ok()))
+            .then(|trade| async move {
+                let mut sender_items = Vec::new();
+                for sender_item in trade.sender_items.into_iter() {
+                    sender_items.push(
+                        ItemDrop::fetch(conn, sender_item)
+                            .await?
+                            .get_thumbnail(conn)
+                            .await?,
+                    );
                 }
+                let mut receiver_items = Vec::new();
+                for receiver_item in trade.receiver_items.into_iter() {
+                    receiver_items.push(
+                        ItemDrop::fetch(conn, receiver_item)
+                            .await?
+                            .get_thumbnail(conn)
+                            .await?,
+                    );
+                }
+                sqlx::Result::Ok(IncomingOffer {
+                    id: trade.id,
+                    sender: user_cache.get(trade.sender_id).await?,
+                    note: trade.note,
+                    sender_items,
+                    receiver_items,
+                })
             })
-            .collect();
-    }
-
-    pub fn count(conn: &PgConnection, user: &User) -> i64 {
-        use self::trade_requests::dsl::*;
-        return trade_requests
-            .filter(receiver_id.eq(user.id))
-            .count()
-            .get_result(conn)
-            .unwrap_or(0);
+            .filter_map(|t| future::ready(t.ok()))
+            .collect()
+            .await
     }
 }
 
@@ -1008,41 +987,50 @@ impl IncomingOffer {
 pub struct OutgoingOffer {
     pub id:             i32,
     pub sender_items:   Vec<ItemThumbnail>,
-    pub receiver:       ProfileStub,
+    pub receiver:       Arc<ProfileStub>,
     pub receiver_items: Vec<ItemThumbnail>,
     pub note:           Option<String>,
 }
 
 impl OutgoingOffer {
-    pub fn retrieve(
-        conn: &PgConnection,
-        user_cache: &mut UserCache,
+    pub async fn retrieve(
+        conn: &PgPool,
+        user_cache: &UserCache<'_>,
         user: &User,
     ) -> Vec<OutgoingOffer> {
-        use self::trade_requests::dsl::*;
-
-        return trade_requests
-            .filter(sender_id.eq(user.id))
-            .load::<TradeRequest>(conn)
-            .unwrap()
-            .into_iter()
-            .map(|trade| -> OutgoingOffer {
-                OutgoingOffer {
-                    id:             trade.id,
-                    receiver:       user_cache.get(trade.receiver_id).clone(),
-                    sender_items:   trade
-                        .sender_items
-                        .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
-                        .collect(),
-                    receiver_items: trade
-                        .receiver_items
-                        .into_iter()
-                        .map(|i| ItemDrop::fetch(&conn, i).unwrap().thumbnail(&conn))
-                        .collect(),
-                    note:           trade.note,
+        sqlx::query_as("SELECT * FROM trade_requests WHERE sender_id = $1")
+            .bind(user.id)
+            .fetch(conn)
+            .filter_map(|trade: Result<TradeRequest, _>| future::ready(trade.ok()))
+            .then(|trade| async move {
+                let mut sender_items = Vec::new();
+                for sender_item in trade.sender_items.into_iter() {
+                    sender_items.push(
+                        ItemDrop::fetch(conn, sender_item)
+                            .await?
+                            .get_thumbnail(conn)
+                            .await?,
+                    );
                 }
+                let mut receiver_items = Vec::new();
+                for receiver_item in trade.receiver_items.into_iter() {
+                    receiver_items.push(
+                        ItemDrop::fetch(conn, receiver_item)
+                            .await?
+                            .get_thumbnail(conn)
+                            .await?,
+                    );
+                }
+                sqlx::Result::Ok(Self {
+                    id: trade.id,
+                    receiver: user_cache.get(trade.receiver_id).await?,
+                    note: trade.note,
+                    sender_items,
+                    receiver_items,
+                })
             })
-            .collect();
+            .filter_map(|t| future::ready(t.ok()))
+            .collect()
+            .await
     }
 }

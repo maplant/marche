@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
-{% block title %}404{% endblock %}
+{% block title %}Error!{% endblock %}
 
 {% block content %}
 <li class="menu-item">
   <div class="post" style="padding-left: 150px; padding-bottom: 50px">
-  <h1>404</h1>
-  <p>There's nothing here,</p>
-  <a href="/">go home</a>
+    <h1>{{code}} - {{reason}}</h1>
+    <p>Nothing to see here</p>
+    <a href="/">go home</a>
   </div>
 </li>
 {% endblock %}

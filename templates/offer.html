@@ -1,3 +1,4 @@
+{%- import "macros.html" as macros -%}
 {% extends "base.html" %}
 
 {% block title %}Draft Trade Offer{% endblock %}
@@ -12,24 +13,13 @@
         <div class="cell" style="width: 100%;"><b>{{sender.name}} offers:</b></div>
       </div>
       <div class="row">
-        <div class="profile" style="{{sender.background}}">
-          <p><a href="/profile/{{sender.id}}" style="color: white; text-decoration: none">{{sender.name}}</a></p>
-          {% let picture = sender.picture.as_ref() %}
-          {% include "profile-pic.html" %}
-          <div class="badge-grid">
-            {% for badge in sender.badges %}
-              {{badge|e("none")}}
-            {% endfor %}
-          </div>
-        </div>
+        {% call macros::profile_stub(sender) %}
         <div class="cell">
           {% for item in sender_inventory %}
           <label class="item-{{item.rarity}}" for="{{item.id}}" style="user-select: none">
             <div class="hover-triggers-overlay">
-              <p>{{item.thumbnail|e("none")}}</p>
-              <div class="overlay-on-hover item-overlay">
-                {% include "item-overlay.html" %}
-              </div>
+              <p>{{item.html|e("none")}}</p>
+              {% call macros::item_overlay(item) %}
             </div>
             <input type="checkbox" name="{{item.id}}" id="{{item.id}}" value="{{sender.id}}" />
             {{item.name}}
@@ -46,24 +36,14 @@
         </div>
       </div>
       <div class="row">
-        <div class="profile" style="{{receiver.background}}">
-          <p><a href="/profile/{{receiver.id}}" style="color: white; text-decoration: none">{{receiver.name}}</a></p>
-          {% let picture = receiver.picture.as_ref() %}
-          {% include "profile-pic.html" %}
-          <div class="badge-grid">
-            {% for badge in receiver.badges %}
-              {{badge|e("none")}}
-            {% endfor %}
-          </div>
+        {% call macros::profile_stub(receiver) %}
         </div>
         <div class="cell">
           {% for item in receiver_inventory %}
           <label class="item-{{item.rarity}}" for="{{item.id}}" style="user-select: none">
             <div class="hover-triggers-overlay">
-              <p>{{item.thumbnail|e("none")}}</p>
-              <div class="overlay-on-hover item-overlay">
-                {% include "item-overlay.html" %}
-              </div>
+              <p>{{item.html|e("none")}}</p>
+              {% call macros::item_overlay(item) %}
             </div>
             <input type="checkbox" name="{{item.id}}" id="{{item.id}}" value="{{receiver.id}}" />
             {{item.name}}
@@ -98,24 +78,14 @@
     </div>
     <script type="text/javascript">
       $(document).ready(function () {
-          const error_messages = {
-              CannotTradeWithSelf: "You cannot submit a trade offer with yourself",
-              ItemNoLongerOwned: "One or more items selected are no longer owned by their original owner; try refreshing",
-              InvalidTrade: "A trade of this type is not valid",
-              NoteTooLong: "Note cannot exceed 150 characters",
-              TradeIsEmpty: "Trade cannot be empty",
-              InternalDbError: "There was an internal error, please try again later",
-          };
           $("form").ajaxForm({
               url: '/offer',
               type: 'post',
               success: function(response, _, _, _) {
-                  if (response.Err !== undefined) {
-                      var error_message = error_messages[response.Err];
-                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
-                      $("#error").html(`<div class="error">${error_message}</div>`)
+                  if (response.error !== undefined) {
+                      $("#error").html(`<div class="error">${response.error}</div>`)
                   } else {
-                      location.href = `/offers?jump_to=${response.Ok.id}`
+                      location.href = `/offers?jump_to=${response.ok.id}`
                   }
               },
               error: function(_, status, error) {

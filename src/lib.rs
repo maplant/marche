@@ -1,48 +1,24 @@
-#[macro_use]
-extern crate diesel;
-
 pub mod items;
 pub mod pages;
 pub mod threads;
 pub mod users;
 
-pub mod threads_dsl {
-    pub use crate::threads::threads::dsl::*;
-}
-
-pub mod replies_dsl {
-    pub use crate::threads::replies::dsl::*;
-}
-
-pub mod drops_dsl {
-    pub use crate::items::drops::dsl::*;
-}
-
-pub mod users_dsl {
-    pub use crate::users::users::dsl::*;
-}
-
 use std::{any::Any, collections::HashMap, error::Error as StdError};
 
-use askama::Template;
 use axum::{
     async_trait,
     body::{Body, Bytes},
     extract::{
-        multipart::MultipartError, ContentLengthLimit, Extension, FromRequest, Multipart,
-        RequestParts,
+        multipart::MultipartError, ContentLengthLimit, FromRequest, Multipart, RequestParts,
     },
     handler::Handler,
     http::StatusCode,
     response::{IntoResponse, Response},
     Router,
 };
-use derive_more::{Display, From};
-use diesel::{
-    r2d2::{ConnectionManager, Pool},
-    PgConnection,
-};
+use derive_more::Display;
 use serde::{de::DeserializeOwned, Serialize};
+use thiserror::Error;
 
 pub const DATE_FMT: &str = "%B %-d, %Y at %I:%M %P";
 
@@ -145,11 +121,24 @@ pub struct File {
     pub bytes: Bytes,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum MultipartFormError {
+    #[error("invalid content length")]
     InvalidContentLength,
+    #[error("invalid field")]
     InvalidField,
-    MultipartError(#[serde(skip)] MultipartError),
+    #[error("error parsing form: {0}")]
+    ParseError(
+        #[from]
+        #[serde(skip)]
+        serde_json::Error,
+    ),
+    #[error("multipart error: {0}")]
+    MultipartError(
+        #[from]
+        #[serde(skip)]
+        MultipartError,
+    ),
 }
 
 impl IntoResponse for MultipartFormError {
@@ -201,30 +190,9 @@ where
         }
 
         // Yes, this is silly, but it's convenient!
-        let form: F = serde_json::from_value(serde_json::to_value(form).unwrap()).unwrap();
+        let form: F = serde_json::from_value(serde_json::to_value(form)?)?;
 
         Ok(Self { form, file })
-    }
-}
-
-pub type PgPool = Pool<ConnectionManager<PgConnection>>;
-
-#[derive(Template)]
-#[template(path = "404.html")]
-pub struct NotFound {
-    offers: i64,
-}
-
-impl NotFound {
-    pub fn new(offers: i64) -> Self {
-        Self { offers }
-    }
-
-    pub async fn show(pool: Extension<PgPool>, user: users::User) -> Self {
-        let conn = pool.get().expect("Could not connect to db");
-        Self {
-            offers: user.incoming_offers(&conn),
-        }
     }
 }
 
