@@ -624,12 +624,20 @@ post! {
         .fetch_one(&mut *transaction)
         .await?;
 
-        sqlx::query("UPDATE threads SET last_post = $1, num_replies = num_replies + 1")
+        let thread: Thread = sqlx::query_as(
+            r#"
+            UPDATE threads SET
+                last_post = $1,
+                num_replies = num_replies + 1
+            RETURNING *
+            "#)
             .bind(reply.id)
-            .execute(&mut *transaction)
+            .fetch_one(&mut *transaction)
             .await?;
 
         transaction.commit().await?;
+
+        user.read_thread(&*conn, &thread).await?;
 
         Ok(reply)
     }

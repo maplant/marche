@@ -116,7 +116,7 @@ get! {
         user: User,
         Path(viewed_tags): Path<String>,
     ) -> Result<Index, Redirect> {
-        let viewed_tags = Tags::fetch_from_str(&conn, dbg!(&*viewed_tags)).await;
+        let viewed_tags = Tags::fetch_from_str(&conn, &*viewed_tags).await;
 
         // If no tags are selected and the user is not privileged, force
         // the user to redirect to /t/en
@@ -217,7 +217,7 @@ get! {
 
         Ok(Index {
             tags: viewed_tags.tags,
-            posts: dbg!(posts),
+            posts: posts,
             viewer_role: user.role,
             offers: user.incoming_offers(&*conn).await.unwrap_or(0),
         })
