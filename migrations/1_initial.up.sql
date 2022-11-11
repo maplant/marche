@@ -1,4 +1,4 @@
-CREATE TYPE role_enum as ENUM (
+CREATE TYPE user_role as ENUM (
   'admin',
   'moderator',
   'user'
@@ -9,7 +9,7 @@ CREATE TABLE users (
   name TEXT NOT NULL UNIQUE,
   password TEXT NOT NULL,
   bio TEXT NOT NULL, 
-  role role_enum NOT NULL,
+  role user_role NOT NULL,
   experience BIGINT NOT NULL, 
   last_reward TIMESTAMP NOT NULL,
   equip_slot_prof_pic INTEGER,

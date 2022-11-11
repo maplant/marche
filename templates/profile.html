@@ -1,6 +1,7 @@
+{%- import "macros.html" as macros -%}
 {% extends "base.html" %}
 
-{% block title %}{{name}}'s Profile{% endblock %}
+{% block title %}{{stub.name}}'s Profile{% endblock %}
 
 {% block content %}
 <li class="menu-item">
@@ -10,18 +11,13 @@
       <div class="heavy-cell" style="width: 100%;">
         <b {% if is_banned %}style="color: red"{% endif %}>
           {% if role == Role::Moderator %}👑 {% endif %}
-          {% if is_banned %}{{name|redact}}{% else %}{{name}}{% endif %}
+          {% if is_banned %}{{stub.name|redact}}{% else %}{{stub.name}}{% endif %}
         </b>
       </div>
     </div>
     <div class="row">
-      <div class="heavy-cell" style="{{background}} text-align: center; min-width: 180px; min-height: 180px; text-shadow: 1px 0 black, 0 1px black, -1px 0 black, 0 -1px black">
-        {% include "profile-pic.html" %}
-        <div class="badge-grid">
-          {% for badge in badges %}
-          {{badge|e("none")}}
-          {% endfor %}
-        </div>
+      <div class="heavy-cell">
+        {% call macros::profile_stub(stub) %}
       </div>
       <div class="heavy-cell" style="vertical-align: top; padding: 15px">
         {% if is_banned %}
@@ -103,7 +99,7 @@
       function setBan(days) {
           if (days === '' || !isNaN(days)) {
               $.ajax({
-                  url: `/ban/{{id}}?ban_len=${days}`,
+                  url: `/ban/{{stub.id}}?ban_len=${days}`,
                   type: 'post',
                   complete: function(_, _) {
                       location.reload();
@@ -113,7 +109,7 @@
       }
       function addNote() {
           $.ajax({
-              url: '/add_note/{{id}}',
+              url: '/add_note/{{stub.id}}',
               type: 'post',
               data: {
                   body: $('#note').val(),
@@ -128,7 +124,7 @@
       {% if viewer_role == Role::Admin %}
       function setRole(role) {
           $.ajax({
-              url: `/user/{{id}}?role=${role}`,
+              url: `/user/{{stub.id}}?role=${role}`,
               type: 'post',
               complete: function(_, _) {
                   location.reload();
@@ -144,7 +140,7 @@
       </div>
       <div class="heavy-cell">
         {% for item in equipped %}
-        {% include "item-thumbnail.html" %}
+        {% call macros::item_thumbnail(item) %}
         {% endfor %}
       </div>
     </div>
@@ -154,7 +150,7 @@
       </div>
       <div class="cell">
         {% for item in inventory %}
-        {% include "item-thumbnail.html" %}
+        {% call macros::item_thumbnail(item) %}
         {% endfor %}
       </div>
     </div>
@@ -175,7 +171,7 @@
           }
         </script>
         {% else %}
-        <form action="/offer/{{id}}">
+        <form action="/offer/{{stub.id}}">
           <button type="submit">Draft trade offer</button>
         </form>
         {% endif %}

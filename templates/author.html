@@ -54,25 +54,15 @@
     </div>
     <script type="text/javascript">
       $(document).ready(function () {
-          const error_messages = {
-              TitleOrBodyIsEmpty: "Title or body cannot be empty",
-              UploadImageError: "There was an error uploading the image",
-              InternalDbError: "There was an internal error, please try again later",
-              MultipartFormError: "File is too large",
-              TagTooLong: "Tags may only be {{crate::threads::MAX_TAG_LEN}} characters long",
-              TooManyTags: "Threads may only have {{crate::threads::MAX_NUM_TAGS}} tags"
-          };
           $("form").ajaxForm({
               url: '/thread',
               type: 'post',
               success: function(response, _, _, _) {
-                  if (response.Err !== undefined) {
-                      var error_message = error_messages[response.Err];
-                      var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                  if (response.error !== undefined) {
                       $('#error').show();
-                      $('#error').html(`${error_message}`);
+                      $('#error').html(`${response.error}`);
                   } else {
-                      location.href = `/thread/${response.Ok.id}`;
+                      location.href = `/thread/${response.ok.id}`;
                   }
               },
               error: function(_, status, error) {

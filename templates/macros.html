@@ -1,0 +1,64 @@
+{% macro profile_stub(stub) %}
+<div class="profile"
+     {% match stub.background %}
+     {% when Some with (style) %}
+     style="{{style}}"
+     {% when None %}
+     style="background: #d3d3d3"
+     {% endmatch %}
+     >
+  <p>
+    <a href="/profile/{{stub.id}}"
+       style="color: white; text-decoration: none">
+      {{stub.name}}
+    </a>
+  </p>
+  {% match stub.picture %}
+  {% when Some with (filename) %}
+  <img style="width: 100%; height: auto;" src="/static/{{filename}}.png">
+  {% when None %}
+  <div style="width: 80px; min-height: 100px;"></div>
+  {% endmatch %}
+  <div class="badge-grid">
+    {% for badge in stub.badges %}
+    {{badge|e("none")}}
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro item_overlay(item) %}
+<div class="table item-{{item.rarity}}" style="margin: 0 auto;">
+    <div class="overlay-row">
+        <div class="item-overlay-cell">
+            {{item.html|e("none")}}
+        </div>
+    </div>
+    <div class="item-overlay-row">
+        <div class="item-overlay-cell">
+            {{item.name}}
+        </div>
+    </div>
+    <div class="item-overlay-row" style="text-align: justify;">
+        <div class="item-overlay-cell">
+            {{item.description}}
+        </div>
+    </div>
+    <div class="item-overlay-row">
+        <div class="item-overlay-cell">
+            <div class="rarity-{{item.rarity}}" style="border-left-color: #FFFFFF;border-top-color: #FFFFFF;">
+                {{item.rarity}}
+            </div>
+        </div>
+    </div>
+</div>
+{% endmacro %}
+
+{% macro item_thumbnail(item) %}
+<a href="/item/{{item.id}}" class="item-{{item.rarity}} hover-triggers-overlay">
+  <p>{{item.html|e("none")}}</p>
+  <div class="overlay-on-hover item-overlay">
+    {% call item_overlay(item) %}
+  </div>
+</a>
+{% endmacro %}

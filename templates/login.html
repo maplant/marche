@@ -35,20 +35,14 @@
       </div>
     </div>
     <script type="text/javascript">
-      const errorMessages = {
-          UserOrPasswordIncorrect: "Invalid username or password",
-          InternalDbError: "Internal server error, please try again later"
-      };
       $(document).ready(function () {
           $("form").ajaxForm({
               url: '/login',
               type: 'post',
               success: function(response, _, _, _) {
-                  if (response.Err !== undefined) {
-                      var errorMessage = errorMessages[response.Err];
-                      var errorMessage = errorMessage == undefined ? "An unknown error occurred" : errorMessage;
+                  if (response.error !== undefined) {
                       $('#error').show();
-                      $('#error').html(`${errorMessage}`);
+                      $('#error').html(`${response.error}`);
                   } else {
                       const urlParams = new URLSearchParams(window.location.search);
                       if (urlParams.has('redirect')) {

@@ -9,6 +9,7 @@ default-run = "marche-server"
 anyhow = "1.0"
 axum = { version = "0.5", features = ["multipart", "json"] }
 axum-client-ip = "0.2.0"
+axum-macros = "0.2"
 base64ct = "1.5"
 thiserror = "1.0"
 aws-config = "0.46"

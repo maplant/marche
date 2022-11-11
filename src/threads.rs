@@ -4,46 +4,50 @@ use std::collections::{HashMap, HashSet};
 use axum::{
     body::Bytes,
     extract::{Extension, Form, Path, Query},
-    Json,
 };
 use chrono::{prelude::*, NaiveDateTime};
-use derive_more::From;
 use futures::stream::StreamExt;
-use lazy_static::lazy_static;
 use marche_proc_macros::json_result;
-use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use sqlx::{Connection, FromRow, PgExecutor, PgPool};
+use sqlx::{FromRow, PgExecutor, PgPool};
+use thiserror::Error;
 
 use crate::{
-    items::{Item, ItemDrop, ItemType},
+    items::ItemDrop,
     post,
-    users::{Role, User /*, UserCache*/},
+    users::{Role, User},
     File, MultipartForm, MultipartFormError,
 };
 
 #[derive(FromRow, Default, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id: i32,
+    pub id:          i32,
     /// Id of the last post
-    pub last_post: i32,
+    pub last_post:   i32,
     /// Title of the thread
-    pub title: String,
+    pub title:       String,
     /// Tags given to this thread
-    pub tags: Vec<i32>,
+    pub tags:        Vec<i32>,
     /// Number of replies to this thread, not including the first.
     pub num_replies: i32,
     /// Whether or not the thread is pinned
-    pub pinned: bool,
+    pub pinned:      bool,
     /// Whether or not the thread is locked
-    pub locked: bool,
+    pub locked:      bool,
     /// Whether or not the thread is hidden
-    pub hidden: bool,
+    pub hidden:      bool,
 }
 
 impl Thread {
-    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM threads WHERE id = $1")
+            .bind(id)
+            .fetch_one(conn)
+            .await
+    }
+
+    pub async fn fetch_optional(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM threads WHERE id = $1")
             .bind(id)
             .fetch_optional(conn)
@@ -51,12 +55,25 @@ impl Thread {
     }
 }
 
-/*
-post! {
+#[derive(Error, Serialize, Debug)]
+pub enum DeleteThreadError {
+    #[error("You are not privileged enough")]
+    Unprivileged,
+    #[error("No such thread exists")]
+    NoSuchThread,
+    #[error("Internal database error {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+}
+
+post!(
     "/delete_thread/:dead_thread_id",
     #[json_result]
     pub async fn delete_thread(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(dead_thread_id): Path<i32>,
     ) -> Json<Result<(), DeleteThreadError>> {
@@ -64,29 +81,25 @@ post! {
             return Err(DeleteThreadError::Unprivileged);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
         // Fetch the thread title for logging purposes
-        let thread_title = Thread::fetch(&conn, dead_thread_id)
-            .map_err(|_| DeleteThreadError::NoSuchThread)?
+        let thread_title = Thread::fetch_optional(&*conn, dead_thread_id)
+            .await?
+            .ok_or(DeleteThreadError::NoSuchThread)?
             .title;
 
-        let _ = conn.transaction(|| -> Result<(), diesel::result::Error> {
-            // Delete the thread:
-            {
-                use crate::schema::threads::dsl::*;
-                diesel::delete(threads.filter(id.eq(dead_thread_id))).execute(&mut conn)?;
-            }
-            // Delete any reply on the thread:
-            {
-                use crate::schema::replies::dsl::*;
-                diesel::delete(replies.filter(thread_id.eq(dead_thread_id)))
-                    .execute(&mut conn)
-                    .map_err(|_| diesel::result::Error::RollbackTransaction)?;
-            }
+        let mut transaction = conn.begin().await?;
 
-            Ok(())
-        });
+        // Delete the thread:
+        sqlx::query("DELETE FROM threads WHERE id = $1")
+            .bind(dead_thread_id)
+            .execute(&mut transaction)
+            .await?;
+
+        // Delete all replies to the thread:
+        sqlx::query("DELETE FROM replies WHERE thread_id = $1")
+            .bind(dead_thread_id)
+            .execute(&mut transaction)
+            .await?;
 
         tracing::info!(
             "User `{}` has deleted thread {dead_thread_id} titled: `{thread_title}`",
@@ -95,24 +108,33 @@ post! {
 
         Ok(())
     }
-}
-*/
+);
 
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
-    tags: String,
-    body: String,
+    tags:  String,
+    body:  String,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum SubmitThreadError {
+    #[error("title or body is empty")]
     TitleOrBodyIsEmpty,
+    #[error("there is a tag that exceeds the maximum length ({MAX_TAG_LEN} characters")]
     TagTooLong,
+    #[error("there are too many tags (maximum {MAX_NUM_TAGS} allowed)")]
     TooManyTags,
-    UploadImageError(UploadImageError),
-    InternalDbError(#[serde(skip)] sqlx::Error),
-    MultipartFormError(MultipartFormError),
+    #[error("error uploading image {0}")]
+    UploadImageError(#[from] UploadImageError),
+    #[error("internal db error {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+    #[error("multipart form error {0}")]
+    MultipartFormError(#[from] MultipartFormError),
 }
 
 pub const MAX_TAG_LEN: usize = 16;
@@ -168,8 +190,9 @@ post! {
             r#"
                  INSERT INTO threads
                      (title, tags, last_post, num_replies, pinned, locked, hidden)
-                  VALUES
+                 VALUES
                      ($1, $2, 0, 0, FALSE, FALSE, FALSE)
+                 RETURNING *
             "#,
         )
         .bind(title)
@@ -186,7 +209,8 @@ post! {
                  INSERT INTO replies
                      (author_id, thread_id, post_date, body, reward, image, thumbnail, filename, reactions)
                  VALUES
-                     ($1, $2, $3, $4, $5, $6, $7, $8, [])
+                     ($1, $2, $3, $4, $5, $6, $7, $8, '{}')
+                 RETURNING *
             "#
         )
         .bind(user.id)
@@ -200,7 +224,7 @@ post! {
         .fetch_one(&mut *transaction)
         .await?;
 
-        let thread = sqlx::query_as("UPDATE threads SET last_post = $1 WHERE id = $2")
+        let thread = sqlx::query_as("UPDATE threads SET last_post = $1 WHERE id = $2 RETURNING *")
             .bind(reply.id)
             .bind(thread.id)
             .fetch_one(&mut *transaction)
@@ -219,74 +243,73 @@ struct UpdateThread {
     hidden: Option<bool>,
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 enum UpdateThreadError {
+    #[error("You are not privileged enough")]
     Unprivileged,
-    InternalDbError(#[serde(skip)] sqlx::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-/*
-post! {
+post!(
     "/thread/:thread_id",
     #[json_result]
     async fn update_thread_flags(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(thread_id): Path<i32>,
         Query(UpdateThread {
-            locked: set_locked,
-            pinned: set_pinned,
-            hidden: set_hidden,
-        }): Query<UpdateThread>
+            locked,
+            pinned,
+            hidden,
+        }): Query<UpdateThread>,
     ) -> Json<Result<(), UpdateThreadError>> {
-        use crate::schema::threads::dsl::*;
-
         if user.role < Role::Moderator {
             return Err(UpdateThreadError::Unprivileged);
         }
 
-        if set_locked.is_none() && set_pinned.is_none() && set_hidden.is_none() {
+        if locked.is_none() && pinned.is_none() && hidden.is_none() {
             return Ok(());
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-
         // TODO: Come up with some pattern to chain these
 
-        if let Some(set_locked) = set_locked {
-            diesel::update(threads.find(thread_id))
-                .set(locked.eq(set_locked))
-                .get_result::<Thread>(&conn)?;
-         }
-
-        if let Some(set_pinned) = set_pinned {
-            diesel::update(threads.find(thread_id))
-                .set(pinned.eq(set_pinned))
-                .get_result::<Thread>(&conn)?;
+        if let Some(locked) = locked {
+            sqlx::query("UPDATE threads SET locked = $1 WHERE id = $2")
+                .bind(locked)
+                .bind(thread_id)
+                .execute(&*conn)
+                .await?;
         }
 
-        if let Some(set_hidden) = set_hidden {
-            diesel::update(threads.find(thread_id))
-                .set(hidden.eq(set_hidden))
-                .get_result::<Thread>(&conn)?;
+        if let Some(pinned) = pinned {
+            sqlx::query("UPDATE threads SET pinned = $1 WHERE id = $2")
+                .bind(pinned)
+                .bind(thread_id)
+                .execute(&*conn)
+                .await?;
+        }
+
+        if let Some(hidden) = hidden {
+            sqlx::query("UPDATE threads SET hidden = $1 WHERE id = $2")
+                .bind(hidden)
+                .bind(thread_id)
+                .execute(&*conn)
+                .await?;
         }
 
         Ok(())
     }
-}
-*/
-
-#[derive(Serialize, From)]
-pub enum DeleteThreadError {
-    Unprivileged,
-    NoSuchThread,
-    InternalDbError(#[serde(skip)] sqlx::Error),
-}
+);
 
 #[derive(Debug, FromRow, Serialize, Clone)]
 pub struct Tag {
-    pub id: i32,
-    pub name: String,
+    pub id:         i32,
+    pub name:       String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
 }
@@ -343,7 +366,7 @@ impl Tag {
             r#"
                 INSERT INTO tags (name)
                 VALUES ($1)
-                ON CONFLICT (name) DO UPDATE SET num_tagged = num_tagged + 1
+                ON CONFLICT (name) DO UPDATE SET num_tagged = tags.num_tagged + 1
                 RETURNING *
             "#,
         )
@@ -407,7 +430,7 @@ impl Tags {
 #[derive(FromRow, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
-    pub id: i32,
+    pub id:        i32,
     /// Id of the author
     pub author_id: i32,
     /// Id of the thread
@@ -416,23 +439,30 @@ pub struct Reply {
     #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
-    pub body: String,
+    pub body:      String,
     /// Any item that was rewarded for this post
-    pub reward: Option<i32>,
+    pub reward:    Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
     /// Image associated with this post
-    pub image: Option<String>,
+    pub image:     Option<String>,
     /// Thumbnail associated with this post's image
     pub thumbnail: Option<String>,
     /// Filename associated with the image
-    pub filename: String,
+    pub filename:  String,
     /// Whether or not the thread is hidden
-    pub hidden: bool,
+    pub hidden:    bool,
 }
 
 impl Reply {
-    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
+    pub async fn fetch(conn: &PgPool, id: i32) -> Result<Self, sqlx::Error> {
+        sqlx::query_as("SELECT * FROM replies WHERE id = $1")
+            .bind(id)
+            .fetch_one(conn)
+            .await
+    }
+
+    pub async fn fetch_optional(conn: &PgPool, id: i32) -> Result<Option<Self>, sqlx::Error> {
         sqlx::query_as("SELECT * FROM replies WHERE id = $1")
             .bind(id)
             .fetch_optional(conn)
@@ -440,57 +470,66 @@ impl Reply {
     }
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 pub enum DeleteReplyError {
+    #[error("You are not privileged enough")]
     Unprivileged,
+    #[error("No such reply exists")]
     NoSuchReply,
+    #[error("You cannot delete the first reply in a thread")]
     CannotDeleteFirstReply,
-    InternalDbError(#[serde(skip)] sqlx::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-/*
-post! {
+post!(
     "/delete_reply/:dead_reply_id",
     #[json_result]
     async fn delete_reply(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(dead_reply_id): Path<i32>,
     ) -> Json<Result<(), DeleteReplyError>> {
-        use crate::schema::replies::dsl::*;
-
         if user.role < Role::Moderator {
             return Err(DeleteReplyError::Unprivileged);
         }
 
-        let conn = pool.get().expect("Could not connect to db");
-        let dead_reply =
-            Reply::fetch(&conn, dead_reply_id).map_err(|_| DeleteReplyError::NoSuchReply)?;
+        let dead_reply = Reply::fetch_optional(&*conn, dead_reply_id)
+            .await?
+            .ok_or(DeleteReplyError::NoSuchReply)?;
 
         // Get the post before this one in case last_post is the dead reply
-        let prev_reply = replies
-            .filter(thread_id.eq(dead_reply.thread_id))
-            .filter(id.lt(dead_reply_id))
-            .order(id.desc())
-            .first::<Reply>(&conn)
-            .map_err(|_| DeleteReplyError::CannotDeleteFirstReply)?;
+        let prev_reply: Reply = sqlx::query_as(
+            "SELECT * FROM replies WHERE thread_id = $1 AND id < $2 ORDER BY id DESC",
+        )
+        .bind(dead_reply.thread_id)
+        .bind(dead_reply_id)
+        .fetch_optional(&*conn)
+        .await?
+        .ok_or(DeleteReplyError::CannotDeleteFirstReply)?;
 
-        {
-            use crate::schema::threads::dsl::*;
+        sqlx::query("UPDATE threads SET last_post = $1 WHERE id = $2 AND last_post = $3")
+            .bind(prev_reply.id)
+            .bind(dead_reply.thread_id)
+            .bind(dead_reply_id)
+            .execute(&*conn)
+            .await?;
 
-            // Discard any error:
-            let _ = diesel::update(threads.find(dead_reply.thread_id))
-                .filter(last_post.eq(dead_reply_id))
-                .set(last_post.eq(prev_reply.id))
-                .get_result::<Thread>(&conn);
+        // Reduce the number of replies by one:
+        sqlx::query("UPDATE threads SET num_replies = num_replies - 1 WHERE id = $1")
+            .bind(dead_reply.thread_id)
+            .execute(&*conn)
+            .await?;
 
-            // Reduce the number of replies by one:
-            diesel::update(threads.find(dead_reply.thread_id))
-                .set(num_replies.eq(num_replies - 1))
-                .get_result::<Thread>(&conn)?;
-        }
-
-        diesel::delete(replies.find(dead_reply_id)).execute(&conn)?;
+        // Delete the reply:
+        sqlx::query("DELETE FROM replies WHERE id = $1")
+            .bind(dead_reply_id)
+            .execute(&*conn)
+            .await?;
 
         tracing::info!(
             "User `{}` has deleted reply {dead_reply_id} in thread {}",
@@ -500,22 +539,34 @@ post! {
 
         Ok(())
     }
-}
- */
+);
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
-    body: String,
+    body:      String,
     thread_id: String,
 }
 
-#[derive(Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum ReplyError {
+    #[error("no such thread")]
     NoSuchThread,
+    #[error("reply cannot be empty")]
     ReplyIsEmpty,
+    #[error("thread is locked")]
     ThreadIsLocked,
-    UploadImageError(#[serde(skip)] UploadImageError),
-    InternalDbError(#[serde(skip)] sqlx::Error),
+    #[error("error uploading image: {0}")]
+    UploadImageError(
+        #[from]
+        #[serde(skip)]
+        UploadImageError,
+    ),
+    #[error("internal db error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
@@ -536,7 +587,7 @@ post! {
         }
 
         let thread_id: i32 = thread_id.parse().map_err(|_| ReplyError::NoSuchThread)?;
-        if Thread::fetch(&conn, thread_id)
+        if Thread::fetch_optional(&conn, thread_id)
             .await?
             .ok_or(ReplyError::NoSuchThread)?
             .locked
@@ -554,7 +605,8 @@ post! {
                 INSERT INTO replies
                     (author_id, thread_id, post_date, body, reward, image, thumbnail, filename, reactions)
                 VALUES
-                    ($1, $2, $3, $4, $5, $6, $7, $8, [])
+                    ($1, $2, $3, $4, $5, $6, $7, $8, '{}')
+                RETURNING *
             "#
         )
         .bind(user.id)
@@ -577,11 +629,12 @@ post! {
             .execute(&mut *transaction)
             .await?;
 
+        transaction.commit().await?;
+
         Ok(reply)
     }
 }
 
-/*
 #[derive(Deserialize)]
 pub struct UpdateReplyParams {
     hidden: Option<bool>,
@@ -592,51 +645,57 @@ pub struct UpdateReplyForm {
     body: Option<String>,
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 pub enum UpdateReplyError {
+    #[error("You are not privileged enough")]
     Unprivileged,
-    NotYourPost,
+    #[error("Post does not exist")]
+    NoSuchReply,
+    #[error("This is not your post")]
+    NotYourReply,
+    #[error("You cannot make a post empty")]
     CannotMakeEmpty,
-    InternalDbError(#[serde(skip)] sqlx::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
 post! {
     "/reply/:post_id",
     #[json_result]
     pub async fn update_reply(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(post_id): Path<i32>,
         Query(UpdateReplyParams {
             hidden,
         }): Query<UpdateReplyParams>,
         Form(UpdateReplyForm { body }): Form<UpdateReplyForm>,
-    ) -> Json<Result<Reply, UpdateReplyError>> {
-        let conn = pool.get().expect("Could not connect to db");
-        let post = Reply::fetch(&conn, post_id)?;
+    ) -> Json<Result<(), UpdateReplyError>> {
+        let post = Reply::fetch_optional(&*conn, post_id)
+            .await?
+            .ok_or(UpdateReplyError::NoSuchReply)?;
 
-        let reply = if let Some(hidden) = hidden {
-            use crate::schema::replies::dsl::*;
-
+        if let Some(hidden) = hidden {
             if user.role < Role::Moderator {
                 return Err(UpdateReplyError::Unprivileged);
             }
+            sqlx::query("UPDATE replies SET hidden = $1 WHERE id = $2")
+                .bind(hidden)
+                .bind(post_id)
+                .execute(&*conn)
+                .await?;
+        }
 
-            Some(diesel::update(replies.find(post_id))
-                .set(hidden.eq(hidden))
-                .get_result::<Reply>(&conn)?)
-        } else {
-            None
-        };
-
-        let body = if let Some(body) = body {
-            body
-        } else {
-            return Ok(reply.unwrap_or(post));
+        let Some(body) = body else {
+            return Ok(());
         };
 
         if post.author_id != user.id && user.role < Role::Moderator {
-            return Err(UpdateReplyError::NotYourPost);
+            return Err(UpdateReplyError::NotYourReply);
         }
 
         let body = body.trim();
@@ -645,181 +704,91 @@ post! {
             return Err(UpdateReplyError::CannotMakeEmpty);
         }
 
-        // TODO: check if time period to edit has expired.
-        let html_output = parse_post(&conn, body, post.thread_id)
-            + &format!(
-                r#" <span style="font-size: 80%; color: grey">Edited on {}</span>"#,
-                Utc::now().naive_utc().format(crate::DATE_FMT)
-            );
+        sqlx::query("UPDATE replies SET body = $1 WHERE id = $2")
+            .bind(body)
+            .bind(post_id)
+            .execute(&*conn)
+            .await?;
 
-        Ok({
-            use crate::schema::replies::dsl::*;
-
-            diesel::update(replies.find(post_id))
-                .set((
-                    body.eq(body),
-                    body_html.eq(html_output),
-                ))
-                .get_result::<Reply>(&conn)?
-        })
+        Ok(())
     }
 }
 
-#[derive(Serialize, From)]
+#[derive(Serialize, Error, Debug)]
 pub enum ReactError {
+    #[error("No such reply exists")]
     NoSuchReply,
+    #[error("You don't own these reactions")]
+    NotYourItems,
+    #[error("You have already consumed one of these reactions")]
+    AlreadyConsumed,
+    #[error("You cannot react to your own post")]
     ThisIsYourPost,
-    InternalDbError(#[serde(skip)] sqlx::Error),
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
 }
 
-post! {
+post!(
     "/react/:post_id",
     #[json_result]
     pub async fn react(
-        pool: Extension<PgPool>,
+        conn: Extension<PgPool>,
         user: User,
         Path(post_id): Path<i32>,
         Form(used_reactions): Form<HashMap<i32, String>>,
     ) -> Json<Result<(), ReactError>> {
-        use diesel::result::Error;
-        use crate::schema::replies::dsl::*;
-
-        let conn = pool.get().expect("Could not connect to db");
-        let reply = Reply::fetch(&conn, post_id).map_err(|_| ReactError::NoSuchReply)?;
+        let reply = Reply::fetch_optional(&conn, post_id)
+            .await?
+            .ok_or(ReactError::NoSuchReply)?;
 
         if reply.author_id == user.id {
             return Err(ReactError::ThisIsYourPost);
         }
 
-        conn.transaction(|| -> Result<i32, Error> {
-            let mut new_reactions = reply.reactions;
+        let mut transaction = conn.begin().await?;
+        let mut new_reactions = Vec::new();
+        let author = User::fetch(&mut transaction, reply.author_id).await?;
 
-            let author =
-                User::fetch(&conn, reply.author_id).map_err(|_| Error::RollbackTransaction)?;
-
-            // Verify that all of the reactions are owned by the user:
-            for (reaction, selected) in used_reactions.into_iter() {
-                let drop = ItemDrop::fetch(&conn, reaction)
-                    .map_err(|_| Error::RollbackTransaction)?;
-                let item = Item::fetch(&conn, drop.item_id);
-                if selected != "on" || drop.owner_id != user.id || !item.is_reaction() {
-                    return Err(Error::RollbackTransaction);
-                }
-
-                // Set the drops to consumed.
-                use crate::schema::drops::dsl::*;
-
-                diesel::update(drops.find(reaction))
-                    .filter(consumed.eq(false))
-                    .set(consumed.eq(true))
-                    .get_result::<ItemDrop>(&conn)
-                    .map_err(|_| Error::RollbackTransaction)?;
-
-                new_reactions.push(reaction);
-                match item.item_type {
-                    ItemType::Reaction { xp_value, .. } => {
-                        author.add_experience(&conn, xp_value as i64)
-                    }
-                    _ => unreachable!(),
-                }
+        // Verify that all of the reactions are owned by the user:
+        for (reaction, selected) in used_reactions.into_iter() {
+            let item_drop = ItemDrop::fetch(&mut transaction, reaction).await?;
+            let item = item_drop.fetch_item(&mut transaction).await?;
+            if selected != "on" || item_drop.owner_id != user.id || !item.is_reaction() {
+                return Err(ReactError::NotYourItems);
             }
 
-            // Update the post with the new reactions:
-            // TODO: Move into Reply struct
-            diesel::update(replies.find(post_id))
-                .set(reactions.eq(new_reactions))
-                .get_result::<Reply>(&conn)
-                .map_err(|_| Error::RollbackTransaction)?;
+            // Set the drops to consumed:
+            if sqlx::query("UPDATE drops SET consumed = TRUE WHERE id = $1 AND consumed = FALSE")
+                .bind(reaction)
+                .execute(&mut transaction)
+                .await?
+                .rows_affected()
+                != 1
+            {
+                return Err(ReactError::AlreadyConsumed);
+            }
 
-            Ok(reply.thread_id)
-        })?;
+            new_reactions.push(reaction);
+            author
+                .add_experience(&mut transaction, item.get_experience().unwrap() as i64)
+                .await?;
+        }
+
+        sqlx::query("UPDATE replies SET reactions = reactions || $1 WHERE id = $2")
+            .bind(new_reactions)
+            .bind(post_id)
+            .execute(&mut transaction)
+            .await?;
+
+        transaction.commit().await?;
 
         Ok(())
     }
-}
-*/
-
-use comrak::{markdown_to_html, ComrakOptions};
-
-lazy_static! {
-    static ref MARKDOWN_OPTIONS: ComrakOptions = {
-        let mut options = ComrakOptions::default();
-        options.extension.strikethrough = true;
-        options.extension.table = true;
-        options.extension.autolink = true;
-        options.extension.tasklist = true;
-        options.render.hardbreaks = true;
-        options.render.escape = true;
-        options.parse.smart = true;
-        options
-    };
-}
-
-/*
-// TODO: This probably needs to be async
-fn parse_post(conn: &PgConnection, body: &str, thread_id: i32) -> String {
-    use crate::schema::replies::dsl::*;
-
-    lazy_static! {
-        static ref REPLY_RE: Regex = Regex::new(r"@(?P<reply_id>\d*)").unwrap();
-    }
-
-    let referenced_reply_ids = REPLY_RE
-        .captures_iter(&body)
-        .map(|captured_group| captured_group["reply_id"].to_string())
-        .collect::<Vec<String>>();
-
-    let mut user_cache = UserCache::new(conn);
-    let id_to_author = replies
-        .filter(thread_id.eq(thread_id))
-        .order(post_date.asc())
-        .load::<Reply>(conn)
-        .unwrap()
-        .into_iter()
-        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string()))
-        .map(|reply| {
-            (
-                reply.id.to_string(),
-                user_cache.get(reply.author_id).clone().name,
-            )
-        })
-        .collect::<HashMap<String, String>>();
-
-    let response_divs = replies
-        .filter(thread_id.eq(thread_id))
-        .order(post_date.asc())
-        .load::<Reply>(conn)
-        .unwrap()
-        .into_iter()
-        .filter(|reply| referenced_reply_ids.contains(&reply.id.to_string())).map(|reply| {
-            format!(
-                r#"<div class="respond-to-preview action-box" reply_id={reply_id}><b>@{author_name}</b></div><div class="overlay-on-hover reply-overlay"></div>"#,
-                reply_id = reply.id.to_string(),
-                author_name = user_cache.get(reply.author_id).clone().name,
-            )
-        })
-        .collect::<String>();
-
-    // TODO: replace markdown parser with our own
-    // Parse the body as markdown
-    let html_output =
-        response_divs + &markdown_to_html(&body.replace("\n", "\n\n"), &MARKDOWN_OPTIONS);
-
-    // Swap out "respond" command sequences for @ mentions
-    REPLY_RE.replace_all(&html_output, |captured_group: &Captures| {
-            let reply_id = &captured_group["reply_id"];
-            if id_to_author.contains_key(reply_id) {
-                format!(
-                    r#"<span class="respond-to-preview" reply_id={reply_id}><b>@{author_name}</b></span><div class="overlay-on-hover reply-overlay"></div>"#,
-                    reply_id = reply_id,
-                    author_name = id_to_author[reply_id],
-                )
-            } else {
-                captured_group[0].to_string()
-            }
-        }).to_string()
-}
-*/
+);
 
 use std::io::Cursor;
 
@@ -836,7 +805,7 @@ use sha2::{Digest, Sha256};
 use tokio::task;
 
 pub struct Image {
-    pub filename: String,
+    pub filename:  String,
     pub thumbnail: Option<String>,
 }
 
@@ -882,12 +851,28 @@ pub struct ImageUploadResult {
 }
 */
 
-#[derive(Debug, Serialize, From)]
+#[derive(Debug, Serialize, Error)]
 pub enum UploadImageError {
+    #[error("invalid file type")]
     InvalidExtension,
-    ImageError(#[serde(skip)] image::ImageError),
-    InternalServerError(#[serde(skip)] tokio::task::JoinError),
-    InternalBlockStorageError(#[serde(skip)] SdkError<PutObjectError>),
+    #[error("error decoding image: {0}")]
+    ImageError(
+        #[from]
+        #[serde(skip)]
+        image::ImageError,
+    ),
+    #[error("internal server error: {0}")]
+    InternalServerError(
+        #[from]
+        #[serde(skip)]
+        tokio::task::JoinError,
+    ),
+    #[error("internal block storage error: {0}")]
+    InternalBlockStorageError(
+        #[from]
+        #[serde(skip)]
+        SdkError<PutObjectError>,
+    ),
 }
 
 // TODO: move return type to struct
@@ -940,7 +925,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     if image_exists(&client, &filename).await {
         let thumbnail = format!("{hash}_thumbnail.{ext}");
         return Ok(Image {
-            filename: get_url(&filename),
+            filename:  get_url(&filename),
             thumbnail: image_exists(&client, &thumbnail)
                 .await
                 .then(move || get_url(&thumbnail)),
@@ -969,7 +954,7 @@ async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
     put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
 
     Ok(Image {
-        filename: get_url(&filename),
+        filename:  get_url(&filename),
         thumbnail: thumbnail.as_deref().map(get_url),
     })
 }

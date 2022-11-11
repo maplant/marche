@@ -1,3 +1,4 @@
+{%- import "macros.html" as macros -%}
 {% extends "base.html" %}
 
 {% block title %}{{name}}'s Profile{% endblock %}
@@ -10,34 +11,21 @@
       <div class="cell" style="width: 100%;"><b>{{name}}</b></div>
     </div>
     <div class="row">
-      <div class="cell" style="{{background}} text-align: center; min-width: 180px; min-height: 180px; text-shadow: 1px 0 black, 0 1px black, -1px 0 black, 0 -1px black; border-radius: 5px">
-        {% include "profile-pic.html" %}
-        <div class="badge-grid">
-          {% for badge in badges %}
-          {{badge|e("none")}}
-          {% endfor %}
-        </div>
-      </div>
+      {% call macros::profile_stub(stub) %}
       <div class="cell" style="vertical-align: top; padding: 15px">
         <form action="update_bio" method="post">
           <textarea name="bio" rows="18" cols="80" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px">{{bio}}</textarea>
           <button type="submit" style="margin-top: 10px">Update</button>
           <div class="error" style="display: none" id="error"></div>
           <script type="text/javascript">
-            const error_messages = {
-                TooLong: "Bio is too long ({{crate::users::MAX_BIO_LEN}} characters allowed)",
-                InternalDbError: "Internal server error, please try again later"
-            };
             $(document).ready(function () {
                 $("form").ajaxForm({
                     url: '/bio',
                     type: 'post',
                     success: function(response, _, _, _) {
-                        if (response.Err !== undefined) {
-                            var error_message = error_messages[response.Err];
-                            var error_message = error_message == undefined ? "An unknown error occurred" : error_message;
+                        if (response.error !== undefined) {
                             $('#error').show();
-                            $('#error').html(`${error_message}`);
+                            $('#error').html(`${response.error}`);
                         } else {
                             location.href = '/profile';
                         }
