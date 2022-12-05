@@ -46,7 +46,8 @@
             type: 'post',
             success: function(response, _, _, _) {
                 if (response.error !== undefined) {
-                    $("#error").html(`${response.error}`)
+                    $("#error").html(`${response.error}`);
+                    $("#error").show();
                 } else {
                     location.href = '/thread/{{thread_id}}?jump_to={{post_id}}';
                 }

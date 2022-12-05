@@ -48,10 +48,7 @@ async fn main() {
     );
 
     let app = app
-        .route(
-            "/:catch/*catch",
-            get(|| async move { ServerError::NotFound }),
-        )
+        .fallback(fallback)
         .nest_service(
             "/static",
             get_service(ServeDir::new("static")).handle_error(|error: std::io::Error| async move {
@@ -71,4 +68,8 @@ async fn main() {
         .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await
         .unwrap();
+}
+
+async fn fallback() -> (StatusCode, ServerError) {
+    (StatusCode::NOT_FOUND, ServerError::NotFound)
 }

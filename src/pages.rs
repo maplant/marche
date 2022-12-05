@@ -707,7 +707,7 @@ pub struct TradeRequestsPage {
 }
 
 get!(
-    "/offers/",
+    "/offers",
     async fn show_offers(
         conn: Extension<PgPool>,
         user: User,
