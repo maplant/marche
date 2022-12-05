@@ -132,7 +132,7 @@ pub struct AttrInfo {
 }
 
 /// An item that can be dropped
-#[derive(FromRow, Debug, Serialize)]
+#[derive(FromRow, Debug, Serialize, Clone)]
 pub struct Item {
     /// Id of the available item
     pub id:          i32,
@@ -307,7 +307,7 @@ post!(
 );
 
 /// A dropped item associated with a user
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, Clone)]
 pub struct ItemDrop {
     /// Id of the dropped item
     pub id:       i32,

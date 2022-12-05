@@ -52,7 +52,7 @@ async fn main() {
             "/:catch/*catch",
             get(|| async move { ServerError::NotFound }),
         )
-        .nest(
+        .nest_service(
             "/static",
             get_service(ServeDir::new("static")).handle_error(|error: std::io::Error| async move {
                 (

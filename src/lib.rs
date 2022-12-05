@@ -4,16 +4,17 @@ pub mod pages;
 pub mod threads;
 pub mod users;
 
-use std::{any::Any, collections::HashMap, error::Error as StdError};
+use std::{any::Any, collections::HashMap};
 
 use axum::{
     async_trait,
     body::{Body, Bytes},
     extract::{
-        multipart::MultipartError, ContentLengthLimit, FromRequest, Multipart, RequestParts,
+        multipart::{MultipartError, MultipartRejection},
+        FromRequest, Multipart,
     },
     handler::Handler,
-    http::StatusCode,
+    http::{Request, StatusCode},
     response::{IntoResponse, Response},
     Router,
 };
@@ -27,18 +28,14 @@ pub struct Endpoint {
     route_type: RouteType,
     path:       &'static str,
     handler:    &'static (dyn Any + Send + Sync + 'static),
-    installer: fn(
-        RouteType,
-        &'static str,
-        &'static (dyn Any + Send + Sync + 'static),
-        Router<Body>,
-    ) -> Router<Body>,
+    installer:
+        fn(RouteType, &'static str, &'static (dyn Any + Send + Sync + 'static), Router) -> Router,
 }
 
 impl Endpoint {
     pub const fn new<I, A>(route_type: RouteType, path: &'static str, handler: &'static I) -> Self
     where
-        I: Handler<A, Body> + Copy + Any + Send + Sync + 'static,
+        I: Handler<A, (), Body> + Copy + Any + Send + Sync + 'static,
         A: 'static,
     {
         Self {
@@ -49,7 +46,7 @@ impl Endpoint {
         }
     }
 
-    pub fn install(&self, router: Router<Body>) -> Router<Body> {
+    pub fn install(&self, router: Router) -> Router {
         (self.installer)(self.route_type, self.path, self.handler, router)
     }
 }
@@ -68,10 +65,10 @@ pub fn install<I, A>(
     route_type: RouteType,
     path: &'static str,
     handler: &'static (dyn Any + Send + Sync + 'static),
-    router: Router<Body>,
-) -> Router<Body>
+    router: Router,
+) -> Router
 where
-    I: Handler<A, Body> + Copy,
+    I: Handler<A, ()> + Copy,
     A: 'static,
 {
     tracing::info!("{route_type} {path} registered");
@@ -134,6 +131,12 @@ pub enum MultipartFormError {
         #[serde(skip)]
         serde_json::Error,
     ),
+    #[error("multipart rejection: {0}")]
+    MultipartRejection(
+        #[from]
+        #[serde(skip)]
+        MultipartRejection,
+    ),
     #[error("multipart error: {0}")]
     MultipartError(
         #[from]
@@ -149,22 +152,17 @@ impl IntoResponse for MultipartFormError {
 }
 
 #[async_trait]
-impl<F, B, const CLL: u64> FromRequest<B> for MultipartForm<F, CLL>
+impl<S, B, F, const CLL: u64> FromRequest<S, B> for MultipartForm<F, CLL>
 where
-    B: Send,
+    S: Send + Sync,
+    B: Send + 'static,
     F: DeserializeOwned + Send,
-    Multipart: FromRequest<B>,
-    ContentLengthLimit<Multipart, CLL>: FromRequest<B>,
-    <ContentLengthLimit<Multipart, CLL> as FromRequest<B>>::Rejection:
-        StdError + Send + Sync + 'static,
+    Multipart: FromRequest<S, B, Rejection = MultipartRejection>,
 {
     type Rejection = MultipartFormError;
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, MultipartFormError> {
-        let ContentLengthLimit(mut multipart) =
-            ContentLengthLimit::<Multipart, CLL>::from_request(req)
-                .await
-                .map_err(|_| MultipartFormError::InvalidContentLength)?;
+    async fn from_request(req: Request<B>, state: &S) -> Result<Self, MultipartFormError> {
+        let mut multipart = Multipart::from_request(req, state).await?;
         let mut form = HashMap::new();
         let mut file = None;
 

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashSet, sync::Arc};
 
 use askama::Template;
 use axum::{
@@ -575,18 +575,17 @@ get!(
             .await?
             .ok_or(ServerError::NotFound)?;
 
-        let equipped: HashMap<_, _> = user
-            .equipped(&*conn)
-            .await?
-            .into_iter()
-            .map(|(item, item_drop)| (item_drop.id, ItemThumbnail::new(&item, &item_drop)))
-            .collect();
+        let equipped = user.equipped(&*conn).await?;
 
+        let mut is_equipped = HashSet::new();
+        for (_, item_drop) in &equipped {
+            is_equipped.insert(item_drop.id);
+        }
         let inventory: Vec<_> = user
             .inventory(&*conn)
             .await?
             .into_iter()
-            .filter(|(_, item_drop)| !equipped.contains_key(&item_drop.id))
+            .filter(|(_, item_drop)| !is_equipped.contains(&item_drop.id))
             .map(|(item, item_drop)| ItemThumbnail::new(&item, &item_drop))
             .collect();
 
@@ -603,7 +602,10 @@ get!(
             level: user.level_info(),
             bio: user.bio,
             role: user.role,
-            equipped: equipped.into_iter().map(|(_, thumb)| thumb).collect(),
+            equipped: equipped
+                .into_iter()
+                .map(|(item, item_drop)| ItemThumbnail::new(&item, &item_drop))
+                .collect(),
             inventory,
             is_curr_user: user.id == curr_user.id,
             notes: user.notes,

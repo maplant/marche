@@ -7,7 +7,8 @@ use std::{
 use askama::Template;
 use axum::{
     async_trait,
-    extract::{Extension, Form, FromRequest, Path, Query, RequestParts},
+    extract::{Extension, Form, FromRequestParts, Path, Query},
+    http::request::Parts,
     response::{IntoResponse, Redirect, Response},
 };
 use axum_client_ip::ClientIp;
@@ -519,24 +520,23 @@ const USER_SESSION_ID_COOKIE: &str = "session_id";
 const PRIVATE_COOKIE_KEY: &str = "ea63npVp7Vg+ileGuoO0OJbBLOdSkHKkNwu87B8/joU=";
 
 #[async_trait]
-impl<B> FromRequest<B> for User
+impl<S> FromRequestParts<S> for User
 where
-    B: Send,
+    S: Send + Sync,
 {
     type Rejection = UserRejection;
 
-    async fn from_request(req: &mut RequestParts<B>) -> Result<Self, Self::Rejection> {
-        let redirect = req
-            .uri()
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let redirect = parts
+            .uri
             .path_and_query()
             .map(|x| x.as_str().to_string())
             .unwrap_or_else(String::new);
-        let cookies =
-            Cookies::from_request(req)
-                .await
-                .map_err(|_| UserRejection::Unauthorized {
-                    redirect: redirect.clone(),
-                })?;
+        let cookies = Cookies::from_request_parts(parts, state)
+            .await
+            .map_err(|_| UserRejection::Unauthorized {
+                redirect: redirect.clone(),
+            })?;
         let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let signed = cookies.private(&private_key);
         let session_id = signed
@@ -544,7 +544,7 @@ where
             .ok_or(UserRejection::Unauthorized {
                 redirect: redirect.clone(),
             })?;
-        let conn = Extension::<PgPool>::from_request(req)
+        let conn = Extension::<PgPool>::from_request_parts(parts, state)
             .await
             .map_err(|_| UserRejection::UnknownError)?;
         let Some(session) = LoginSession::fetch(&conn, session_id.value()).await? else {
