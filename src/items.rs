@@ -230,8 +230,7 @@ impl Item {
         match self.item_type.0 {
             ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
             ItemType::Avatar { ref filename } => format!(
-                r#"<img src="/static/{}.png" style="width: 50px; height: auto;">"#,
-                filename
+                r#"<img src="{filename}" style="width: 50px; height: auto;">"#,
             ),
             ItemType::ProfileBackground { .. } => {
                 format!(

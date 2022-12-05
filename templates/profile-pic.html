@@ -1,6 +1,0 @@
-{% match picture %}
-  {% when Some with (picture) %}
-    <img style="width: 100%; height: auto;" src="/static/{{ picture }}.png">
-  {% when None %}
-    <div style="width: 80px; min-height: 100px;"></div>
-{% endmatch %}

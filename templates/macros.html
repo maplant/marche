@@ -15,7 +15,7 @@
   </p>
   {% match stub.picture %}
   {% when Some with (filename) %}
-  <img style="width: 100%; height: auto;" src="/static/{{filename}}.png">
+  <img style="width: 100%; height: auto;" src="{{filename}}">
   {% when None %}
   <div style="width: 80px; min-height: 100px;"></div>
   {% endmatch %}
