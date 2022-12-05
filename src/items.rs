@@ -242,7 +242,7 @@ impl Item {
             ItemType::Reaction { ref filename, .. } => format!(
                 r#"
                 <div style="animation: start, {div_animation};">
-                    <img src="/static/{filename}.png"
+                    <img src="{filename}"
                          style="width: 50px;
                                 height: auto;
                                 transform: {transform};
@@ -480,7 +480,11 @@ impl ItemDrop {
 
         // Give the new item to the user
         let item_drop = sqlx::query_as(
-            "INSERT INTO drops (owner_id, item_id, pattern, consumed) VALUES ($1, $2, $3, FALSE)",
+            r#"
+            INSERT INTO drops (owner_id, item_id, pattern, consumed)
+            VALUES ($1, $2, $3, FALSE)
+            RETURNING *
+            "#,
         )
         .bind(user.id)
         .bind(chosen.id)
