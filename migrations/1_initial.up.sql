@@ -81,7 +81,7 @@ CREATE TABLE items (
   available BOOLEAN NOT NULL,
   rarity rarity NOT NULL,
   item_type JSONB NOT NULL,
-  attribute_map JSONB NOT NULL
+  attributes JSONB NOT NULL
 );
 
 CREATE TABLE drops (

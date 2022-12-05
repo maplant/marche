@@ -1,3 +1,4 @@
+pub mod images;
 pub mod items;
 pub mod pages;
 pub mod threads;

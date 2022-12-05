@@ -1,6 +1,6 @@
-use std::{cmp::PartialEq, collections::HashMap, sync::Arc};
+use std::{cmp::PartialEq, collections::HashMap, num::ParseIntError, str::FromStr, sync::Arc};
 
-use axum::extract::{Extension, Form, Path};
+use axum::extract::{Extension, Form, Path, Query};
 use chrono::{Duration, Utc};
 use futures::{future, StreamExt};
 use lazy_static::lazy_static;
@@ -15,12 +15,14 @@ use sqlx::{
 use thiserror::Error;
 
 use crate::{
+    images::{Image, UploadImageError, MAXIMUM_FILE_SIZE},
     post,
-    users::{ProfileStub, User, UserCache},
+    users::{ProfileStub, Role, User, UserCache},
+    MultipartForm, MultipartFormError,
 };
 
 /// Rarity of an item.
-#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Type)]
+#[derive(Copy, Clone, Debug, Hash, Eq, PartialEq, PartialOrd, Ord, Type, Serialize)]
 #[sqlx(type_name = "rarity")]
 #[sqlx(rename_all = "snake_case")]
 pub enum Rarity {
@@ -48,6 +50,26 @@ impl ToString for Rarity {
             Self::Legendary => "legendary",
             Self::Unique => "unique",
         })
+    }
+}
+
+#[derive(Copy, Clone, Debug, Error)]
+#[error("invalid rarity")]
+pub struct InvalidRarity;
+
+impl FromStr for Rarity {
+    type Err = InvalidRarity;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "common" => Ok(Self::Common),
+            "uncommon" => Ok(Self::Uncommon),
+            "rare" => Ok(Self::Rare),
+            "ultra-rare" => Ok(Self::UltraRare),
+            "legendary" => Ok(Self::Legendary),
+            "unique" => Ok(Self::Unique),
+            _ => Err(InvalidRarity),
+        }
     }
 }
 
@@ -99,17 +121,18 @@ pub enum ItemType {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AttributeMap {
-    map: HashMap<String, AttrInfo>,
+    #[serde(flatten)]
+    pub attrs: HashMap<String, AttrInfo>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct AttrInfo {
+pub struct AttrInfo {
     rarity: u32,
     seed:   usize,
 }
 
 /// An item that can be dropped
-#[derive(FromRow, Debug)]
+#[derive(FromRow, Debug, Serialize)]
 pub struct Item {
     /// Id of the available item
     pub id:          i32,
@@ -243,6 +266,46 @@ impl Item {
     }
 }
 
+#[derive(Deserialize)]
+struct SetAvailability {
+    available: bool,
+}
+
+#[derive(Debug, Serialize, Error)]
+enum SetAvailabilityError {
+    #[error("you are not authorized to make items available to drop")]
+    Unauthorized,
+    #[error("internal db error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+}
+
+post!(
+    "/set_item_availability/:item_id",
+    #[json_result]
+    async fn set_availability(
+        conn: Extension<PgPool>,
+        user: User,
+        Path(item_id): Path<i32>,
+        Query(SetAvailability { available }): Query<SetAvailability>,
+    ) -> Json<Result<(), SetAvailabilityError>> {
+        if user.role < Role::Admin {
+            return Err(SetAvailabilityError::Unauthorized);
+        }
+
+        sqlx::query("UPDATE items SET available = $1 WHERE id = $2")
+            .bind(available)
+            .bind(item_id)
+            .execute(&*conn)
+            .await?;
+
+        Ok(())
+    }
+);
+
 /// A dropped item associated with a user
 #[derive(FromRow, Debug)]
 pub struct ItemDrop {
@@ -308,25 +371,29 @@ impl ItemDrop {
         let item = Item::fetch(&mut transaction, self.item_id).await?;
         let user: User = match *item.item_type {
             ItemType::Avatar { .. } => {
-                sqlx::query_as("UPDATE users SET equip_slot_prof_pic = $1 WHERE id = $2")
-                    .bind(self.id)
-                    .bind(user.id)
-                    .fetch_one(&mut transaction)
-                    .await?
+                sqlx::query_as(
+                    "UPDATE users SET equip_slot_prof_pic = $1 WHERE id = $2 RETURNING *",
+                )
+                .bind(self.id)
+                .bind(user.id)
+                .fetch_one(&mut transaction)
+                .await?
             }
             ItemType::ProfileBackground { .. } => {
-                sqlx::query_as("UPDATE users SET equip_slot_background = $1 WHERE id = $2")
-                    .bind(self.id)
-                    .bind(user.id)
-                    .fetch_one(&mut transaction)
-                    .await?
+                sqlx::query_as(
+                    "UPDATE users SET equip_slot_background = $1 WHERE id = $2 RETURNING *",
+                )
+                .bind(self.id)
+                .bind(user.id)
+                .fetch_one(&mut transaction)
+                .await?
             }
             ItemType::Badge { .. } => {
                 let mut badges = user.equip_slot_badges.clone();
                 if !badges.contains(&self.id) && badges.len() < crate::users::MAX_NUM_BADGES {
                     badges.push(self.id);
                 }
-                sqlx::query_as("UPDATE users SET equip_slot_badges = $1 WHERE id = $2")
+                sqlx::query_as("UPDATE users SET equip_slot_badges = $1 WHERE id = $2 RETURNING *")
                     .bind(badges)
                     .bind(user.id)
                     .fetch_one(&mut transaction)
@@ -384,16 +451,6 @@ impl ItemDrop {
             Ok(())
         }
     }
-
-    /*
-        pub async fn is_equiped(&self, conn: &PgPool) -> Result<bool, sqlx::Error> {
-            Ok(User::fetch(conn, self.owner_id)
-                .await?
-                .equipped(conn)
-                .await?
-                .contains(&self))
-    }
-        */
 
     /// Possibly selects an item, depending on the last drop.
     pub async fn drop(
@@ -619,7 +676,7 @@ pub struct Attributes {
 
 impl Attributes {
     fn fetch(item: &Item, pattern: i32) -> Self {
-        let attributes = item.attributes.0.clone().map;
+        let attributes = item.attributes.0.clone().attrs;
         let mut attr_res = HashMap::new();
 
         for (attr_name, AttrInfo { rarity, seed }) in attributes.into_iter() {
@@ -1034,3 +1091,214 @@ impl OutgoingOffer {
             .await
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct MintItemForm {
+    name:       String,
+    descr:      String,
+    rarity:     String,
+    item_type:  String,
+    badge:      String,
+    experience: String,
+    colors:     String,
+    attrs:      String,
+}
+
+#[derive(Debug, Serialize, Error)]
+pub enum MintItemError {
+    #[error("item name cannot be empty")]
+    EmptyName,
+    #[error("item description cannot be empty")]
+    EmptyDescription,
+    #[error("invalid rarity")]
+    InvalidRarity(
+        #[from]
+        #[serde(skip)]
+        InvalidRarity,
+    ),
+    #[error("invalid item type")]
+    InvalidItemType,
+    #[error("invalid badge")]
+    InvalidBadge,
+    #[error("attributes is not valid json")]
+    InvalidAttributes,
+    #[error("background colors is not valid json")]
+    InvalidColors(
+        #[from]
+        #[serde(skip)]
+        serde_json::Error,
+    ),
+    #[error("experience value is not a valid 32 bit signed integer")]
+    InvalidExperience(
+        #[from]
+        #[serde(skip)]
+        ParseIntError,
+    ),
+    #[error("a file must be attached to create a new reaction or avatar")]
+    NoImageAttached,
+    #[error("error uploading image: {0}")]
+    UploadImageError(#[from] UploadImageError),
+    #[error("no such attribute '{0}' exists")]
+    NoSuchAttribute(String),
+    #[error("you are not authorized to mint items")]
+    Unauthorized,
+    #[error("internal db error {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+    #[error("multipart form error {0}")]
+    MultipartFormError(#[from] MultipartFormError),
+}
+
+post!(
+    "/mint",
+    #[json_result]
+    async fn mint_item(
+        conn: Extension<PgPool>,
+        user: User,
+        form: Result<MultipartForm<MintItemForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
+    ) -> Json<Result<Item, MintItemError>> {
+        if user.role < Role::Admin {
+            return Err(MintItemError::Unauthorized);
+        }
+
+        let MultipartForm {
+            form:
+                MintItemForm {
+                    name,
+                    descr,
+                    rarity,
+                    item_type,
+                    badge,
+                    experience,
+                    colors,
+                    attrs,
+                },
+            file,
+        } = form?;
+
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(MintItemError::EmptyName);
+        }
+
+        let descr = descr.trim();
+        if descr.is_empty() {
+            return Err(MintItemError::EmptyDescription);
+        }
+
+        let attrs: HashMap<String, AttrInfo> =
+            serde_json::from_str(&attrs).map_err(|_| MintItemError::InvalidAttributes)?;
+
+        for (attr, _) in &attrs {
+            if !ATTRIBUTES.contains_key(attr.as_str()) {
+                return Err(MintItemError::NoSuchAttribute(attr.clone()));
+            }
+        }
+
+        let rarity: Rarity = rarity.parse()?;
+
+        let item_type = match item_type.as_str() {
+            "avatar" => {
+                let filename =
+                    Image::upload_image(file.ok_or(MintItemError::NoImageAttached)?.bytes)
+                        .await?
+                        .filename;
+                ItemType::Avatar { filename }
+            }
+            "background" => {
+                let colors = serde_json::from_str(&colors)?;
+                ItemType::ProfileBackground { colors }
+            }
+            "reaction" => {
+                let filename =
+                    Image::upload_image(file.ok_or(MintItemError::NoImageAttached)?.bytes)
+                        .await?
+                        .filename;
+                let xp_value: i32 = experience.parse()?;
+                ItemType::Reaction { filename, xp_value }
+            }
+            "badge" => {
+                let value = badge.trim().to_string();
+                if value.is_empty() {
+                    return Err(MintItemError::InvalidBadge);
+                }
+                ItemType::Badge {
+                    value: badge.trim().to_string(),
+                }
+            }
+            _ => return Err(MintItemError::InvalidItemType),
+        };
+
+        Ok(sqlx::query_as(
+            r#"
+            INSERT INTO items (name, description, available, rarity, item_type, attributes)
+            VALUES ($1, $2, FALSE, $3, $4, $5)
+            RETURNING *
+            "#,
+        )
+        .bind(name)
+        .bind(descr)
+        .bind(rarity)
+        .bind(Jsonb(item_type))
+        .bind(Jsonb(AttributeMap { attrs }))
+        .fetch_one(&*conn)
+        .await?)
+    }
+);
+
+#[derive(Deserialize)]
+pub struct GiftItemForm {
+    receiver_id: i32,
+    item_id:     i32,
+    #[serde(default, deserialize_with = "crate::empty_string_as_none")]
+    pattern:     Option<i32>,
+}
+
+#[derive(Debug, Error, Serialize)]
+pub enum GiftItemError {
+    #[error("You are not authorized to gift items")]
+    Unauthorized,
+    #[error("Internal database error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+}
+
+post!(
+    "/gift",
+    #[json_result]
+    async fn gift(
+        conn: Extension<PgPool>,
+        user: User,
+        Form(GiftItemForm {
+            receiver_id,
+            item_id,
+            pattern,
+        }): Form<GiftItemForm>,
+    ) -> Json<Result<(), GiftItemError>> {
+        let pattern = pattern.unwrap_or_else(rand::random);
+
+        if user.role < Role::Admin {
+            return Err(GiftItemError::Unauthorized);
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO drops (owner_id, item_id, pattern, consumed)
+            VALUES ($1, $2, $3, FALSE)
+            "#,
+        )
+        .bind(receiver_id)
+        .bind(item_id)
+        .bind(pattern)
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+);

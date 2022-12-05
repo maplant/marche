@@ -1,10 +1,7 @@
 //! Display threads
 use std::collections::{HashMap, HashSet};
 
-use axum::{
-    body::Bytes,
-    extract::{Extension, Form, Path, Query},
-};
+use axum::extract::{Extension, Form, Path, Query};
 use chrono::{prelude::*, NaiveDateTime};
 use futures::stream::StreamExt;
 use marche_proc_macros::json_result;
@@ -13,30 +10,31 @@ use sqlx::{FromRow, PgExecutor, PgPool};
 use thiserror::Error;
 
 use crate::{
+    images::{Image, UploadImageError, MAXIMUM_FILE_SIZE},
     items::ItemDrop,
     post,
     users::{Role, User},
-    File, MultipartForm, MultipartFormError,
+    MultipartForm, MultipartFormError,
 };
 
 #[derive(FromRow, Default, Debug, Serialize)]
 pub struct Thread {
     /// Id of the thread
-    pub id: i32,
+    pub id:          i32,
     /// Id of the last post
-    pub last_post: i32,
+    pub last_post:   i32,
     /// Title of the thread
-    pub title: String,
+    pub title:       String,
     /// Tags given to this thread
-    pub tags: Vec<i32>,
+    pub tags:        Vec<i32>,
     /// Number of replies to this thread, not including the first.
     pub num_replies: i32,
     /// Whether or not the thread is pinned
-    pub pinned: bool,
+    pub pinned:      bool,
     /// Whether or not the thread is locked
-    pub locked: bool,
+    pub locked:      bool,
     /// Whether or not the thread is hidden
-    pub hidden: bool,
+    pub hidden:      bool,
 }
 
 impl Thread {
@@ -115,8 +113,8 @@ post!(
 #[derive(Debug, Deserialize)]
 pub struct ThreadForm {
     title: String,
-    tags: String,
-    body: String,
+    tags:  String,
+    body:  String,
 }
 
 #[derive(Debug, Serialize, Error)]
@@ -160,7 +158,13 @@ post! {
         }
 
         let post_date = Utc::now().naive_utc();
-        let (image, thumbnail, filename) = upload_image(file).await?;
+
+        let (image, thumbnail, filename) = if let Some(file) = file {
+            let Image { filename: image, thumbnail } = Image::upload_image(file.bytes).await?;
+            (Some(image), thumbnail, file.name)
+        } else {
+            (None, None, String::new())
+        };
 
         let mut tags = Vec::new();
         for tag in parse_tag_list(&thread.tags) {
@@ -310,8 +314,8 @@ post!(
 
 #[derive(Debug, FromRow, Serialize, Clone)]
 pub struct Tag {
-    pub id: i32,
-    pub name: String,
+    pub id:         i32,
+    pub name:       String,
     /// Number of posts that have been tagged with this tag.
     pub num_tagged: i32,
 }
@@ -432,7 +436,7 @@ impl Tags {
 #[derive(FromRow, Debug, Serialize)]
 pub struct Reply {
     /// Id of the reply
-    pub id: i32,
+    pub id:        i32,
     /// Id of the author
     pub author_id: i32,
     /// Id of the thread
@@ -441,19 +445,19 @@ pub struct Reply {
     #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
-    pub body: String,
+    pub body:      String,
     /// Any item that was rewarded for this post
-    pub reward: Option<i32>,
+    pub reward:    Option<i32>,
     /// Reactions attached to this post
     pub reactions: Vec<i32>,
     /// Image associated with this post
-    pub image: Option<String>,
+    pub image:     Option<String>,
     /// Thumbnail associated with this post's image
     pub thumbnail: Option<String>,
     /// Filename associated with the image
-    pub filename: String,
+    pub filename:  String,
     /// Whether or not the thread is hidden
-    pub hidden: bool,
+    pub hidden:    bool,
 }
 
 impl Reply {
@@ -545,7 +549,7 @@ post!(
 
 #[derive(Deserialize)]
 pub struct ReplyForm {
-    body: String,
+    body:      String,
     thread_id: String,
 }
 
@@ -598,7 +602,16 @@ post!(
         }
 
         let post_date = Utc::now().naive_utc();
-        let (image, thumbnail, filename) = upload_image(file).await?;
+
+        let (image, thumbnail, filename) = if let Some(file) = file {
+            let Image {
+                filename: image,
+                thumbnail,
+            } = Image::upload_image(file.bytes).await?;
+            (Some(image), thumbnail, file.name)
+        } else {
+            (None, None, String::new())
+        };
 
         let mut transaction = conn.begin().await?;
 
@@ -803,172 +816,3 @@ post!(
         Ok(())
     }
 );
-
-use std::io::Cursor;
-
-use aws_sdk_s3::{
-    error::PutObjectError,
-    model::ObjectCannedAcl,
-    output::PutObjectOutput,
-    types::{ByteStream, SdkError},
-    Client, Endpoint,
-};
-use base64ct::{Base64Url, Encoding};
-use image::ImageFormat;
-use sha2::{Digest, Sha256};
-use tokio::task;
-
-pub struct Image {
-    pub filename: String,
-    pub thumbnail: Option<String>,
-}
-
-pub const IMAGE_STORE_ENDPOINT: &'static str = "https://marche-storage.nyc3.digitaloceanspaces.com";
-pub const IMAGE_STORE_BUCKET: &'static str = "images";
-
-pub fn get_url(filename: &str) -> String {
-    format!("{IMAGE_STORE_ENDPOINT}/{IMAGE_STORE_BUCKET}/{filename}")
-}
-
-pub const MAXIMUM_FILE_SIZE: u64 = 12 * 1024 * 1024; /* 12mb */
-
-async fn image_exists(client: &Client, filename: &str) -> bool {
-    client
-        .head_object()
-        .bucket(IMAGE_STORE_BUCKET)
-        .key(filename)
-        .send()
-        .await
-        .is_ok()
-}
-
-async fn put_image(
-    client: &Client,
-    filename: &str,
-    ext: &str,
-    body: ByteStream,
-) -> Result<PutObjectOutput, SdkError<PutObjectError>> {
-    client
-        .put_object()
-        .acl(ObjectCannedAcl::PublicRead)
-        .content_type(format!("image/{}", ext))
-        .bucket(IMAGE_STORE_BUCKET)
-        .key(filename)
-        .body(body)
-        .send()
-        .await
-}
-
-/*
-pub struct ImageUploadResult {
-
-}
-*/
-
-#[derive(Debug, Serialize, Error)]
-pub enum UploadImageError {
-    #[error("invalid file type")]
-    InvalidExtension,
-    #[error("error decoding image: {0}")]
-    ImageError(
-        #[from]
-        #[serde(skip)]
-        image::ImageError,
-    ),
-    #[error("internal server error: {0}")]
-    InternalServerError(
-        #[from]
-        #[serde(skip)]
-        tokio::task::JoinError,
-    ),
-    #[error("internal block storage error: {0}")]
-    InternalBlockStorageError(
-        #[from]
-        #[serde(skip)]
-        SdkError<PutObjectError>,
-    ),
-}
-
-// TODO: move return type to struct
-async fn upload_image(
-    file: Option<File>,
-) -> Result<(Option<String>, Option<String>, String), UploadImageError> {
-    match file {
-        Some(file) => {
-            let Image {
-                filename,
-                thumbnail,
-            } = upload_bytes(file.bytes).await?;
-            Ok((Some(filename), thumbnail, file.name))
-        }
-        None => Ok((None, None, String::new())),
-    }
-}
-
-/// Upload image to object storage
-async fn upload_bytes(bytes: Bytes) -> Result<Image, UploadImageError> {
-    /// Maximum width/height of an image.
-    const MAX_WH: u32 = 400;
-
-    let format = image::guess_format(&bytes)?;
-    let ext = match format {
-        ImageFormat::Png => "png",
-        ImageFormat::Jpeg => "jpeg",
-        ImageFormat::Gif => "gif",
-        ImageFormat::WebP => "webp",
-        _ => return Err(UploadImageError::InvalidExtension),
-    };
-
-    let (bytes, hash) = task::spawn_blocking(move || {
-        let mut hasher = Sha256::new();
-        hasher.update(&bytes);
-        (bytes, Base64Url::encode_string(&hasher.finalize()))
-    })
-    .await?;
-
-    // Check if file already exists:
-    let config = aws_config::from_env()
-        .endpoint_resolver(Endpoint::immutable(
-            IMAGE_STORE_ENDPOINT.parse().expect("valid URI"),
-        ))
-        .load()
-        .await;
-    let client = Client::new(&config);
-    let filename = format!("{hash}.{ext}");
-
-    if image_exists(&client, &filename).await {
-        let thumbnail = format!("{hash}_thumbnail.{ext}");
-        return Ok(Image {
-            filename: get_url(&filename),
-            thumbnail: image_exists(&client, &thumbnail)
-                .await
-                .then(move || get_url(&thumbnail)),
-        });
-    }
-
-    // Resize the image if it is necessary
-    let image = image::load_from_memory(&bytes)?;
-    let thumbnail = if image.height() > MAX_WH || image.width() > MAX_WH {
-        let thumb = task::spawn_blocking(move || image.thumbnail(MAX_WH, MAX_WH)).await?;
-        let mut output = Cursor::new(Vec::with_capacity(thumb.as_bytes().len()));
-        thumb.write_to(&mut output, format)?;
-        let thumbnail = format!("{hash}_thumbnail.{ext}");
-        put_image(
-            &client,
-            &thumbnail,
-            &ext,
-            ByteStream::from(output.into_inner()),
-        )
-        .await?;
-        Some(thumbnail)
-    } else {
-        None
-    };
-
-    put_image(&client, &filename, &ext, ByteStream::from(bytes)).await?;
-
-    Ok(Image {
-        filename: get_url(&filename),
-        thumbnail: thumbnail.as_deref().map(get_url),
-    })
-}

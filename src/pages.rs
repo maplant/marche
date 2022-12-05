@@ -14,7 +14,7 @@ use thiserror::Error;
 
 use crate::{
     get,
-    items::{IncomingOffer, ItemDrop, ItemThumbnail, OutgoingOffer},
+    items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
     threads::{Reply, Tag, Tags, Thread},
     users::{LevelInfo, ProfileStub, Role, User, UserCache},
 };
@@ -63,16 +63,45 @@ impl IntoResponse for ServerError {
 #[template(path = "items.html")]
 pub struct Items {
     offers: usize,
+    items:  Vec<ItemStub>,
+}
+
+#[derive(Debug)]
+pub struct ItemStub {
+    id:          i32,
+    name:        String,
+    description: String,
+    item_type:   String,
+    attrs:       String,
+    thumbnail:   String,
+    rarity:      String,
+    available:   bool,
 }
 
 get!(
     "/items",
-    pub async fn mint(user: User) -> Result<Items, ServerError> {
+    pub async fn items(conn: Extension<PgPool>, user: User) -> Result<Items, ServerError> {
         if user.role != Role::Admin {
-            Err(ServerError::Unauthorized)
-        } else {
-            Ok(Items { offers: 0 })
+            return Err(ServerError::Unauthorized);
         }
+
+        let items = sqlx::query_as("SELECT * FROM items ORDER BY rarity DESC, id DESC")
+            .fetch(&*conn)
+            .filter_map(|item: Result<Item, _>| future::ready(item.ok()))
+            .map(|item| ItemStub {
+                thumbnail:   item.get_thumbnail_html(rand::random()),
+                id:          item.id,
+                name:        item.name,
+                description: item.description,
+                item_type:   serde_json::to_string(&item.item_type).unwrap(),
+                attrs:       serde_json::to_string(&item.attributes).unwrap(),
+                rarity:      item.rarity.to_string(),
+                available:   item.available,
+            })
+            .collect()
+            .await;
+
+        Ok(Items { offers: 0, items })
     }
 );
 

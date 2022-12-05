@@ -124,19 +124,17 @@ $(document).ready(function() {
         var button = $(this).parents("#attach-file-to-reply-button");
         var buttonTextHolder = $("#attach-file-to-reply-text-container");
         var filenameTextHolder = $("#attached-filename-text-container");
-        if (file){
+        if (file) {
             button.attr("title", file.name);
             button.css("background-color", "lightgreen");
             buttonTextHolder[0].textContent="✔️ File!";
             filenameTextHolder[0].textContent=`└ ${file.name}`;
-        }
-        else{
+        } else {
             button.attr("title", "");
             button.css("background-color", "");
             buttonTextHolder[0].textContent="+ File!";
             filenameTextHolder[0].textContent="";
         }
-        // alert( event.target.files[0].name );
       });
 });
 

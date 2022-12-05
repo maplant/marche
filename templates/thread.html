@@ -223,13 +223,15 @@
               type: 'post',
               success: function(response, _, _, _) {
                   if (response.error !== undefined) {
-                      $("#error").html(`${response.error_message}`)
+                      $("#error").html(`${response.error}`);
+                      $("#error").show();
                   } else {
                       location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
                   }
               },
               error: function(_, status, error) {
-                  $("#error").html(`An unknown error occurred`);
+                  $("#error").html("An unknown error occurred");
+                  $("#error").show();
               }
           });
       });

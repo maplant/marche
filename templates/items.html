@@ -4,7 +4,7 @@
 
 {% block content %}
 <li class="menu-item" style="display: grid; padding: 15px">
-  <form action="/mint" method="post" enctype="multipart/form-data">
+  <form action="/mint" id="mint" method="post" enctype="multipart/form-data">
     Mint a new item
     <div class="table" style="width: 100%">
       <div class="row">
@@ -32,13 +32,199 @@
             <option value="common">Common</option>
             <option value="uncommon">Uncommon</option>
             <option value="rare">Rare</option>
-            <option value="ultra_rare">Ultra-rare</option>
+            <option value="ultra-rare">Ultra-rare</option>
             <option value="legendary">Legendary</option>
             <option value="unique">Unique</option>
           </select>
         </div>
-      </div class="row"> 
+      </div class="row">
+      <div class="row">
+        <div class="heavy-cell">
+          Attributes:
+        </div>
+        <div class="heavy-cell">
+          <input type="text" name="attrs" value="{}" style="width: 100%; box-sizing: border-box; padding: 5px">
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell">
+          <select name="item_type" id="item-type">
+            <option value="badge">Badge</option>
+            <option value="reaction">Reaction</option>
+            <option value="background">Profile Background</option>
+            <option value="avatar">Avatar</option>
+          </select>
+        </div>
+        <div class="heavy-cell">
+          <div id="badge-form">
+            <input type="text" name="badge" placeholder="badge" style="box-sizing: border-box; padding: 5px">
+          </div>
+          <div id="reaction-form" style="display: none;">
+            <input type="number" name="experience" placeholder="experience awarded" style="box-sizing: border-box; padding: 5px">
+          </div>
+          <div id="background-form" style="display: none;">
+            <input type="text" name="colors" placeholder="[color1, color2...]" style="box-sizing: border-box; padding: 5px">
+          </div>
+          <div id="image-form" style="display: none;">
+            <label id="attach-file-to-reply-button" class="action-box" style="margin-left: 0px">
+              <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
+              <span id="attach-file-to-reply-text-container">Image</span>
+            </label>
+            <div id="attached-filename-text-container"></div>
+          </div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell">
+        </div>
+        <div class="cell">
+          <div class="error" id="error" style="display: none; margin: 5px"></div>
+          <button type="submit" class="action-box" style="float: right;">New Item</button>
+        </div>
+      </div>
     </div>
   </form>
 </li>
+{% for item in items %}
+<li class="menu-item" style="display: inherit; text-align: left">
+  <div class="table">
+    <div class="row">
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell" style="width: 100%;">
+        <div class="item-{{item.rarity}}">
+          {{item.thumbnail|e("none")}}
+        </div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Name:</div>
+      <div class="heavy-cell">{{item.name}}</div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Description:</div>
+      <div class="heavy-cell">{{item.description}}</div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Type:</div>
+      <div class="heavy-cell"><tt style="padding: 5px; background: white">{{item.item_type}}</tt></div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Attributes:</div>
+      <div class="heavy-cell"><tt style="padding: 5px; background: white">{{item.attrs}}</tt></div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell">Rarity:</div>
+      <div class="heavy-cell"><div class="rarity-{{item.rarity}}">{{item.rarity}}</div></div>
+    </div>
+    <div class="row">
+      <div class="heavy-cell"></div>
+      <div class="heavy-cell">
+        <form id="{{item.id}}">
+          <input type="hidden" value="{{item.id}}" name="item_id">
+          <input type="text" name="receiver_id" placeholder="Receiver Id" style="box-sizing: border-box; padding: 5px">
+          <input type="text" name="pattern" placeholder="Pattern (empty for random)" style="box-sizing: border-box; padding: 5px">
+          <div class="action-box" id="gift-{{item.id}}" onclick="gift({{item.id}})">Gift</div>
+        </form>
+      </div>
+    </div>
+    <div class="row">
+      <div class="cell">
+        <div class="action-box" style="width: 100%" 
+             onclick="setAvailable({{item.id}}, !{{item.available}})">
+          {% if item.available %}
+          Make Unavailable
+          {% else %}
+          Make Available
+          {% endif %}
+        </div>
+      </div>
+      <div class="cell"><div class="error" id="{{item.id}}-available-error" style="display: none"></div></div>
+    </div>
+  </div>
+</li>
+{% endfor %}
+<script type="text/javascript">
+  $(document).ready(function () {
+      $('#item-type').change(function () {
+          $('#badge-form').hide();
+          $('#reaction-form').hide();
+          $('#background-form').hide();
+          $('#image-form').hide();
+          if ($(this).val() == "reaction") {
+              $('#reaction-form').show();
+              $('#image-form').show();
+          } else if ($(this).val() == "avatar") {
+              $('#image-form').show();
+          } else {
+              $(`#${$(this).val()}-form`).show();
+          }
+      });
+
+      // Custom file input button
+      $("#attach-file-to-reply-input").change(function(event) {
+          var file = event.target.files[0];
+          var button = $(this).parents("#attach-file-to-reply-button");
+          var buttonTextHolder = $("#attach-file-to-reply-text-container");
+          var filenameTextHolder = $("#attached-filename-text-container");
+          if (file){
+              button.attr("title", file.name);
+              button.css("background-color", "lightgreen");
+              buttonTextHolder[0].textContent="✔️ Image";
+              filenameTextHolder[0].textContent=`└ ${file.name}`;
+          } else {
+            button.attr("title", "");
+            button.css("background-color", "");
+            buttonTextHolder[0].textContent="Image";
+            filenameTextHolder[0].textContent="";
+        }
+      });
+
+      $('form#mint').ajaxForm({
+          url: '/mint',
+          type: 'post',
+          success: function(response, _, _, _) {
+              if (response.error !== undefined) {
+                  $("#error").html(`${response.error}`);
+                  $("#error").show();
+              } else {
+                  location.href = "/items";
+              }
+          },
+          error: function(_, status, error) {
+              $("#error").html("An unknown error occurred");
+              $("#error").show();
+          }
+      })
+  });
+  function setAvailable(id, available) {
+      $.ajax({
+          url: `/set_item_availability/${id}?available=${available}`,
+          type: `post`,
+          complete: function(_, _) {
+              location.href = "/items";
+          }
+      });
+  }
+  function gift(item_id) {
+      $(`#gift-${item_id}`).prop("disabled", true);
+      $(`#gift-${item_id}`).html("Gift");
+      $.ajax({
+          url: "gift",
+          type: "post",
+          data: $(`#${item_id}`).serialize(),
+          success: function(response, _, _, _) {
+              if (response.error !== undefined) {
+                  $(`#error-${item_id}`).html(`${response.error}`);
+                  $(`#gift-${item_id}`).html("Gift");
+              } else {
+                  $(`#gift-${item_id}`).html("✔️ Gift");
+              }
+              $(`#gift-${item_id}`).prop("disabled", false);
+          },
+          error: function(_, _, _) {
+
+          }
+      });
+  }
+</script>
 {% endblock %}

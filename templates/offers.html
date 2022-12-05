@@ -163,7 +163,7 @@
           type: 'post',
           success: function(response, _, _, _) {
               if (response.error !== undefined) {
-                  $(`#error-${offer_id}`).html("${response.error}");
+                  $(`#error-${offer_id}`).html(`${response.error}`);
                   $(`#accept-${offer_id}`).prop("disabled", false);
                   $(`#decline-${offer_id}`).prop("disabled", false);
               } else {
@@ -172,7 +172,7 @@
               }
           },
           error: function(_, status, error) {
-              $(`#error-${offer_id}`).html("Unable to decline offer, status: ${status}, error: ${error}");
+              $(`#error-${offer_id}`).html("Unknown error");
               $(`#accept-${offer_id}`).prop("disabled", false);
               $(`#decline-${offer_id}`).prop("disabled", false);
           }
@@ -186,7 +186,7 @@
           type: 'post',
           success: function(response, _, _, _) {
               if (response.error !== undefined) {
-                  $(`#error-${offer_id}`).html("${response.error}");
+                  $(`#error-${offer_id}`).html(`${response.error}`);
                   $(`#rescind-${offer_id}`).prop("disabled", false);
               } else {
                   $(`#rescind-${offer_id}`).html("❌ Rescinded");
@@ -194,7 +194,7 @@
               }
           },
           error: function(_, status, error) {
-              $(`#error-${offer_id}`).html("Unable to decline offer, status: ${status}, error: ${error}");
+              $(`#error-${offer_id}`).html("Unknown error");
               $(`#rescind-${offer_id}`).prop("disabled", false);
           }
       });
