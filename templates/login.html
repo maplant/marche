@@ -39,22 +39,17 @@
           $("form").ajaxForm({
               url: '/login',
               type: 'post',
-              success: function(response, _, _, _) {
-                  if (response.error !== undefined) {
-                      $('#error').show();
-                      $('#error').html(`${response.error}`);
+              success: function(response) {
+                  const urlParams = new URLSearchParams(window.location.search);
+                  if (urlParams.has('redirect')) {
+                      location.href = urlParams.get('redirect');
                   } else {
-                      const urlParams = new URLSearchParams(window.location.search);
-                      if (urlParams.has('redirect')) {
-                          location.href = urlParams.get('redirect');
-                      } else {
-                          location.href = '/';
-                      }
+                      location.href = '/';
                   }
               },
-              error: function(_, _, _) {
+              error: function(xhr) {
+                  $('#error').html(`${xhr.responseJSON.error}`)
                   $('#error').show();
-                  $('#error').html('An unknown error occurred');
               }
           });
       });

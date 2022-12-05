@@ -151,7 +151,7 @@
           $.ajax({
               url: `/thread/{{id}}?pinned=${set_pinned}`,
               type: 'post',
-              complete: function(_, _) {
+              complete: function() {
                   location.href = `/thread/{{id}}`;
               }
           });
@@ -161,7 +161,7 @@
           $.ajax({
               url: `/thread/{{id}}?locked=${set_locked}`,
               type: 'post',
-              complete: function(_, _) {
+              complete: function() {
                   location.href = `/thread/{{id}}`;
               }
           });
@@ -171,7 +171,7 @@
           $.ajax({
               url: `/thread/{{id}}?hidden=${set_hidden}`,
               type: 'post',
-              complete: function(_, _) {
+              complete: function() {
                   location.href = `/thread/{{id}}`;
               }
           });
@@ -184,7 +184,7 @@
               data: {
                   hidden: hide,
               },
-              complete: function(_, _) {
+              complete: function() {
                   if (hide) {
                       $(`#hidden-${id}`).css('filter', 'brightness(70%)');
                       $(`#hidden-${id}`).attr('hidden', true);
@@ -201,7 +201,7 @@
           $.ajax({
               url: '/delete_thread/{{id}}',
               type: 'post',
-              complete: function(_, _) {
+              complete: function() {
                   location.href = '/t/en';
               }
           });
@@ -210,7 +210,7 @@
           $.ajax({
               url: `/delete_reply/${id}`,
               type: 'post',
-              complete: function(_, _) {
+              complete: function() {
                   $(`#reply-${id}`).slideToggle();
               }
           });
@@ -221,16 +221,12 @@
           $("form#reply").ajaxForm({
               url: '/reply',
               type: 'post',
-              success: function(response, _, _, _) {
-                  if (response.error !== undefined) {
-                      $("#error").html(`${response.error}`);
-                      $("#error").show();
-                  } else {
-                      location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
-                  }
+              sucess: function() {
+                  // TODO: Populate a new reply with the contents of the resonse
+                  location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
               },
-              error: function(_, status, error) {
-                  $("#error").html("An unknown error occurred");
+              error: function(xhr) {
+                  $("#error").html(`${xhr.responseJSON.error}`);
                   $("#error").show();
               }
           });

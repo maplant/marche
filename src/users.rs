@@ -16,7 +16,7 @@ use chrono::{prelude::*, Duration};
 use futures::StreamExt;
 use ipnetwork::IpNetwork;
 use libpasta::verify_password;
-use marche_proc_macros::json_result;
+use marche_proc_macros::{json, ErrorCode};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgExecutor, PgPool, Postgres, Row, Transaction, Type};
@@ -356,10 +356,10 @@ pub struct UpdateUser {
     role: Role,
 }
 
-#[derive(Debug, Error, Serialize)]
+#[derive(Debug, Error, Serialize, ErrorCode)]
 pub enum UpdateUserError {
     #[error("You are not privileged enough")]
-    Unprivileged,
+    Unauthorized,
     #[error("There is no such user")]
     NoSuchUser,
     #[error("Internal database error: {0}")]
@@ -372,19 +372,19 @@ pub enum UpdateUserError {
 
 post!(
     "/user/:user_id",
-    #[json_result]
+    #[json]
     async fn update_user(
         conn: Extension<PgPool>,
         moderator: User,
         Path(user_id): Path<i32>,
         Query(UpdateUser { role }): Query<UpdateUser>,
-    ) -> Json<Result<(), UpdateUserError>> {
+    ) -> Result<(), UpdateUserError> {
         let user = User::fetch_optional(&*conn, user_id)
             .await?
             .ok_or(UpdateUserError::NoSuchUser)?;
 
         if user.role >= moderator.role || role >= moderator.role {
-            return Err(UpdateUserError::Unprivileged);
+            return Err(UpdateUserError::Unauthorized);
         }
 
         sqlx::query("UPDATE users SET role = $1 WHERE id = $2")
@@ -405,15 +405,15 @@ pub struct BanUser {
 
 post!(
     "/ban/:user_id",
-    #[json_result]
+    #[json]
     async fn ban_user(
         conn: Extension<PgPool>,
         moderator: User,
         Path(user_id): Path<i32>,
         Query(BanUser { ban_len }): Query<BanUser>,
-    ) -> Json<Result<(), UpdateUserError>> {
+    ) -> Result<(), UpdateUserError> {
         if moderator.role < Role::Moderator || moderator.id == user_id {
-            return Err(UpdateUserError::Unprivileged);
+            return Err(UpdateUserError::Unauthorized);
         }
         User::fetch_optional(&*conn, user_id)
             .await?
@@ -434,7 +434,7 @@ pub struct UpdateBioForm {
     bio: String,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum UpdateBioError {
     #[error("Bio is too long (maximum {MAX_BIO_LEN} characters allowed)")]
     TooLong,
@@ -450,12 +450,12 @@ pub const MAX_BIO_LEN: usize = 300;
 
 post!(
     "/bio",
-    #[json_result]
+    #[json]
     async fn update_bio(
         conn: Extension<PgPool>,
         user: User,
         Form(UpdateBioForm { bio }): Form<UpdateBioForm>,
-    ) -> Json<Result<(), UpdateBioError>> {
+    ) -> Result<(), UpdateBioError> {
         if bio.len() > MAX_BIO_LEN {
             return Err(UpdateBioError::TooLong);
         }
@@ -475,10 +475,10 @@ pub struct AddNoteForm {
     body: String,
 }
 
-#[derive(Debug, Error, Serialize)]
+#[derive(Debug, Error, Serialize, ErrorCode)]
 pub enum AddNoteError {
     #[error("You are not privileged enough")]
-    Unprivileged,
+    Unauthorized,
     #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
@@ -489,15 +489,15 @@ pub enum AddNoteError {
 
 post!(
     "/add_note/:user_id",
-    #[json_result]
+    #[json]
     pub async fn submit(
         conn: Extension<PgPool>,
         viewer: User,
         Path(user_id): Path<i32>,
         Form(AddNoteForm { body }): Form<AddNoteForm>,
-    ) -> Json<Result<(), AddNoteError>> {
+    ) -> Result<(), AddNoteError> {
         if viewer.role < Role::Moderator {
-            return Err(AddNoteError::Unprivileged);
+            return Err(AddNoteError::Unauthorized);
         }
 
         let viewer_name = viewer.name;
@@ -648,11 +648,11 @@ pub struct LoginSession {
     pub ip_addr:       IpNetwork,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum LoginFailure {
-    #[error("username or password is incorrect")]
+    #[error("Username or password is incorrect")]
     UserOrPasswordIncorrect,
-    #[error("internal database error: {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -731,13 +731,13 @@ pub struct LoginForm {
 
 post! {
     "/login",
-    #[json_result]
+    #[json]
     async fn login(
         pool: Extension<PgPool>,
         jar: Cookies,
         ClientIp(ip): ClientIp,
         login: Form<LoginForm>,
-    ) -> Json<Result<(), LoginFailure>> {
+    ) -> Result<(), LoginFailure> {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
@@ -748,11 +748,11 @@ post! {
     }
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum LogoutFailure {
-    #[error("an unknown error occurred")]
+    #[error("An unknown error occurred")]
     UnknownError,
-    #[error("internal database error: {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -762,11 +762,11 @@ pub enum LogoutFailure {
 
 post! {
     "/logout",
-    #[json_result]
+    #[json]
     async fn logout(
         pool: Extension<PgPool>,
         cookies: Cookies,
-    ) -> Json<Result<(), LogoutFailure>> {
+    ) -> Result<(), LogoutFailure> {
         let private_key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let signed = cookies.private(&private_key);
         let session_id = signed

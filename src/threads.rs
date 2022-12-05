@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use axum::extract::{Extension, Form, Path, Query};
 use chrono::{prelude::*, NaiveDateTime};
 use futures::stream::StreamExt;
-use marche_proc_macros::json_result;
+use marche_proc_macros::{json, ErrorCode};
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgExecutor, PgPool};
 use thiserror::Error;
@@ -53,10 +53,10 @@ impl Thread {
     }
 }
 
-#[derive(Error, Serialize, Debug)]
+#[derive(Error, Serialize, Debug, ErrorCode)]
 pub enum DeleteThreadError {
     #[error("You are not privileged enough")]
-    Unprivileged,
+    Unauthorized,
     #[error("No such thread exists")]
     NoSuchThread,
     #[error("Internal database error {0}")]
@@ -69,14 +69,14 @@ pub enum DeleteThreadError {
 
 post!(
     "/delete_thread/:dead_thread_id",
-    #[json_result]
+    #[json]
     pub async fn delete_thread(
         conn: Extension<PgPool>,
         user: User,
         Path(dead_thread_id): Path<i32>,
-    ) -> Json<Result<(), DeleteThreadError>> {
+    ) -> Result<(), DeleteThreadError> {
         if user.role < Role::Moderator {
-            return Err(DeleteThreadError::Unprivileged);
+            return Err(DeleteThreadError::Unauthorized);
         }
 
         // Fetch the thread title for logging purposes
@@ -117,23 +117,23 @@ pub struct ThreadForm {
     body:  String,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum SubmitThreadError {
-    #[error("title or body is empty")]
+    #[error("Title or body is empty")]
     TitleOrBodyIsEmpty,
-    #[error("there is a tag that exceeds the maximum length ({MAX_TAG_LEN} characters")]
+    #[error("There is a tag that exceeds the maximum length ({MAX_TAG_LEN} characters")]
     TagTooLong,
-    #[error("there are too many tags (maximum {MAX_NUM_TAGS} allowed)")]
+    #[error("There are too many tags (maximum {MAX_NUM_TAGS} allowed)")]
     TooManyTags,
-    #[error("error uploading image {0}")]
+    #[error("Error uploading image: {0}")]
     UploadImageError(#[from] UploadImageError),
-    #[error("internal db error {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
         sqlx::Error,
     ),
-    #[error("multipart form error {0}")]
+    #[error("Multipart form error: {0}")]
     MultipartFormError(#[from] MultipartFormError),
 }
 
@@ -142,12 +142,12 @@ pub const MAX_NUM_TAGS: usize = 6;
 
 post! {
     "/thread",
-    #[json_result]
+    #[json]
     async fn new_thread(
         conn: Extension<PgPool>,
         user: User,
         form: Result<MultipartForm<ThreadForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
-    ) -> Json<Result<Thread, SubmitThreadError>> {
+    ) -> Result<Thread, SubmitThreadError> {
         let MultipartForm { file, form: thread } = form?;
 
         let title = thread.title.trim();
@@ -249,10 +249,10 @@ struct UpdateThread {
     hidden: Option<bool>,
 }
 
-#[derive(Serialize, Error, Debug)]
+#[derive(Serialize, Error, Debug, ErrorCode)]
 enum UpdateThreadError {
     #[error("You are not privileged enough")]
-    Unprivileged,
+    Unauthorized,
     #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
@@ -263,7 +263,7 @@ enum UpdateThreadError {
 
 post!(
     "/thread/:thread_id",
-    #[json_result]
+    #[json]
     async fn update_thread_flags(
         conn: Extension<PgPool>,
         user: User,
@@ -273,9 +273,9 @@ post!(
             pinned,
             hidden,
         }): Query<UpdateThread>,
-    ) -> Json<Result<(), UpdateThreadError>> {
+    ) -> Result<(), UpdateThreadError> {
         if user.role < Role::Moderator {
-            return Err(UpdateThreadError::Unprivileged);
+            return Err(UpdateThreadError::Unauthorized);
         }
 
         if locked.is_none() && pinned.is_none() && hidden.is_none() {
@@ -476,10 +476,10 @@ impl Reply {
     }
 }
 
-#[derive(Serialize, Error, Debug)]
+#[derive(Serialize, Error, Debug, ErrorCode)]
 pub enum DeleteReplyError {
     #[error("You are not privileged enough")]
-    Unprivileged,
+    Unauthorized,
     #[error("No such reply exists")]
     NoSuchReply,
     #[error("You cannot delete the first reply in a thread")]
@@ -494,14 +494,14 @@ pub enum DeleteReplyError {
 
 post!(
     "/delete_reply/:dead_reply_id",
-    #[json_result]
+    #[json]
     async fn delete_reply(
         conn: Extension<PgPool>,
         user: User,
         Path(dead_reply_id): Path<i32>,
-    ) -> Json<Result<(), DeleteReplyError>> {
+    ) -> Result<(), DeleteReplyError> {
         if user.role < Role::Moderator {
-            return Err(DeleteReplyError::Unprivileged);
+            return Err(DeleteReplyError::Unauthorized);
         }
 
         let dead_reply = Reply::fetch_optional(&*conn, dead_reply_id)
@@ -553,21 +553,21 @@ pub struct ReplyForm {
     thread_id: String,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum ReplyError {
-    #[error("no such thread")]
+    #[error("No such thread")]
     NoSuchThread,
-    #[error("reply cannot be empty")]
+    #[error("Reply cannot be empty")]
     ReplyIsEmpty,
-    #[error("thread is locked")]
+    #[error("Thread is locked")]
     ThreadIsLocked,
-    #[error("error uploading image: {0}")]
+    #[error("Error uploading image: {0}")]
     UploadImageError(
         #[from]
         #[serde(skip)]
         UploadImageError,
     ),
-    #[error("internal db error: {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -577,7 +577,7 @@ pub enum ReplyError {
 
 post!(
     "/reply",
-    #[json_result]
+    #[json]
     pub async fn new_reply(
         conn: Extension<PgPool>,
         user: User,
@@ -585,7 +585,7 @@ post!(
             file,
             form: ReplyForm { thread_id, body },
         }: MultipartForm<ReplyForm, MAXIMUM_FILE_SIZE>,
-    ) -> Json<Result<Reply, ReplyError>> {
+    ) -> Result<Reply, ReplyError> {
         let body = body.trim();
 
         if body.is_empty() && file.is_none() {
@@ -672,14 +672,12 @@ pub struct UpdateReplyForm {
     body: Option<String>,
 }
 
-#[derive(Serialize, Error, Debug)]
+#[derive(Serialize, Error, Debug, ErrorCode)]
 pub enum UpdateReplyError {
     #[error("You are not privileged enough")]
-    Unprivileged,
+    Unauthorized,
     #[error("Post does not exist")]
     NoSuchReply,
-    #[error("This is not your post")]
-    NotYourReply,
     #[error("You cannot make a post empty")]
     CannotMakeEmpty,
     #[error("Internal database error: {0}")]
@@ -692,7 +690,7 @@ pub enum UpdateReplyError {
 
 post! {
     "/reply/:post_id",
-    #[json_result]
+    #[json]
     pub async fn update_reply(
         conn: Extension<PgPool>,
         user: User,
@@ -701,14 +699,14 @@ post! {
             hidden,
         }): Query<UpdateReplyParams>,
         Form(UpdateReplyForm { body }): Form<UpdateReplyForm>,
-    ) -> Json<Result<(), UpdateReplyError>> {
+    ) -> Result<(), UpdateReplyError> {
         let post = Reply::fetch_optional(&*conn, post_id)
             .await?
             .ok_or(UpdateReplyError::NoSuchReply)?;
 
         if let Some(hidden) = hidden {
             if user.role < Role::Moderator {
-                return Err(UpdateReplyError::Unprivileged);
+                return Err(UpdateReplyError::Unauthorized);
             }
             sqlx::query("UPDATE replies SET hidden = $1 WHERE id = $2")
                 .bind(hidden)
@@ -722,7 +720,7 @@ post! {
         };
 
         if post.author_id != user.id && user.role < Role::Moderator {
-            return Err(UpdateReplyError::NotYourReply);
+            return Err(UpdateReplyError::Unauthorized);
         }
 
         let body = body.trim();
@@ -741,12 +739,12 @@ post! {
     }
 }
 
-#[derive(Serialize, Error, Debug)]
+#[derive(Serialize, Error, Debug, ErrorCode)]
 pub enum ReactError {
     #[error("No such reply exists")]
     NoSuchReply,
     #[error("You don't own these reactions")]
-    NotYourItems,
+    Unauthorized,
     #[error("You have already consumed one of these reactions")]
     AlreadyConsumed,
     #[error("You cannot react to your own post")]
@@ -761,13 +759,13 @@ pub enum ReactError {
 
 post!(
     "/react/:post_id",
-    #[json_result]
+    #[json]
     pub async fn react(
         conn: Extension<PgPool>,
         user: User,
         Path(post_id): Path<i32>,
         Form(used_reactions): Form<HashMap<i32, String>>,
-    ) -> Json<Result<(), ReactError>> {
+    ) -> Result<(), ReactError> {
         let reply = Reply::fetch_optional(&conn, post_id)
             .await?
             .ok_or(ReactError::NoSuchReply)?;
@@ -785,7 +783,7 @@ post!(
             let item_drop = ItemDrop::fetch(&mut transaction, reaction).await?;
             let item = item_drop.fetch_item(&mut transaction).await?;
             if selected != "on" || item_drop.owner_id != user.id || !item.is_reaction() {
-                return Err(ReactError::NotYourItems);
+                return Err(ReactError::Unauthorized);
             }
 
             // Set the drops to consumed:

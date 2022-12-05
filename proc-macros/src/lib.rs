@@ -2,29 +2,9 @@ use proc_macro::{self, TokenStream};
 use proc_macro2::Span;
 use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, parse_quote, punctuated::Punctuated, token::Comma, Block, Expr,
-    GenericArgument, Ident, ItemFn, PatIdent, PathArguments, ReturnType, Type,
+    parse_macro_input, parse_quote, punctuated::Punctuated, token::Comma, Block, Expr, Fields,
+    Ident, ItemEnum, ItemFn, PatIdent,
 };
-
-fn extract_type_from_result(ty: &Type) -> Type {
-    match ty {
-        Type::Path(typepath) if typepath.qself.is_none() => {
-            // Get the first segment of the path (there is only one, in fact: "Option"):
-            let type_params = typepath.path.segments.first().unwrap().arguments.clone();
-            // It should have only on angle-bracketed param ("<String>"):
-            let generic_arg = match type_params {
-                PathArguments::AngleBracketed(params) => params.args.first().unwrap().clone(),
-                _ => panic!("TODO: error handling"),
-            };
-            // This argument must be a type:
-            match generic_arg {
-                GenericArgument::Type(ty) => ty.clone(),
-                _ => panic!("TODO: error handling"),
-            }
-        }
-        _ => panic!("TODO: error handling"),
-    }
-}
 
 fn transform_params(
     params: Punctuated<syn::FnArg, syn::token::Comma>,
@@ -88,7 +68,7 @@ pub fn get_fn_name(item: TokenStream) -> TokenStream {
 }
 
 #[proc_macro_attribute]
-pub fn json_result(_attr: TokenStream, item: TokenStream) -> TokenStream {
+pub fn json(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let ItemFn {
         attrs,
         vis,
@@ -96,34 +76,39 @@ pub fn json_result(_attr: TokenStream, item: TokenStream) -> TokenStream {
         block,
     } = parse_macro_input!(item as ItemFn);
 
-    let inner = match sig.output.clone() {
-        ReturnType::Type(_, ty) => extract_type_from_result(&ty),
-        _ => panic!("type is not a Json"),
-    };
+    let inner = sig.output.clone();
     let args = sig.inputs.clone();
     let call_args = transform_params_to_call(sig.inputs.clone());
     sig.inputs = transform_params(sig.inputs.clone());
-    sig.output = parse_quote!(-> axum::Json<serde_json::Value>);
+    sig.output = parse_quote!(-> (http::StatusCode, axum::Json<serde_json::Value>));
 
     let block: Block = parse_quote! {
         {
-            async fn inner(#args) -> #inner {
+            async fn inner(#args) #inner {
                 #block
             }
-            axum::Json(match inner #call_args .await {
+            match inner #call_args .await {
                 Err(err) => {
+                    use crate::ErrorCode;
+
                     tracing::error!("{}", err);
-                    serde_json::json!({
-                        "error": format!("{}", err),
-                        "error_type": err,
-                    })
+                    (
+                        err.error_code(),
+                        axum::Json(serde_json::json!({
+                            "error": format!("{}", err),
+                            "error_type": err,
+                        }))
+                    )
                 },
                 Ok(ok) => {
-                    serde_json::json!({
-                        "ok": ok,
-                    })
+                    (
+                        http::StatusCode::OK,
+                        axum::Json(serde_json::json!({
+                            "ok": ok,
+                        }))
+                    )
                 }
-            })
+            }
         }
     };
 
@@ -134,5 +119,46 @@ pub fn json_result(_attr: TokenStream, item: TokenStream) -> TokenStream {
         block: Box::new(block),
     }
     .into_token_stream()
+    .into()
+}
+
+#[proc_macro_derive(ErrorCode)]
+pub fn error_code(input: TokenStream) -> TokenStream {
+    let ItemEnum {
+        ident, variants, ..
+    } = parse_macro_input!(input as ItemEnum);
+
+    let mut matches = Vec::new();
+    for variant in variants {
+        let status_code = if variant.ident == "Unauthorized" {
+            quote! { http::StatusCode::UNAUTHORIZED }
+        } else if variant.ident == "UnknownError"
+            || variant.ident.to_string().starts_with("Internal")
+        {
+            quote! { http::StatusCode::INTERNAL_SERVER_ERROR }
+        } else {
+            continue;
+        };
+        let guard = match variant.fields {
+            Fields::Named(..) => quote! { { .. } },
+            Fields::Unnamed(..) => quote! { ( .. ) },
+            Fields::Unit => quote! {},
+        };
+        let ident = variant.ident;
+        matches.push(quote! {
+            Self::#ident #guard => #status_code,
+        });
+    }
+
+    quote! {
+        impl crate::ErrorCode for #ident {
+            fn error_code(&self) -> http::StatusCode {
+                match self {
+                    #( #matches )*
+                    _ => http::StatusCode::BAD_REQUEST,
+                }
+            }
+        }
+    }
     .into()
 }

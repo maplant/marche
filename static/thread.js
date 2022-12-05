@@ -12,17 +12,13 @@ $(document).ready(function() {
         $(this).ajaxForm({
             url: `/reply/${id}`,
             type: 'post',
-            success: function(response, _, _, _) {
-                if (response.error !== undefined) {
-                    $(`.error-${id}`).show();
-                    $(`.error-${id}`).html(`${response.error}`)
-                } else {
-                    // TODO: Do this properly
-                    location.href = `/thread/${thread_id}?jump_to=${id}`;
-                }
+            success: function(response) {
+                // TODO: Do this properly
+                location.href = `/thread/${thread_id}?jump_to=${id}`;
             },
-            error: function(_, status, error) {
-                  $(`.error-${id}`).html("Error attempting to update post")
+            error: function(xhr) {
+                $(`.error-${id}`).show();
+                $(`.error-${id}`).html(`${xhr.responseJSON.error}`)
             }
         });
     });

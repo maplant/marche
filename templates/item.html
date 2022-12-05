@@ -59,17 +59,12 @@
   $(document).ready(function () {
       $("form").ajaxForm({
           type: 'post',
-          success: function(response, _, _, _) {
-              if (response.error !== undefined) {
-                  $('#error').show();
-                  $('#error').html('Failed to equip this item');
-              } else {
-                  location.href = '/profile';
-              }
+          success: function() {
+              location.href = '/profile';
           },
-          error: function(_, _, _) {
+          error: function(xhr) {
               $('#error').show();
-              $('#error').html('Failed to equip this item');
+              $('#error').html(`${xhr.responseJSON.error}`);
           }
       });
   });

@@ -44,16 +44,12 @@
         $("form").ajaxForm({
             url: '/react/{{post_id}}',
             type: 'post',
-            success: function(response, _, _, _) {
-                if (response.error !== undefined) {
-                    $("#error").html(`${response.error}`);
-                    $("#error").show();
-                } else {
-                    location.href = '/thread/{{thread_id}}?jump_to={{post_id}}';
-                }
+            success: function() {
+                location.href = '/thread/{{thread_id}}?jump_to={{post_id}}';
             },
-            error: function(_, status, error) {
-                $("#error").html(`An unknown error occurred`);
+            error: function(xhr) {
+                $("#error").html(`${xhr.responseJSON.error}`);
+                $("#error").show();
             }
         });
     })

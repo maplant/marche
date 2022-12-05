@@ -71,7 +71,7 @@
         <div class="cell">
           <div style="display: flex">
             <button type="submit">Submit trade offer</button>
-            <div id="error" style="margin-left: 10px"></div>
+            <div id="error" class="error" style="margin-left: 10px; display: none"></div>
           </div>
         </div>
       </div>
@@ -81,15 +81,12 @@
           $("form").ajaxForm({
               url: '/offer',
               type: 'post',
-              success: function(response, _, _, _) {
-                  if (response.error !== undefined) {
-                      $("#error").html(`<div class="error">${response.error}</div>`)
-                  } else {
-                      location.href = `/offers?jump_to=${response.ok.id}`
-                  }
+              success: function(response) {
+                  location.href = `/offers?jump_to=${response.ok.id}`;
               },
-              error: function(_, status, error) {
-                  $("#error").html(`<div class="error">An unknown error occurred</div>`);
+              error: function(xhr) {
+                  $("#error").html(`${xhr.responseJSON.error}`);
+                  $("#error").show();
               }
           });
       });

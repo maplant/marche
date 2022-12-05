@@ -5,7 +5,7 @@ use chrono::{Duration, Utc};
 use futures::{future, StreamExt};
 use lazy_static::lazy_static;
 use maplit::hashmap;
-use marche_proc_macros::json_result;
+use marche_proc_macros::{json, ErrorCode};
 use rand::{prelude::*, Rng, SeedableRng};
 use rand_xorshift::XorShiftRng;
 use serde::{Deserialize, Serialize};
@@ -229,9 +229,9 @@ impl Item {
         } = Attributes::fetch(self, pattern);
         match self.item_type.0 {
             ItemType::Useless => String::from(r#"<div class="fixed-item-thumbnail">?</div>"#),
-            ItemType::Avatar { ref filename } => format!(
-                r#"<img src="{filename}" style="width: 50px; height: auto;">"#,
-            ),
+            ItemType::Avatar { ref filename } => {
+                format!(r#"<img src="{filename}" style="width: 50px; height: auto;">"#,)
+            }
             ItemType::ProfileBackground { .. } => {
                 format!(
                     r#"<div class="fixed-item-thumbnail" style="{}"></div>"#,
@@ -270,11 +270,11 @@ struct SetAvailability {
     available: bool,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 enum SetAvailabilityError {
-    #[error("you are not authorized to make items available to drop")]
+    #[error("You are not authorized to make items available to drop")]
     Unauthorized,
-    #[error("internal db error: {0}")]
+    #[error("Internal db error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -284,13 +284,13 @@ enum SetAvailabilityError {
 
 post!(
     "/set_item_availability/:item_id",
-    #[json_result]
+    #[json]
     async fn set_availability(
         conn: Extension<PgPool>,
         user: User,
         Path(item_id): Path<i32>,
         Query(SetAvailability { available }): Query<SetAvailability>,
-    ) -> Json<Result<(), SetAvailabilityError>> {
+    ) -> Result<(), SetAvailabilityError> {
         if user.role < Role::Admin {
             return Err(SetAvailabilityError::Unauthorized);
         }
@@ -404,7 +404,7 @@ impl ItemDrop {
             transaction.commit().await?;
             Ok(())
         } else {
-            Err(EquipError::NotYourItem)
+            Err(EquipError::Unauthorized)
         }
     }
 
@@ -509,15 +509,15 @@ impl ItemDrop {
     }
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum EquipError {
-    #[error("no such item exists")]
+    #[error("No such item exists")]
     NoSuchItem,
-    #[error("that is not your item")]
-    NotYourItem,
-    #[error("that item cannot be equiped")]
+    #[error("That is not your item")]
+    Unauthorized,
+    #[error("That item cannot be equiped")]
     Unequipable,
-    #[error("internal database error: {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -527,29 +527,29 @@ pub enum EquipError {
 
 post! {
     "/equip/:item_id",
-    #[json_result]
+    #[json]
     async fn equip(
         conn: Extension<PgPool>,
         user: User,
         Path(drop_id): Path<i32>
-    ) -> Json<Result<(), EquipError>> {
+    ) -> Result<(), EquipError> {
         let drop = ItemDrop::fetch_optional(&*conn, drop_id).await?.ok_or(EquipError::NoSuchItem)?;
         if drop.owner_id == user.id {
             drop.equip(&*conn).await?;
         } else {
-            return Err(EquipError::NotYourItem);
+            return Err(EquipError::Unauthorized);
         }
         Ok(())
     }
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum UnequipError {
-    #[error("no such item exists")]
+    #[error("No such item exists")]
     NoSuchItem,
-    #[error("that is not your item")]
-    NotYourItem,
-    #[error("internal database error: {0}")]
+    #[error("That is not your item")]
+    Unauthorized,
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -559,17 +559,17 @@ pub enum UnequipError {
 
 post! {
     "/unequip/:item_id",
-    #[json_result]
+    #[json]
     pub async fn unequip(
         conn: Extension<PgPool>,
         user: User,
         Path(drop_id): Path<i32>
-    ) -> Json<Result<(), UnequipError>> {
+    ) -> Result<(), UnequipError> {
         let drop = ItemDrop::fetch_optional(&*conn, drop_id).await?.ok_or(UnequipError::NoSuchItem)?;
         if drop.owner_id == user.id {
             drop.unequip(&*conn).await?;
         } else {
-            return Err(UnequipError::NotYourItem);
+            return Err(UnequipError::Unauthorized);
         }
 
         Ok(())
@@ -736,17 +736,17 @@ pub struct TradeRequest {
     pub note:           Option<String>,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum TradeResponseError {
-    #[error("no such item exists")]
+    #[error("No such item exists")]
     NoSuchItem,
-    #[error("no such trade exists")]
+    #[error("No such trade exists")]
     NoSuchTrade,
-    #[error("not your trade")]
-    NotYourTrade,
-    #[error("a conflicting trade has already been executed")]
+    #[error("Not your trade")]
+    Unauthorized,
+    #[error("A conflicting trade has already been executed")]
     ConflictingTradeExecuted,
-    #[error("internal database error: {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
@@ -845,27 +845,27 @@ pub struct TradeRequestForm {
     trade:       HashMap<String, String>,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum SubmitOfferError {
-    #[error("you cannot trade with yourself")]
+    #[error("You cannot trade with yourself")]
     CannotTradeWithSelf,
-    #[error("item is no longer owned by one of the parties")]
+    #[error("Item is no longer owned by one of the parties")]
     ItemNoLongerOwned,
-    #[error("no such user")]
+    #[error("No such user")]
     NoSuchUser,
-    #[error("invalid trade")]
+    #[error("Invalid trade")]
     InvalidTrade,
-    #[error("note is too long")]
+    #[error("Note is too long")]
     NoteTooLong,
-    #[error("trade is empty")]
+    #[error("Trade is empty")]
     TradeIsEmpty,
-    #[error("internal database error: {0}")]
+    #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
         sqlx::Error,
     ),
-    #[error("invalid form: {0}")]
+    #[error("Invalid form: {0}")]
     InvalidForm(
         #[from]
         #[serde(skip)]
@@ -877,12 +877,12 @@ const MAX_NOTE_LENGTH: usize = 150;
 
 post! {
     "/offer/",
-    #[json_result]
+    #[json]
     pub async fn submit_offer(
         conn: Extension<PgPool>,
         sender: User,
         Form(TradeRequestForm { receiver_id, note, trade }): Form<TradeRequestForm>,
-    ) -> Json<Result<TradeRequest, SubmitOfferError>> {
+    ) -> Result<TradeRequest, SubmitOfferError> {
         let mut sender_items = Vec::new();
         let mut receiver_items = Vec::new();
 
@@ -955,38 +955,38 @@ post! {
 
 post! {
     "/accept/:trade_id",
-    #[json_result]
+    #[json]
     async fn accept(
         conn: Extension<PgPool>,
         user: User,
         Path(trade_id): Path<i32>
-    ) -> Json<Result<(), TradeResponseError>> {
+    ) -> Result<(), TradeResponseError> {
         let req = TradeRequest::fetch(&*conn, trade_id)
             .await?
             .ok_or(TradeResponseError::NoSuchTrade)?;
         if req.receiver_id == user.id {
             req.accept(&*conn).await
         } else {
-            Err(TradeResponseError::NotYourTrade)
+            Err(TradeResponseError::Unauthorized)
         }
     }
 }
 
 post! {
     "/decline/:trade_id",
-    #[json_result]
+    #[json]
     async fn decline_offer(
         conn: Extension<PgPool>,
         user: User,
         Path(trade_id): Path<i32>,
-    ) -> Json<Result<(), TradeResponseError>> {
+    ) -> Result<(), TradeResponseError> {
         let req = TradeRequest::fetch(&*conn, trade_id)
             .await?
             .ok_or(TradeResponseError::NoSuchTrade)?;
         if req.sender_id == user.id || req.receiver_id == user.id {
             req.decline(&*conn).await
         } else {
-            Err(TradeResponseError::NotYourTrade)
+            Err(TradeResponseError::Unauthorized)
         }
     }
 }
@@ -1107,62 +1107,62 @@ pub struct MintItemForm {
     attrs:      String,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum MintItemError {
-    #[error("item name cannot be empty")]
+    #[error("Item name cannot be empty")]
     EmptyName,
-    #[error("item description cannot be empty")]
+    #[error("Item description cannot be empty")]
     EmptyDescription,
-    #[error("invalid rarity")]
+    #[error("Invalid rarity")]
     InvalidRarity(
         #[from]
         #[serde(skip)]
         InvalidRarity,
     ),
-    #[error("invalid item type")]
+    #[error("Invalid item type")]
     InvalidItemType,
-    #[error("invalid badge")]
+    #[error("Invalid badge")]
     InvalidBadge,
-    #[error("attributes is not valid json")]
+    #[error("Attributes is not valid json")]
     InvalidAttributes,
-    #[error("background colors is not valid json")]
+    #[error("Background colors is not valid json")]
     InvalidColors(
         #[from]
         #[serde(skip)]
         serde_json::Error,
     ),
-    #[error("experience value is not a valid 32 bit signed integer")]
+    #[error("Experience value is not a valid 32 bit signed integer")]
     InvalidExperience(
         #[from]
         #[serde(skip)]
         ParseIntError,
     ),
-    #[error("a file must be attached to create a new reaction or avatar")]
+    #[error("A file must be attached to create a new reaction or avatar")]
     NoImageAttached,
-    #[error("error uploading image: {0}")]
+    #[error("Error uploading image: {0}")]
     UploadImageError(#[from] UploadImageError),
-    #[error("no such attribute '{0}' exists")]
+    #[error("No such attribute '{0}' exists")]
     NoSuchAttribute(String),
-    #[error("you are not authorized to mint items")]
+    #[error("You are not authorized to mint items")]
     Unauthorized,
-    #[error("internal db error {0}")]
+    #[error("Internal db error {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
         sqlx::Error,
     ),
-    #[error("multipart form error {0}")]
+    #[error("Multipart form error {0}")]
     MultipartFormError(#[from] MultipartFormError),
 }
 
 post!(
     "/mint",
-    #[json_result]
+    #[json]
     async fn mint_item(
         conn: Extension<PgPool>,
         user: User,
         form: Result<MultipartForm<MintItemForm, MAXIMUM_FILE_SIZE>, MultipartFormError>,
-    ) -> Json<Result<Item, MintItemError>> {
+    ) -> Result<Item, MintItemError> {
         if user.role < Role::Admin {
             return Err(MintItemError::Unauthorized);
         }
@@ -1260,7 +1260,7 @@ pub struct GiftItemForm {
     pattern:     Option<i32>,
 }
 
-#[derive(Debug, Error, Serialize)]
+#[derive(Debug, Error, Serialize, ErrorCode)]
 pub enum GiftItemError {
     #[error("You are not authorized to gift items")]
     Unauthorized,
@@ -1274,7 +1274,7 @@ pub enum GiftItemError {
 
 post!(
     "/gift",
-    #[json_result]
+    #[json]
     async fn gift(
         conn: Extension<PgPool>,
         user: User,
@@ -1283,7 +1283,7 @@ post!(
             item_id,
             pattern,
         }): Form<GiftItemForm>,
-    ) -> Json<Result<(), GiftItemError>> {
+    ) -> Result<(), GiftItemError> {
         let pattern = pattern.unwrap_or_else(rand::random);
 
         if user.role < Role::Admin {

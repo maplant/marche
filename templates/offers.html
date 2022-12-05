@@ -136,19 +136,12 @@
       $.ajax({
           url: `/accept/${offer_id}`,
           type: 'post',
-          success: function(response, _, _, _) {
-              console.log(response);
-              if (response.error !== undefined) {
-                  $(`#error-${offer_id}`).html(`${response.error}`);
-                  $(`#accept-${offer_id}`).prop("disabled", false);
-                  $(`#decline-${offer_id}`).prop("disabled", false);
-              } else {
-                  $(`#accept-${offer_id}`).html("✔️ Accepted!");
-                  $(`#offer-${offer_id}`).slideToggle();
-              }
+          success: function() {
+              $(`#accept-${offer_id}`).html("✔️ Accepted!");
+              $(`#offer-${offer_id}`).slideToggle();
           },
-          error: function(_, _, _) {
-              $(`#error-${offer_id}`).html("Unable to decline offer");
+          error: function(xhr) {
+              $(`#error-${offer_id}`).html(`${xhr.responseJSON.error}`);
               $(`#accept-${offer_id}`).prop("disabled", false);
               $(`#decline-${offer_id}`).prop("disabled", false);
           }
@@ -161,18 +154,12 @@
       $.ajax({
           url: `/decline/${offer_id}`,
           type: 'post',
-          success: function(response, _, _, _) {
-              if (response.error !== undefined) {
-                  $(`#error-${offer_id}`).html(`${response.error}`);
-                  $(`#accept-${offer_id}`).prop("disabled", false);
-                  $(`#decline-${offer_id}`).prop("disabled", false);
-              } else {
-                  $(`#decline-${offer_id}`).html("❌ Declined");
-                  $(`#offer-${offer_id}`).slideToggle();
-              }
+          success: function() {
+              $(`#decline-${offer_id}`).html("❌ Declined");
+              $(`#offer-${offer_id}`).slideToggle();
           },
-          error: function(_, status, error) {
-              $(`#error-${offer_id}`).html("Unknown error");
+          error: function(xhr) {
+              $(`#error-${offer_id}`).html(`${xhr.responseJSON.error}`);
               $(`#accept-${offer_id}`).prop("disabled", false);
               $(`#decline-${offer_id}`).prop("disabled", false);
           }
@@ -184,17 +171,12 @@
       $.ajax({
           url: `/decline/${offer_id}`,
           type: 'post',
-          success: function(response, _, _, _) {
-              if (response.error !== undefined) {
-                  $(`#error-${offer_id}`).html(`${response.error}`);
-                  $(`#rescind-${offer_id}`).prop("disabled", false);
-              } else {
-                  $(`#rescind-${offer_id}`).html("❌ Rescinded");
-                  $(`#offer-${offer_id}`).slideToggle();
-              }
+          success: function() {
+              $(`#rescind-${offer_id}`).html("❌ Rescinded");
+              $(`#offer-${offer_id}`).slideToggle();
           },
-          error: function(_, status, error) {
-              $(`#error-${offer_id}`).html("Unknown error");
+          error: function(xhr) {
+              $(`#error-${offer_id}`).html(`${xhr.responseJSON.error}`);
               $(`#rescind-${offer_id}`).prop("disabled", false);
           }
       });

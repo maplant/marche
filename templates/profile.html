@@ -7,16 +7,8 @@
 <li class="menu-item">
   <div class="table">
     <div class="row">
-      <div class="heavy-cell"></div>
-      <div class="heavy-cell" style="width: 100%;">
-        <b {% if is_banned %}style="color: red"{% endif %}>
-          {% if role == Role::Moderator %}👑 {% endif %}
-          {% if is_banned %}{{stub.name|redact}}{% else %}{{stub.name}}{% endif %}
-        </b>
-      </div>
-    </div>
-    <div class="row">
       <div class="heavy-cell">
+        {% if role >= Role::Moderator %}<div style="text-align: center; font-size: 300%; margin-bottom: -20px">👑</div>{% endif %}
         {% call macros::profile_stub(stub) %}
       </div>
       <div class="heavy-cell" style="vertical-align: top; padding: 15px">
@@ -101,9 +93,7 @@
               $.ajax({
                   url: `/ban/{{stub.id}}?ban_len=${days}`,
                   type: 'post',
-                  complete: function(_, _) {
-                      location.reload();
-                  }
+                  complete: location.reload,
               });
           }
       }
@@ -114,7 +104,7 @@
               data: {
                   body: $('#note').val(),
               },
-              complete: function(_, _) {
+              complete: function() {
                   var body = $('#note').val();
                   $('#note').val("");
                   $('#notes').append(`<p>“${body}” — {{viewer_name}}</p>`);
@@ -126,9 +116,7 @@
           $.ajax({
               url: `/user/{{stub.id}}?role=${role}`,
               type: 'post',
-              complete: function(_, _) {
-                  location.reload();
-              }
+              complete: location.reload,
           });
       }
       {% endif %}
@@ -164,7 +152,7 @@
               $.ajax({
                   url: '/logout',
                   type: 'post',
-                  complete: function(_, _) {
+                  complete: function() {
                       location.href = '/login';
                   }
               });

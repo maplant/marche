@@ -57,17 +57,12 @@
           $("form").ajaxForm({
               url: '/thread',
               type: 'post',
-              success: function(response, _, _, _) {
-                  if (response.error !== undefined) {
-                      $('#error').show();
-                      $('#error').html(`${response.error}`);
-                  } else {
-                      location.href = `/thread/${response.ok.id}`;
-                  }
+              success: function(response) {
+                  location.href = `/thread/${response.ok.id}`;
               },
-              error: function(_, status, error) {
+              error: function(xhr) {
                   $('#error').show();
-                  $('#error').html('An unknown error occurred');
+                  $('#error').html(`${xhr.responseJSON.error}`);
               }
           });
       });

@@ -22,16 +22,12 @@
                 $("form").ajaxForm({
                     url: '/bio',
                     type: 'post',
-                    success: function(response, _, _, _) {
-                        if (response.error !== undefined) {
-                            $('#error').show();
-                            $('#error').html(`${response.error}`);
-                        } else {
-                            location.href = '/profile';
-                        }
+                    success: function(response) {
+                        location.href = '/profile';
                     },
-                    error: function(_, _, _) {
-                        $('#error').html('An unknown error occurred');
+                    error: function(xhr) {
+                        $('#error').html(`${xhr.responseJSON.error}`);
+                        $('#error').show()
                     }
                 });
             });

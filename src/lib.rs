@@ -14,11 +14,12 @@ use axum::{
         FromRequest, Multipart,
     },
     handler::Handler,
-    http::{Request, StatusCode},
+    http::Request,
     response::{IntoResponse, Response},
     Router,
 };
 use derive_more::Display;
+use marche_proc_macros::ErrorCode;
 use serde::{de::DeserializeOwned, Serialize};
 use thiserror::Error;
 
@@ -51,6 +52,8 @@ impl Endpoint {
     }
 }
 
+inventory::collect!(Endpoint);
+
 #[derive(Copy, Clone, Display)]
 pub enum RouteType {
     #[display(fmt = "GET")]
@@ -58,8 +61,6 @@ pub enum RouteType {
     #[display(fmt = "POST")]
     Post,
 }
-
-inventory::collect!(Endpoint);
 
 pub fn install<I, A>(
     route_type: RouteType,
@@ -105,6 +106,11 @@ macro_rules! post {
     };
 }
 
+/// An error type must give a proper status code for error handling.
+pub trait ErrorCode {
+    fn error_code(&self) -> http::StatusCode;
+}
+
 /// A multipart form that includes a file (which must be named "file").
 /// Ideally we'd like this to be
 #[derive(Debug)]
@@ -119,7 +125,7 @@ pub struct File {
     pub bytes: Bytes,
 }
 
-#[derive(Debug, Serialize, Error)]
+#[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum MultipartFormError {
     #[error("invalid content length")]
     InvalidContentLength,
@@ -147,7 +153,11 @@ pub enum MultipartFormError {
 
 impl IntoResponse for MultipartFormError {
     fn into_response(self) -> Response {
-        (StatusCode::INTERNAL_SERVER_ERROR, "internal service error").into_response()
+        (
+            self.error_code(),
+            axum::Json(serde_json::json!({ "error": format!("{}", self), "error_type": self })),
+        )
+            .into_response()
     }
 }
 
@@ -176,7 +186,7 @@ where
             } else {
                 continue;
             };
-            if name == "file" {
+            if name == "file}" {
                 if field.file_name().is_none() {
                     continue;
                 }

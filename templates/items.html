@@ -182,16 +182,11 @@
       $('form#mint').ajaxForm({
           url: '/mint',
           type: 'post',
-          success: function(response, _, _, _) {
-              if (response.error !== undefined) {
-                  $("#error").html(`${response.error}`);
-                  $("#error").show();
-              } else {
-                  location.href = "/items";
-              }
+          success: function() {
+              location.href = "/items";
           },
-          error: function(_, status, error) {
-              $("#error").html("An unknown error occurred");
+          error: function(xhr) {
+              $("#error").html(`${xhr.responseJSON.error}`)
               $("#error").show();
           }
       })
@@ -200,7 +195,7 @@
       $.ajax({
           url: `/set_item_availability/${id}?available=${available}`,
           type: `post`,
-          complete: function(_, _) {
+          complete: function() {
               location.href = "/items";
           }
       });
@@ -212,17 +207,14 @@
           url: "gift",
           type: "post",
           data: $(`#${item_id}`).serialize(),
-          success: function(response, _, _, _) {
-              if (response.error !== undefined) {
-                  $(`#error-${item_id}`).html(`${response.error}`);
-                  $(`#gift-${item_id}`).html("Gift");
-              } else {
-                  $(`#gift-${item_id}`).html("✔️ Gift");
-              }
+          success: function(response) {
+              $(`#gift-${item_id}`).html("✔️ Gift");
               $(`#gift-${item_id}`).prop("disabled", false);
           },
-          error: function(_, _, _) {
-
+          error: function(xhr) {
+              $(`#error-${item_id}`).html(`${xhr.responseJSON.error}`);
+              $(`#gift-${item_id}`).html("Gift");
+              $(`#gift-${item_id}`).prop("disabled", false);
           }
       });
   }
