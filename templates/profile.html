@@ -11,7 +11,7 @@
         {% if role >= Role::Moderator %}<div style="text-align: center; font-size: 300%; margin-bottom: -20px">👑</div>{% endif %}
         {% call macros::profile_stub(stub) %}
       </div>
-      <div class="heavy-cell" style="vertical-align: top; padding: 15px">
+      <div class="heavy-cell" style="vertical-align: top; padding: 15px; width: 100%">
         {% if is_banned %}
         <p>{{bio|redact|linebreaks|e("none")}}</p>
         <p style="color: red">This user has been banned!</p>
