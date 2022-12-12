@@ -221,7 +221,7 @@
           $("form#reply").ajaxForm({
               url: '/reply',
               type: 'post',
-              sucess: function() {
+              success: function() {
                   // TODO: Populate a new reply with the contents of the resonse
                   location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
               },
