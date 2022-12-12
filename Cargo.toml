@@ -6,11 +6,12 @@ edition = "2021"
 default-run = "marche-server"
 
 [dependencies]
+aes-gcm = "0.10"
 anyhow = "1.0"
 axum = { version = "0.6", features = ["multipart", "json"] }
 axum-client-ip = "0.3.0"
 axum-macros = "0.2"
-base64ct = "1.5"
+base64 = "0.13"
 thiserror = "1.0"
 aws-config = "0.46"
 aws-sdk-s3 = "0.16"
@@ -42,6 +43,7 @@ ipnetwork = "0.19"
 inventory = "0.2"
 sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "postgres", "chrono", "ipnetwork" ] }
 futures = "0.3"
+google-authenticator = { version = "0.2.0", git = "https://github.com/maplant/google-authenticator-rust.git" }
 
 [dependencies.marche-proc-macros]
 path = "proc-macros"

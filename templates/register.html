@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block title %}Create An Account{% endblock %}
+
+{% block content %}
+<li class="menu-item" id="reg-form">
+  <form action="/user" method="post">
+    <div class="header">
+      Register a new account
+    </div>
+    <div class="table">
+      <div class="row">
+        <div class="heavy-cell" style="border-top: 1px solid black">
+          <label for="title">Username: </label>
+        </div>
+        <div class="heavy-cell" style="width: 100%; border-top: 1px solid black">
+          <input type="text" name="username" id="username" style="padding: 5px">
+          <span class="error" id="username-error" style="display: none"></span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell">
+          <label for="title">Email: </label>
+        </div>
+        <div class="heavy-cell" style="width: 100%">
+          <input type="text" name="email" id="email" style="padding: 5px">
+          <span class="error" id="email-error" style="display: none"></span>
+          <div style="padding-top: 10px">Email is stored only for account issues. We will <u>never</u> subscribe you to a list or needlessly email you.</div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell">
+          <label for="content">Password: </label>
+        </div>
+        <div class="heavy-cell">
+          <input type="password" name="password" id="password" style="padding: 5px">
+          <span class="error" id="password-error" style="display: none"></span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="heavy-cell">
+          <label for="content">Confirm Password: </label>
+        </div>
+        <div class="heavy-cell">
+          <input type="password" name="confirm-password" id="confirm-password" style="padding: 5px">
+          <span class="error" id="confirm-password-error" style="display: none"></span>
+        </div>
+      </div>
+      <div class="row">
+        <div class="cell">
+          <button type="submit">Register</button>
+        </div>
+        <div class="error" id="general-error" style="display: none">
+        </div>
+      </div>
+    </div>
+  </form>
+</li>
+<li class="menu-item" id="success" style="display: none">
+  <p>Registration almost complete, here are the last steps:</p>
+  <p>The following is your reset link, <b>store this string somewhere safe as it is the only way to reset your account:</b></p>
+  <div id="reset-link"></div>
+  <p>Additionally, you must scan the following QR code with a mobile authenticator app, such as google-authenticator.</p>
+  <p><b>Failure to do so will require an account reset!</b></p>
+  <img id="qr-code" src="" />
+  <div><a href="/login" class="action-box">Acknowledge and continue to login</a></div>
+</li>
+<script type="text/javascript">
+  $(document).ready(function () {
+      $('form').ajaxForm({
+          url: 'user',
+          type: 'post',
+          beforeSubmit: function() {
+              $('#username-error').hide();
+              $('#password-error').hide();
+              $('#confirm-password-error').hide();
+              $('#email-error').hide();
+              $('#general-error').hide();
+              let pass = $('#password').val();
+              let confirm = $('#confirm-password').val();
+              if (pass !== confirm) {
+                  $('#confirm-password-error').html("Passwords do not match");
+                  $('#confirm-password-error').show();
+                  return false;
+              } else {
+                  return true;
+              }
+          },
+          success: function(response) {
+              let username = $('#username').val().toLowerCase().trim();
+              $('#reg-form').hide();
+              $('#reset-link').html(`<tt>https://cest-le-marche.com/reset?username=${username}&secret=${response.ok.reset_code}</tt>`);
+              $('#qr-code').attr('src', response.ok.qr_code_url);
+              $('#success').show();
+          },
+          error: function(xhr) {
+              let id = { InvalidUserName: "#username-error",
+                         PasswordTooShort: "#password-error",
+                         UserNameInUse: "#username-error",
+                         InvalidEmail: "#email-error",
+                         InternalDbError: "#general-error",
+                         InternalEncryptionError: "#general-error", };
+              $(id[xhr.responseJSON.error_type]).html(xhr.responseJSON.error);
+              $(id[xhr.responseJSON.error_type]).show();
+          }
+      });
+  });
+</script>
+{% endblock %}

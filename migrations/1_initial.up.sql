@@ -7,8 +7,12 @@ CREATE TYPE user_role as ENUM (
 CREATE TABLE users (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
+  display_name TEXT NOT NULL,
   password TEXT NOT NULL,
-  bio TEXT NOT NULL, 
+  secret BYTEA NOT NULL,
+  reset_code TEXT NOT NULL,
+  bio TEXT NOT NULL,
+  email TEXT NOT NULL,
   role user_role NOT NULL,
   experience BIGINT NOT NULL, 
   last_reward TIMESTAMP NOT NULL,

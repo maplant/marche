@@ -504,6 +504,19 @@ get! {
 }
 
 #[derive(Template)]
+#[template(path = "register.html")]
+pub struct RegisterPage {
+    offers: usize,
+}
+
+get! {
+    "/register",
+    async fn register_page() -> RegisterPage {
+        RegisterPage { offers: 0 }
+    }
+}
+
+#[derive(Template)]
 #[template(path = "update_bio.html")]
 pub struct UpdateBioPage {
     name:   String,

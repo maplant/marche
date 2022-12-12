@@ -8,7 +8,6 @@ use aws_sdk_s3::{
     Client, Endpoint,
 };
 use axum::body::Bytes;
-use base64ct::{Base64Url, Encoding};
 use image::ImageFormat;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -62,7 +61,10 @@ impl Image {
         let (bytes, hash) = task::spawn_blocking(move || {
             let mut hasher = Sha256::new();
             hasher.update(&bytes);
-            (bytes, Base64Url::encode_string(&hasher.finalize()))
+            (
+                bytes,
+                base64::encode_config(hasher.finalize().as_slice(), base64::URL_SAFE_NO_PAD),
+            )
         })
         .await?;
 

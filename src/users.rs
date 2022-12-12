@@ -1,9 +1,11 @@
 use std::{
     collections::HashMap,
     ops::Range,
+    string::FromUtf8Error,
     sync::{Arc, Mutex},
 };
 
+use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use askama::Template;
 use axum::{
     async_trait,
@@ -14,8 +16,10 @@ use axum::{
 use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
 use futures::StreamExt;
+use google_authenticator::{create_secret, qr_code_url, verify_code};
 use ipnetwork::IpNetwork;
-use libpasta::verify_password;
+use lazy_static::lazy_static;
+use libpasta::{hash_password, verify_password};
 use marche_proc_macros::{json, ErrorCode};
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
@@ -33,12 +37,20 @@ use crate::{
 pub struct User {
     /// Id of the user
     pub id:                    i32,
-    /// User name
+    /// User name (lowercased copy of the display name for faster lookups)
     pub name:                  String,
+    /// Display name
+    pub display_name:          String,
     /// Password hash
     pub password:              String,
+    /// Encrypted, shared secret for 2FA
+    pub secret:                Vec<u8>,
+    /// Reset code to change password and 2FA
+    pub reset_code:            String,
     /// Biography of the user
     pub bio:                   String,
+    /// Email address of the useer
+    pub email:                 String,
     /// Role
     pub role:                  Role,
     /// Exprerience
@@ -264,7 +276,7 @@ impl User {
     pub async fn get_profile_stub(&self, conn: &PgPool) -> Result<ProfileStub, sqlx::Error> {
         Ok(ProfileStub {
             id:         self.id,
-            name:       self.name.clone(),
+            name:       self.display_name.clone(),
             picture:    self.get_avatar(conn).await?,
             background: self.get_profile_background(conn).await?,
             badges:     self.get_badges(conn).await?,
@@ -349,6 +361,124 @@ impl User {
                 .get(0),
         )
     }
+}
+
+#[derive(Deserialize)]
+pub struct UserRegistrationForm {
+    username: String,
+    password: String,
+    email:    String,
+}
+
+#[derive(Serialize)]
+pub struct UserRegistration {
+    qr_code_url: String,
+    reset_code:  String,
+}
+
+#[derive(Error, Debug, Serialize, ErrorCode)]
+pub enum UserRegistrationError {
+    #[error("User names can only contain alphabetical characters")]
+    InvalidUserName,
+    #[error("Password is too short (minimum {MINIMUM_PASSWORD_LENGTH} characters)")]
+    PasswordTooShort,
+    #[error("User name has already been registered")]
+    UserNameInUse,
+    #[error("Invalid email")]
+    InvalidEmail,
+    #[error("Internal db error: {0}")]
+    InternalDbError(
+        #[from]
+        #[serde(skip)]
+        sqlx::Error,
+    ),
+    #[error("Internal encryption error")]
+    InternalEncryptionError,
+}
+
+impl From<aes_gcm::Error> for UserRegistrationError {
+    fn from(_: aes_gcm::Error) -> Self {
+        UserRegistrationError::InternalEncryptionError
+    }
+}
+
+const MINIMUM_PASSWORD_LENGTH: usize = 8;
+
+post!(
+    "/user",
+    #[json]
+    async fn register_user(
+        conn: Extension<PgPool>,
+        Form(UserRegistrationForm {
+            username,
+            password,
+            email,
+        }): Form<UserRegistrationForm>,
+    ) -> Result<UserRegistration, UserRegistrationError> {
+        let username = username.trim();
+        if !is_valid_username(&username) {
+            return Err(UserRegistrationError::InvalidUserName);
+        }
+
+        let name = username.to_lowercase();
+        let display_name = username;
+        let email = email.trim();
+
+        if password.len() < MINIMUM_PASSWORD_LENGTH {
+            return Err(UserRegistrationError::PasswordTooShort);
+        }
+
+        if email.is_empty() {
+            return Err(UserRegistrationError::InvalidEmail);
+        }
+
+        let existing_user: Option<User> = sqlx::query_as("SELECT * FROM users WHERE name = $1")
+            .bind(&name)
+            .fetch_optional(&*conn)
+            .await?;
+
+        if existing_user.is_some() {
+            return Err(UserRegistrationError::UserNameInUse);
+        }
+
+        let shared_secret = create_secret!();
+        let nonce = Nonce::from_slice(SHARED_SECRET_NONCE);
+        let encrypted_secret = SHARED_SECRET_CIPHER.encrypt(nonce, shared_secret.as_ref())?;
+        let qr_code_url = qr_code_url!(&shared_secret, "C'est Le Marché", "C'est Le Marché");
+
+        let reset_code =
+            base64::encode_config(&rand::random::<[u8; 32]>(), base64::URL_SAFE_NO_PAD);
+        let hashed_reset_code = hash_password(&reset_code);
+        let password = hash_password(&password);
+
+        sqlx::query(
+            r#"
+            INSERT INTO users (
+                name, display_name, password, secret, reset_code, email,
+                role, last_reward, experience, bio, equip_slot_badges, notes
+            ) VALUES ( $1, $2, $3, $4, $5, $6, $7, $8, 0, '', '{}', '' )
+            "#,
+        )
+        .bind(name)
+        .bind(display_name)
+        .bind(password)
+        .bind(encrypted_secret)
+        .bind(&hashed_reset_code)
+        .bind(email.trim())
+        .bind(Role::User)
+        .bind(Utc::now().naive_utc())
+        .execute(&*conn)
+        .await?;
+
+        Ok(UserRegistration {
+            qr_code_url,
+            reset_code,
+        })
+    }
+);
+
+fn is_valid_username(username: &str) -> bool {
+    username.chars().all(char::is_alphanumeric)
 }
 
 #[derive(Deserialize)]
@@ -652,13 +782,39 @@ pub struct LoginSession {
 pub enum LoginFailure {
     #[error("Username or password is incorrect")]
     UserOrPasswordIncorrect,
+    #[error("Invalid 2FA code")]
+    InvalidCode,
     #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
         #[serde(skip)]
         sqlx::Error,
     ),
+    #[error("Internal encryption error")]
+    InternalEncryptionError,
 }
+
+impl From<aes_gcm::Error> for LoginFailure {
+    fn from(_: aes_gcm::Error) -> Self {
+        LoginFailure::InternalEncryptionError
+    }
+}
+
+impl From<FromUtf8Error> for LoginFailure {
+    fn from(_: FromUtf8Error) -> Self {
+        LoginFailure::InternalEncryptionError
+    }
+}
+
+lazy_static! {
+    pub static ref SHARED_SECRET_CIPHER: Aes256Gcm = {
+        let key = std::env::var("SHARED_SECRET_KEY").unwrap();
+        let key_bytes = base64::decode(&key).expect("SHARED_SECRET_KEY is not valid base64");
+        Aes256Gcm::new_from_slice(&key_bytes).expect("could not construct shared secret cipher")
+    };
+}
+
+pub const SHARED_SECRET_NONCE: &[u8; 12] = b"96bitsIs12u8";
 
 impl LoginSession {
     /// Fetch the login session.
@@ -679,14 +835,15 @@ impl LoginSession {
     /// Attempt to login a user
     pub async fn login(
         conn: &PgPool,
-        user_name: &str,
+        username: &str,
         password: &str,
+        code: &str,
         ip_addr: IpNetwork,
     ) -> Result<Self, LoginFailure> {
-        let user_name = user_name.trim();
+        let username = username.trim();
         let user: User = {
             sqlx::query_as("SELECT * FROM users WHERE name = $1")
-                .bind(user_name)
+                .bind(username.to_lowercase())
                 .fetch_optional(conn)
                 .await?
                 .ok_or(LoginFailure::UserOrPasswordIncorrect)?
@@ -694,6 +851,16 @@ impl LoginSession {
 
         if !verify_password(&user.password, password) {
             return Err(LoginFailure::UserOrPasswordIncorrect);
+        }
+
+        // Decode the shared secret:
+        let nonce = Nonce::from_slice(SHARED_SECRET_NONCE);
+        let shared_secret =
+            String::from_utf8(SHARED_SECRET_CIPHER.decrypt(nonce, user.secret.as_ref())?)?;
+
+        // Check if the 2FA code is valid:
+        if !verify_code!(&shared_secret, code) {
+            return Err(LoginFailure::InvalidCode);
         }
 
         // TODO: Add extra protections here?
@@ -727,9 +894,10 @@ impl LoginSession {
 pub struct LoginForm {
     username: String,
     password: String,
+    code:     String,
 }
 
-post! {
+post!(
     "/login",
     #[json]
     async fn login(
@@ -741,12 +909,18 @@ post! {
         let key = Key::derive_from(PRIVATE_COOKIE_KEY.as_bytes());
         let private = jar.private(&key);
         private.remove(Cookie::named(USER_SESSION_ID_COOKIE));
-        let LoginSession { session_id, .. } =
-            LoginSession::login(&pool, &login.username, &login.password, IpNetwork::from(ip)).await?;
+        let LoginSession { session_id, .. } = LoginSession::login(
+            &pool,
+            login.username.trim(),
+            login.password.trim(),
+            login.code.trim(),
+            IpNetwork::from(ip),
+        )
+        .await?;
         private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
         Ok(())
     }
-}
+);
 
 #[derive(Debug, Serialize, Error, ErrorCode)]
 pub enum LogoutFailure {
