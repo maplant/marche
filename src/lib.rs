@@ -186,7 +186,7 @@ where
             } else {
                 continue;
             };
-            if name == "file}" {
+            if name == "file" {
                 if field.file_name().is_none() {
                     continue;
                 }
