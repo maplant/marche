@@ -16,9 +16,9 @@
         {% call macros::profile_stub(sender) %}
         <div class="cell">
           {% for item in sender_inventory %}
-          <label class="item-{{item.rarity}}" for="{{item.id}}" style="user-select: none">
-            <div class="hover-triggers-overlay">
-              <p>{{item.html|e("none")}}</p>
+          <label class="item-{{item.rarity}} hover-triggers-overlay" for="{{item.id}}" style="user-select: none">
+            <p>{{item.html|e("none")}}</p>
+            <div class="overlay-on-hover item-overlay">
               {% call macros::item_overlay(item) %}
             </div>
             <input type="checkbox" name="{{item.id}}" id="{{item.id}}" value="{{sender.id}}" />
@@ -40,9 +40,9 @@
         </div>
         <div class="cell">
           {% for item in receiver_inventory %}
-          <label class="item-{{item.rarity}}" for="{{item.id}}" style="user-select: none">
-            <div class="hover-triggers-overlay">
-              <p>{{item.html|e("none")}}</p>
+          <label class="item-{{item.rarity}} hover-triggers-overlay" for="{{item.id}}" style="user-select: none">
+            <p>{{item.html|e("none")}}</p>
+            <div class="overlay-on-hover item-overlay">
               {% call macros::item_overlay(item) %}
             </div>
             <input type="checkbox" name="{{item.id}}" id="{{item.id}}" value="{{receiver.id}}" />
