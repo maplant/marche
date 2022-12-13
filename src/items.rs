@@ -876,7 +876,7 @@ pub enum SubmitOfferError {
 const MAX_NOTE_LENGTH: usize = 150;
 
 post! {
-    "/offer/",
+    "/offer",
     #[json]
     pub async fn submit_offer(
         conn: Extension<PgPool>,
@@ -940,6 +940,7 @@ post! {
                     (sender_id, sender_items, receiver_id, receiver_items, note)
                 VALUES
                     ($1, $2, $3, $4, $5)
+                RETURNING *
                 "#
             )
                 .bind(sender.id)

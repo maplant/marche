@@ -37,7 +37,6 @@
       </div>
       <div class="row">
         {% call macros::profile_stub(receiver) %}
-        </div>
         <div class="cell">
           {% for item in receiver_inventory %}
           <label class="item-{{item.rarity}} hover-triggers-overlay" for="{{item.id}}" style="user-select: none">

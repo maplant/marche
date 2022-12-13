@@ -5,7 +5,7 @@
 Marche is lightweight forum software in the vein of Reddit or 4chan, designed to provide an 
 enjoyable and rewarding experience for users. 
 
-You can check out the canonical deployment of marche at [https://www.cest-le-marche.com]
+You can check out the canonical deployment of marche at https://www.cest-le-marche.com
 Everything on the main branch of this repository is automatically deployed to that URL.
 
 ## What makes Marche different?
