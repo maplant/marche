@@ -23,13 +23,24 @@ $(document).ready(function() {
         });
     });
 
+    // Auto-embed links
+    $(".post-text").each(function() {
+        const LINK_RE = /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/gi;
+        let paragraphs = $(this).find("p").each(function() {
+            let html = $(this).html();
+            $(this).html(html.replaceAll(LINK_RE, function(match) {
+                return `<a href="${match}">${match}</a>`;
+            }));
+        });
+    });
+
     // Replace @ with responses
     const has_reply_preview = new Map();
     $(".post-text").each(function() {        
         const REPLY_RE = /@(\d+)/g;
         let html = $(this).html();
         let curr_id = $(this).parents(".reply").attr("id");
-        $(this).html(html.replaceAll(REPLY_RE, function(match, id, _, _, _) {
+        $(this).html(html.replaceAll(REPLY_RE, function(match, id) {
             let post = $(`#${id}`);
             let author = post.attr("author");
             if (id < curr_id && post.length) {
