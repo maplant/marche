@@ -634,7 +634,7 @@ post!(
         let body = html_escape::encode_text(&body);
         let new_note = format!("<p>“{body}” — {viewer_name}</p>");
 
-        sqlx::query("UPDATE users SET notes = notes || $1 WHERE id = $1")
+        sqlx::query("UPDATE users SET notes = notes || $1 WHERE id = $2")
             .bind(new_note)
             .bind(user_id)
             .execute(&*conn)

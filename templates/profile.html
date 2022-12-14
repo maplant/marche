@@ -93,7 +93,7 @@
               $.ajax({
                   url: `/ban/{{stub.id}}?ban_len=${days}`,
                   type: 'post',
-                  complete: location.reload,
+                  complete: function() { location.reload(); }
               });
           }
       }
@@ -116,7 +116,7 @@
           $.ajax({
               url: `/user/{{stub.id}}?role=${role}`,
               type: 'post',
-              complete: location.reload,
+              complete: function() { location.reload(); }
           });
       }
       {% endif %}

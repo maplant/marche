@@ -10,13 +10,11 @@ aes-gcm = "0.10"
 anyhow = "1.0"
 axum = { version = "0.6", features = ["multipart", "json"] }
 axum-client-ip = "0.3.0"
-axum-macros = "0.2"
 base64 = "0.13"
 thiserror = "1.0"
 aws-config = "0.46"
 aws-sdk-s3 = "0.16"
 html-escape = "0.2.11"
-comrak = "0.14.0"
 rand = { version = "0.8" , features = ["getrandom"] }
 derive_more = "0.99"
 serde = { version = "1.0", features = ["derive"] }
@@ -24,7 +22,6 @@ serde_json = "1.0"
 sha2 = "0.10"
 libpasta = "0.1"
 chrono = "0.4"
-maplit = "1.0"
 lazy_static = "1.4"
 rand_xorshift = "0.3.0"
 regex = "1"
@@ -44,6 +41,7 @@ inventory = "0.2"
 sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "postgres", "chrono", "ipnetwork" ] }
 futures = "0.3"
 google-authenticator = { version = "0.2.0", git = "https://github.com/maplant/google-authenticator-rust.git" }
+maplit = "1.0.2"
 
 [dependencies.marche-proc-macros]
 path = "proc-macros"
