@@ -129,7 +129,7 @@
     </div>
     <div class="row">
       <div class="cell">
-        <div class="action-box" style="width: 100%" 
+        <div class="action-box" style="width: 100%" id="set-available-{{item.id}}"
              onclick="setAvailable({{item.id}}, !{{item.available}})">
           {% if item.available %}
           Make Unavailable
@@ -196,7 +196,12 @@
           url: `/set_item_availability/${id}?available=${available}`,
           type: `post`,
           complete: function() {
-              location.href = "/items";
+              if (available)  {
+                  $(`#set-available-${id}`).html("Make Unavailable");
+              } else {
+                  $(`#set-available-${id}`).html("Make Available");
+              }
+              $(`#set-available-${id}`).attr("onclick", `setAvailable(${id}, !${available})`);
           }
       });
   }
