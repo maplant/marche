@@ -42,6 +42,7 @@ sqlx = { version = "0.6", features = [ "runtime-tokio-rustls", "postgres", "chro
 futures = "0.3"
 google-authenticator = { version = "0.2.0", git = "https://github.com/maplant/google-authenticator-rust.git" }
 maplit = "1.0.2"
+cookie = "0.16"
 
 [dependencies.marche-proc-macros]
 path = "proc-macros"

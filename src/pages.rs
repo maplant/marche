@@ -2,13 +2,13 @@ use std::{collections::HashSet, sync::Arc};
 
 use askama::Template;
 use axum::{
-    extract::{Extension, Path},
+    extract::{Extension, Path, Query},
     http::StatusCode,
     response::{IntoResponse, Redirect, Response},
 };
 use chrono::prelude::*;
 use futures::{future, stream, StreamExt, TryStreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use thiserror::Error;
 
@@ -16,7 +16,7 @@ use crate::{
     get,
     items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
     threads::{Reply, Tag, Tags, Thread},
-    users::{LevelInfo, ProfileStub, Role, User, UserCache},
+    users::{LevelInfo, ProfileStub, Role, User, UserCache, UserRejection},
 };
 
 const THREADS_PER_PAGE: i64 = 25;
@@ -85,7 +85,7 @@ get!(
             return Err(ServerError::Unauthorized);
         }
 
-        let items = sqlx::query_as("SELECT * FROM items ORDER BY rarity DESC, id DESC")
+        let items = sqlx::query_as("SELECT * FROM items ORDER BY rarity DESC, id DESC, name ASC")
             .fetch(&*conn)
             .filter_map(|item: Result<Item, _>| future::ready(item.ok()))
             .map(|item| ItemStub {
@@ -496,12 +496,23 @@ pub struct LoginPage {
     offers: usize,
 }
 
-get! {
-    "/login",
-    async fn login_page() -> LoginPage {
-        LoginPage { offers: 0 }
-    }
+#[derive(Deserialize)]
+pub struct LoginPageParams {
+    redirect: Option<String>,
 }
+
+get!(
+    "/login",
+    async fn login_page(
+        user: Result<User, UserRejection>,
+        Query(LoginPageParams { redirect }): Query<LoginPageParams>,
+    ) -> Result<LoginPage, Redirect> {
+        match (redirect, user) {
+            (Some(redirect), Ok(_)) => Err(Redirect::to(&redirect)),
+            _ => Ok(LoginPage { offers: 0 }),
+        }
+    }
+);
 
 #[derive(Template)]
 #[template(path = "register.html")]

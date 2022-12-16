@@ -15,6 +15,7 @@ use axum::{
 };
 use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
+use cookie::time as cookie_time;
 use futures::StreamExt;
 use google_authenticator::{create_secret, qr_code_url, verify_code};
 use ipnetwork::IpNetwork;
@@ -827,7 +828,7 @@ impl LoginSession {
                 .filter(|session: &Self| {
                     // The session is automatically invalid if the session is longer than a month
                     // old.
-                    session.session_start >= (Utc::now() - Duration::weeks(4)).naive_utc()
+                    session.session_start >= (Utc::now() - Duration::weeks(52)).naive_utc()
                 }),
         )
     }
@@ -917,7 +918,10 @@ post!(
             IpNetwork::from(ip),
         )
         .await?;
-        private.add(Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string()));
+        let mut cookie = Cookie::new(USER_SESSION_ID_COOKIE, session_id.to_string());
+        cookie
+            .set_expires(cookie_time::OffsetDateTime::now_utc() + cookie_time::Duration::weeks(52));
+        private.add(cookie);
         Ok(())
     }
 );
