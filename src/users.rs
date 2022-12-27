@@ -783,8 +783,6 @@ pub struct LoginSession {
 pub enum LoginFailure {
     #[error("Username or password is incorrect")]
     UserOrPasswordIncorrect,
-    #[error("Invalid 2FA code")]
-    InvalidCode,
     #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
@@ -852,16 +850,6 @@ impl LoginSession {
 
         if !verify_password(&user.password, password) {
             return Err(LoginFailure::UserOrPasswordIncorrect);
-        }
-
-        // Decode the shared secret:
-        let nonce = Nonce::from_slice(SHARED_SECRET_NONCE);
-        let shared_secret =
-            String::from_utf8(SHARED_SECRET_CIPHER.decrypt(nonce, user.secret.as_ref())?)?;
-
-        // Check if the 2FA code is valid:
-        if !verify_code!(&shared_secret, code) {
-            return Err(LoginFailure::InvalidCode);
         }
 
         // TODO: Add extra protections here?
