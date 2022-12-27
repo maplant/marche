@@ -17,7 +17,7 @@ use axum_client_ip::ClientIp;
 use chrono::{prelude::*, Duration};
 use cookie::time as cookie_time;
 use futures::StreamExt;
-use google_authenticator::{create_secret, qr_code_url, verify_code};
+use google_authenticator::{create_secret, qr_code_url};
 use ipnetwork::IpNetwork;
 use lazy_static::lazy_static;
 use libpasta::{hash_password, verify_password};
@@ -836,7 +836,6 @@ impl LoginSession {
         conn: &PgPool,
         username: &str,
         password: &str,
-        code: &str,
         ip_addr: IpNetwork,
     ) -> Result<Self, LoginFailure> {
         let username = username.trim();
@@ -883,8 +882,7 @@ impl LoginSession {
 pub struct LoginForm {
     username: String,
     password: String,
-    code:     String,
-}
+ }
 
 post!(
     "/login",
@@ -902,7 +900,6 @@ post!(
             &pool,
             login.username.trim(),
             login.password.trim(),
-            login.code.trim(),
             IpNetwork::from(ip),
         )
         .await?;
