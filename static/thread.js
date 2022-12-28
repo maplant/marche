@@ -84,8 +84,11 @@ $(document).ready(function() {
     });
 
     $(".reply-to-button").click(function() {
-        $("#reply")[0].scrollIntoView({ behavior: "smooth" });
-        $("#reply-textarea")[0].value += `@${$(this).attr("replyid")} `
+        $("#reply-textarea")[0].value += `@${$(this).attr("replyid")} `;
+        if($('#reply-form').is(':hidden')) {
+            $('#toggle-form-button').html("▼ Reply");
+            $('#reply-form').slideToggle();
+        }
     });
 
     $(".respond-to-preview").click(function() {

@@ -4,7 +4,7 @@
 {% block title %}{{title}}{% endblock %}
 
 {% block content %}
-<script src="/static/thread.js" integrity="sha384-vysjgrJeDIgmXB1YPiCbaWU9+askdQeCYy2nTLso7DlC20P7Ppf1/xxJjcxrmk9W" async></script>
+<script src="/static/thread.js" integrity="sha384-cs8EmcAoFfc6E8SxxBwWq3yx3ttDoY2f8pRQyFOyZ9zUK/FNNBucLqUWDeHk3+iK" async></script>
 <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
   {{title}}
   <div>
@@ -123,41 +123,62 @@
 </li>
 {% endif %}
 {% endfor %}
-<form action="/thread/{{id}}" method="post" id="reply" enctype="multipart/form-data">
-  <input type="hidden" id="thread_id" name="thread_id" value={{id}}>
-  <li class="menu-item" style="padding: 25px">
-    {% if locked %}
-    <div style="display: flow-root">
-      <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px" disabled></textarea></div>
-      <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;" disabled>+ Reply!</button>
-      <div id="error" style="margin-top: 15px">Post is locked</div>
+{% endblock %}
+{% block footer %}
+<div style="height: 335px"></div>
+<div class="reply-box" id="reply-box">
+  <div style="padding: 10px">
+    <div onclick="toggleReplyForm()" id="toggle-form-button" style="cursor: pointer">► Reply</div>
+    <div style="display: none; padding-top: 15px" id="reply-form">
+      <form action="/thread/{{id}}" method="post" id="reply" enctype="multipart/form-data">
+        <input type="hidden" id="thread_id" name="thread_id" value={{id}}>
+        {% if locked %}
+        <div style="display: flow-root">
+          <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px" disabled></textarea></div>
+          <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;" disabled>+ Reply!</button>
+          <div id="error" style="margin-top: 15px">Post is locked</div>
+        </div>
+        {% else %}
+        <div style="display: flow-root">
+          <div><textarea name="body" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
+          <span id="attached-filename-text-container"></span>
+          <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">+ Reply!</button>
+          <label id="attach-file-to-reply-button" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-bottom: 0px; margin-right: 7px;">
+            <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
+            <span id="attach-file-to-reply-text-container">+ File!</span>
+          </label>
+          <div id="error" style="margin-top: 15px; display: none" class="error"></div>
+        </div>
+        {% endif %}
+      </form>
     </div>
-    {% else %}
-    <div style="display: flow-root">
-      <div><textarea name="body" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
-      <span id="attached-filename-text-container"></span>
-      <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">+ Reply!</button>
-      <label id="attach-file-to-reply-button" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-bottom: 0px; margin-right: 7px;">
-        <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
-        <span id="attach-file-to-reply-text-container">+ File!</span>
-      </label>
-      <div id="error" style="margin-top: 15px; display: none" class="error"></div>
-    </div>
-    {% endif %}
-    <script type="text/javascript">
-      {% if viewer_role >= Role::User %}
-      function togglePinned() {
-          var set_pinned = !{{pinned}};
-          $.ajax({
-              url: `/thread/{{id}}?pinned=${set_pinned}`,
+  </div>
+  <script type="text/javascript">
+    function toggleReplyForm() {
+        // Do not let us toggle if reply area is in view.
+        if (isReplyAreaInView()) {
+            return;
+        }
+        if ($('#reply-form').is(':visible')) {
+            $('#toggle-form-button').html("► Reply");
+        } else {
+            $('#toggle-form-button').html("▼ Reply");
+        }
+        $('#reply-form').slideToggle();
+    }
+    {% if viewer_role >= Role::User %}
+    function togglePinned() {
+        var set_pinned = !{{pinned}};
+        $.ajax({
+            url: `/thread/{{id}}?pinned=${set_pinned}`,
               type: 'post',
-              complete: function() {
-                  location.href = `/thread/{{id}}`;
-              }
-          });
-      }
-      function toggleLocked() {
-          var set_locked = !{{locked}};
+            complete: function() {
+                location.href = `/thread/{{id}}`;
+            }
+        });
+    }
+    function toggleLocked() {
+        var set_locked = !{{locked}};
           $.ajax({
               url: `/thread/{{id}}?locked=${set_locked}`,
               type: 'post',
@@ -165,73 +186,90 @@
                   location.href = `/thread/{{id}}`;
               }
           });
-      }
-      function toggleHidden() {
-          var set_hidden = !{{hidden}};
-          $.ajax({
-              url: `/thread/{{id}}?hidden=${set_hidden}`,
-              type: 'post',
-              complete: function() {
+    }
+    function toggleHidden() {
+        var set_hidden = !{{hidden}};
+        $.ajax({
+            url: `/thread/{{id}}?hidden=${set_hidden}`,
+            type: 'post',
+            complete: function() {
                   location.href = `/thread/{{id}}`;
-              }
-          });
-      }
-      function hideReply(id, hide) {
-          var hide = !$(`#hidden-${id}`).attr('hidden');
-          $.ajax({
-              url: `/reply/${id}?hidden=${hide}`,
-              type: 'post',
-              data: {
-                  hidden: hide,
-              },
-              complete: function() {
-                  if (hide) {
-                      $(`#hidden-${id}`).css('filter', 'brightness(70%)');
-                      $(`#hidden-${id}`).attr('hidden', true);
-                      $(`#reply-${id}`).css('filter', 'brightness(70%)');
-                  } else {
-                      $(`#hidden-${id}`).css('filter', 'brightness(100%)');
-                      $(`#hidden-${id}`).attr('hidden', false);
-                      $(`#reply-${id}`).css('filter', 'brightness(100%)');
-                  }
-              }
-          });
-      }
-      function deleteThread() {
-          $.ajax({
-              url: '/delete_thread/{{id}}',
-              type: 'post',
-              complete: function() {
-                  location.href = '/t/en';
-              }
-          });
-      }
-      function deleteReply(id) {
-          $.ajax({
-              url: `/delete_reply/${id}`,
-              type: 'post',
-              complete: function() {
-                  $(`#reply-${id}`).slideToggle();
-              }
-          });
-      }
-      {% endif %}
-      // posting replies
-      $(document).ready(function () {
-          $("form#reply").ajaxForm({
-              url: '/reply',
-              type: 'post',
-              success: function(response) {
-                  // TODO: Populate a new reply with the contents of the resonse
-                  location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
-              },
-              error: function(xhr) {
-                  $("#error").html(`${xhr.responseJSON.error}`);
-                  $("#error").show();
-              }
-          });
-      });
-    </script>
-  </li>
-</form>
+            }
+        });
+    }
+    function hideReply(id, hide) {
+        var hide = !$(`#hidden-${id}`).attr('hidden');
+        $.ajax({
+            url: `/reply/${id}?hidden=${hide}`,
+            type: 'post',
+            data: {
+                hidden: hide,
+            },
+            complete: function() {
+                if (hide) {
+                    $(`#hidden-${id}`).css('filter', 'brightness(70%)');
+                    $(`#hidden-${id}`).attr('hidden', true);
+                    $(`#reply-${id}`).css('filter', 'brightness(70%)');
+                } else {
+                    $(`#hidden-${id}`).css('filter', 'brightness(100%)');
+                    $(`#hidden-${id}`).attr('hidden', false);
+                    $(`#reply-${id}`).css('filter', 'brightness(100%)');
+                }
+            }
+        });
+    }
+    function deleteThread() {
+        $.ajax({
+            url: '/delete_thread/{{id}}',
+            type: 'post',
+            complete: function() {
+                location.href = '/t/en';
+            }
+        });
+    }
+    function deleteReply(id) {
+        $.ajax({
+            url: `/delete_reply/${id}`,
+            type: 'post',
+            complete: function() {
+                $(`#reply-${id}`).slideToggle();
+            }
+        });
+    }
+    {% endif %}
+    function isReplyAreaInView() {
+        return $(window).scrollTop() + $(window).height() > $(document).height() - 350;
+    }
+    $(document).ready(function () {
+        if (isReplyAreaInView()) {
+            $('#toggle-form-button').html("▼ Reply");
+            $('#reply-form').slideToggle();
+        }
+        // Toggle the reply when we scroll to the bottom
+        $(window).scroll(function() {
+            if (isReplyAreaInView()) {
+                if($('#reply-form').is(':hidden')) {
+                    $('#toggle-form-button').html("▼ Reply");
+                    $('#reply-form').slideToggle();
+                }
+            }
+        });
+        // // Set bottom padding to the height of the reply tab
+        // $('#bottom-padding').height($('#reply-form').height());
+        // Add response form
+        $("form#reply").ajaxForm({
+            url: '/reply',
+            type: 'post',
+            success: function(response) {
+                // TODO: Populate a new reply with the contents of the resonse
+                location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
+            },
+            error: function(xhr) {
+                $("#error").html(`${xhr.responseJSON.error}`);
+                $("#error").show();
+            }
+        });
+    });
+  </script>
+</div>
 {% endblock %}
