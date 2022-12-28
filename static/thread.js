@@ -157,6 +157,7 @@ function cleanCloneDiv(div) {
     div.find(".reply-to-button").remove();
     div.find(".react-button").remove();
     div.find(".edit-post-form").remove();
+    div.find(".response-container").remove();
 }
 
 function getOverlayDiv(origin) {
