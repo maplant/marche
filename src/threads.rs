@@ -6,13 +6,13 @@ use std::{
 
 use axum::{
     extract::{
-        ws::{Message, WebSocket, WebSocketUpgrade},
+        ws::{Message, WebSocketUpgrade},
         Extension, Form, Path, Query,
     },
     response::Response,
 };
 use chrono::{prelude::*, NaiveDateTime};
-use futures::{stream::StreamExt, Future};
+use futures::stream::StreamExt;
 use marche_proc_macros::{json, ErrorCode};
 use serde::{Deserialize, Serialize};
 use sqlx::{postgres::PgListener, FromRow, PgExecutor, PgPool};

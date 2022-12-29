@@ -289,7 +289,7 @@
 
     $(document).ready(function () {
         // Watch this thread via websockets
-        const socket = new WebSocket('ws://cest-le-marche.com/watch/{{id}}');
+        const socket = new WebSocket('wss://cest-le-marche.com/watch/{{id}}');
 
         socket.addEventListener('message', (event) => {
             appendPost(JSON.parse(event.data));
@@ -308,8 +308,7 @@
                 }
             }
         });
-        // // Set bottom padding to the height of the reply tab
-        // $('#bottom-padding').height($('#reply-form').height());
+
         // Add response form
         $("form#reply").ajaxForm({
             url: '/reply',
