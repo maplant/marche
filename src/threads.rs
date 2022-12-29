@@ -669,30 +669,6 @@ post!(
         user.read_thread(&*conn, &thread).await?;
 
         Ok(())
-
-        /*
-            Ok(Post {
-                id: reply.id,
-                author: Arc::new(user.get_profile_stub(&*conn).await?),
-                body: reply.body,
-                date: reply.post_date.format(crate::DATE_FMT).to_string(),
-                reactions: vec![],
-                reward: match reply.reward {
-                    Some(drop_id) => ItemDrop::fetch(&*conn, drop_id)
-                        .await?
-                        .get_thumbnail(&*conn)
-                        .await
-                        .ok(),
-                    _ => None,
-                },
-                can_react: false,
-                can_edit: true,
-                hidden: false,
-                image: reply.image,
-                thumbnail: reply.thumbnail,
-                filename: reply.filename,
-        })
-            */
     }
 );
 

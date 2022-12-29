@@ -4,7 +4,7 @@
 {% block title %}{{title}}{% endblock %}
 
 {% block content %}
-<script src="/static/thread.js" integrity="sha384-IdtkNCMDfepc+7wZITmRwhPyD4KuqjoNuaW3btC2ou78b+OZg0QM0Xqbh3d628H0" async></script>
+<script src="/static/thread.js" integrity="sha384-epELeD2BhXy+rKMDD3FTxq0Ky5mhzxXsPbS9NymfyuwJPP4/lb3/fMXGF8m9J5u4" async></script>
 <li class="menu-item" style="text-align: center; margin: 5px; padding: 10px">
   {{title}}
   <div>
@@ -60,7 +60,7 @@
             {% if post.can_edit %}
             <form class="unparsed-{{post.id}} edit-post-form" action="/reply/{{post.id}}" method="post" threadid="{{id}}" postid="{{post.id}}" hidden>
               <div><textarea name="body" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px">{{post.body}}</textarea></div>
-              <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">⇒ Update!</button>
+              <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">⇒ update</button>
               <div class="error error-{{post.id}}" style="display: none; margin-top: 15px"></div>
             </form>
             {% endif %}
@@ -88,14 +88,14 @@
             {% endmatch %}
             {% if post.can_react %}
             <a href="/react/{{post.id}}" class="react-button action-box action-box-standard-size">
-              + React!
+              ► react
             </a>
             {% endif %}
             {% if post.can_edit %}
-            <div class="edit-post-button action-box action-box-standard-size" style="margin-right: 0px" postid={{post.id}}>⚙️ Edit!</div>
+            <div class="edit-post-button action-box action-box-standard-size" style="margin-right: 0px" postid={{post.id}}>📝 edit</div>
             {% endif %}
             <div class="reply-to-button action-box action-box-standard-size" style="margin-right: 0px" replyid={{post.id}}>
-              + Respond!
+              🗣️ respond
             </div>
             {% if viewer_role > Role::User && loop.index > 1 %}
             <button id="hidden-{{post.id}}"
@@ -128,24 +128,24 @@
 <div style="height: 335px"></div>
 <div class="reply-box" id="reply-box">
   <div style="padding: 10px">
-    <div onclick="toggleReplyForm()" id="toggle-form-button" style="cursor: pointer">► Reply</div>
+    <div onclick="toggleReplyForm()" id="toggle-form-button" style="cursor: pointer">► reply</div>
     <div style="display: none; padding-top: 15px" id="reply-form">
       <form action="/thread/{{id}}" method="post" id="reply" enctype="multipart/form-data">
         <input type="hidden" id="thread_id" name="thread_id" value={{id}}>
         {% if locked %}
         <div style="display: flow-root">
           <div><textarea name="reply" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px" disabled></textarea></div>
-          <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;" disabled>+ Reply!</button>
+          <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;" disabled>reply</button>
           <div id="error" style="margin-top: 15px">Post is locked</div>
         </div>
         {% else %}
         <div style="display: flow-root">
           <div><textarea name="body" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
           <span id="attached-filename-text-container"></span>
-          <button id="submit" type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">+ Reply!</button>
+          <button id="submit" type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">reply</button>
           <label id="attach-file-to-reply-button" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-bottom: 0px; margin-right: 7px;">
             <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
-            <span id="attach-file-to-reply-text-container">+ File!</span>
+            <span id="attach-file-to-reply-text-container">file</span>
           </label>
           <div id="error" style="margin-top: 15px; display: none" class="error"></div>
         </div>
@@ -160,9 +160,9 @@
             return;
         }
         if ($('#reply-form').is(':visible')) {
-            $('#toggle-form-button').html("► Reply");
+            $('#toggle-form-button').html("► reply");
         } else {
-            $('#toggle-form-button').html("▼ Reply");
+            $('#toggle-form-button').html("▼ reply");
         }
         $('#reply-form').slideToggle();
     }
@@ -295,7 +295,7 @@
             appendPost(JSON.parse(event.data));
         });
         if (isReplyAreaInView()) {
-            $('#toggle-form-button').html("▼ Reply");
+            $('#toggle-form-button').html("▼ reply");
             $('#reply-form').slideToggle();
         }
         // Toggle the reply when we scroll to the bottom
@@ -305,12 +305,12 @@
             }
             if (isReplyAreaInView()) {
                 if($('#reply-form').is(':hidden')) {
-                    $('#toggle-form-button').html("▼ Reply");
+                    $('#toggle-form-button').html("▼ reply");
                     $('#reply-form').slideToggle();
                 }
             } else if ($('#reply-textarea').val().trim() == "") {
                 if(!$('#reply-form').is(':hidden') && !$('#reply-form').prop('sliding')) {
-                    $('#toggle-form-button').html("► Reply");
+                    $('#toggle-form-button').html("► reply");
                     $('#reply-form').prop('sliding', true);
                     $('#reply-form').slideToggle(400, function() { $('#reply-form').prop('sliding', false); });
                 }

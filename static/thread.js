@@ -136,13 +136,13 @@ $(document).ready(function() {
         var filenameTextHolder = $("#attached-filename-text-container");
         if (file) {
             button.attr("title", file.name);
-            button.css("background-color", "lightgreen");
-            buttonTextHolder[0].textContent="✔️ File!";
+            button.css("background-color", "#b1c66d");
+            buttonTextHolder[0].textContent="✔️ file";
             filenameTextHolder[0].textContent=`└ ${file.name}`;
         } else {
             button.attr("title", "");
             button.css("background-color", "");
-            buttonTextHolder[0].textContent="+ File!";
+            buttonTextHolder[0].textContent="file";
             filenameTextHolder[0].textContent="";
         }
       });

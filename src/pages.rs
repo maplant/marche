@@ -605,7 +605,7 @@ get!(
         Ok(ProfilePage {
             is_banned: user.is_banned(),
             ban_timestamp,
-            offers: user.incoming_offers(&*conn).await?,
+            offers: curr_user.incoming_offers(&*conn).await?,
             stub: user.get_profile_stub(&*conn).await?,
             level: user.level_info(),
             bio: user.bio,

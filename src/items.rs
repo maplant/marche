@@ -822,8 +822,9 @@ impl TradeRequest {
             }
         }
 
-        // Delete the transaction
+        // Delete the transaction and commit
         self.decline(&mut *transaction).await?;
+        transaction.commit().await?;
 
         Ok(())
     }
