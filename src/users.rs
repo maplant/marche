@@ -730,7 +730,10 @@ impl IntoResponse for UserRejection {
             Self::Unauthorized { redirect } => {
                 Redirect::to(&format!("/login?redirect={redirect}")).into_response()
             }
-            _ => todo!(),
+            err => {
+                tracing::error!("Unknown error occurred: {:?}", err);
+                Redirect::to("/login").into_response()
+            }
         }
     }
 }

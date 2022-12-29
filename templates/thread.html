@@ -294,19 +294,27 @@
         socket.addEventListener('message', (event) => {
             appendPost(JSON.parse(event.data));
         });
-        
         if (isReplyAreaInView()) {
             $('#toggle-form-button').html("▼ Reply");
             $('#reply-form').slideToggle();
         }
         // Toggle the reply when we scroll to the bottom
         $(window).scroll(function() {
+            if ($('#reply-form').prop('sliding')) {
+                return;
+            }
             if (isReplyAreaInView()) {
                 if($('#reply-form').is(':hidden')) {
                     $('#toggle-form-button').html("▼ Reply");
                     $('#reply-form').slideToggle();
                 }
-            }
+            } else if ($('#reply-textarea').val().trim() == "") {
+                if(!$('#reply-form').is(':hidden') && !$('#reply-form').prop('sliding')) {
+                    $('#toggle-form-button').html("► Reply");
+                    $('#reply-form').prop('sliding', true);
+                    $('#reply-form').slideToggle(400, function() { $('#reply-form').prop('sliding', false); });
+                }
+            } 
         });
 
         // Add response form

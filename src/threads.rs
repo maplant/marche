@@ -2,6 +2,7 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
+    time::Duration,
 };
 
 use axum::{
@@ -15,7 +16,7 @@ use chrono::{prelude::*, NaiveDateTime};
 use futures::stream::StreamExt;
 use marche_proc_macros::{json, ErrorCode};
 use serde::{Deserialize, Serialize};
-use sqlx::{postgres::PgListener, FromRow, PgExecutor, PgPool};
+use sqlx::{FromRow, PgExecutor, PgPool};
 use thiserror::Error;
 
 use crate::{
@@ -868,65 +869,66 @@ pub struct Post {
 get!(
     "/watch/:thread_id",
     pub async fn watch(
+        _user: User,
         conn: Extension<PgPool>,
         ws: WebSocketUpgrade,
         Path(thread_id): Path<i32>,
     ) -> Response {
-        ws.on_upgrade(move |mut socket| async move {
-            let Ok(mut listener) = PgListener::connect_with(&*conn).await else {
-                return;
-            };
-            listener.listen("new_posts").await.unwrap();
-            loop {
-                let Ok(notification) = listener.recv().await else {
-                    println!("Failed to recv");
-                    return;
-                };
-                let payload = notification.payload();
-                let Ok(reply) = serde_json::from_str::<Reply>(&payload) else {
-                    println!("Could not deserialize payload:\n\t'{}'", payload);
-                    return;
-                };
-                if reply.thread_id != thread_id {
-                    continue;
-                }
-                let Ok(user) = User::fetch(&*conn, reply.author_id).await else {
-                    println!("Failed to fetch user from id");
-                    return;
-                };
-                let body = askama::filters::linebreaks(
-                    askama::filters::escape(askama::Html, reply.body).unwrap(),
-                )
+        let latest_thread: Reply =
+            sqlx::query_as("SELECT * FROM replies WHERE thread_id = $1 ORDER BY post_date DESC")
+                .bind(thread_id)
+                .fetch_one(&*conn)
+                .await
                 .unwrap();
-                let post = Post {
-                    id: reply.id,
-                    author: Arc::new(user.get_profile_stub(&*conn).await.unwrap()),
-                    body,
-                    date: reply.post_date.format(crate::DATE_FMT).to_string(),
-                    reactions: vec![],
-                    reward: match reply.reward {
-                        Some(drop_id) => ItemDrop::fetch(&*conn, drop_id)
-                            .await
-                            .unwrap()
-                            .get_thumbnail(&*conn)
-                            .await
-                            .ok(),
-                        _ => None,
-                    },
-                    can_react: false,
-                    can_edit: true,
-                    hidden: false,
-                    image: reply.image,
-                    thumbnail: reply.thumbnail,
-                    filename: reply.filename,
-                };
-                if socket
-                    .send(Message::from(serde_json::to_string(&post).unwrap()))
-                    .await
-                    .is_err()
-                {
-                    return;
+        let mut last_post = latest_thread.id;
+        ws.on_upgrade(move |mut socket| async move {
+            // Don't use listeners. It will quickly exhaust the number of connections
+            loop {
+                let mut new_posts = sqlx::query_as(
+                "SELECT * FROM replies WHERE thread_id = $1 AND id > $2 ORDER BY post_date ASC  ",
+            )
+            .bind(thread_id)
+            .bind(last_post)
+            .fetch(&*conn);
+                while let Some(reply) = new_posts.next().await {
+                    let reply: Reply = reply.unwrap();
+                    last_post = reply.id;
+                    let user = User::fetch(&*conn, reply.author_id).await.unwrap();
+                    let body = askama::filters::linebreaks(
+                        askama::filters::escape(askama::Html, reply.body).unwrap(),
+                    )
+                    .unwrap();
+                    let post = Post {
+                        id: reply.id,
+                        author: Arc::new(user.get_profile_stub(&*conn).await.unwrap()),
+                        body,
+                        date: reply.post_date.format(crate::DATE_FMT).to_string(),
+                        reactions: vec![],
+                        reward: match reply.reward {
+                            Some(drop_id) => ItemDrop::fetch(&*conn, drop_id)
+                                .await
+                                .unwrap()
+                                .get_thumbnail(&*conn)
+                                .await
+                                .ok(),
+                            _ => None,
+                        },
+                        can_react: false,
+                        can_edit: true,
+                        hidden: false,
+                        image: reply.image,
+                        thumbnail: reply.thumbnail,
+                        filename: reply.filename,
+                    };
+                    if socket
+                        .send(Message::from(serde_json::to_string(&post).unwrap()))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
                 }
+                tokio::time::sleep(Duration::from_millis(50)).await;
             }
         })
     }
