@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::{
     get,
     items::{IncomingOffer, Item, ItemDrop, ItemThumbnail, OutgoingOffer},
-    threads::{Reply, Tag, Tags, Thread},
+    threads::{Post, Reply, Tag, Tags, Thread},
     users::{LevelInfo, ProfileStub, Role, User, UserCache, UserRejection},
 };
 
@@ -265,22 +265,6 @@ pub struct ThreadPage {
     locked:      bool,
     hidden:      bool,
     viewer_role: Role,
-}
-
-#[derive(Serialize)]
-struct Post {
-    id:        i32,
-    author:    Arc<ProfileStub>,
-    body:      String,
-    date:      String,
-    reactions: Vec<ItemThumbnail>,
-    reward:    Option<ItemThumbnail>,
-    can_react: bool,
-    can_edit:  bool,
-    hidden:    bool,
-    image:     Option<String>,
-    thumbnail: Option<String>,
-    filename:  String,
 }
 
 get!(

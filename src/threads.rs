@@ -1,19 +1,29 @@
 //! Display threads
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
-use axum::extract::{Extension, Form, Path, Query};
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Extension, Form, Path, Query,
+    },
+    response::Response,
+};
 use chrono::{prelude::*, NaiveDateTime};
-use futures::stream::StreamExt;
+use futures::{stream::StreamExt, Future};
 use marche_proc_macros::{json, ErrorCode};
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, PgExecutor, PgPool};
+use sqlx::{postgres::PgListener, FromRow, PgExecutor, PgPool};
 use thiserror::Error;
 
 use crate::{
+    get,
     images::{Image, UploadImageError, MAXIMUM_FILE_SIZE},
-    items::ItemDrop,
+    items::{ItemDrop, ItemThumbnail},
     post,
-    users::{Role, User},
+    users::{ProfileStub, Role, User},
     MultipartForm, MultipartFormError,
 };
 
@@ -433,7 +443,7 @@ impl Tags {
     }
 }
 
-#[derive(FromRow, Debug, Serialize)]
+#[derive(FromRow, Debug, Serialize, Deserialize)]
 pub struct Reply {
     /// Id of the reply
     pub id:        i32,
@@ -442,7 +452,6 @@ pub struct Reply {
     /// Id of the thread
     pub thread_id: i32,
     /// Date of posting
-    #[serde(skip)] // TODO: Serialize this
     pub post_date: NaiveDateTime,
     /// Body of the reply
     pub body:      String,
@@ -585,7 +594,7 @@ post!(
             file,
             form: ReplyForm { thread_id, body },
         }: MultipartForm<ReplyForm, MAXIMUM_FILE_SIZE>,
-    ) -> Result<Reply, ReplyError> {
+    ) -> Result<(), ReplyError> {
         let body = body.trim();
 
         if body.is_empty() && file.is_none() {
@@ -658,7 +667,31 @@ post!(
 
         user.read_thread(&*conn, &thread).await?;
 
-        Ok(reply)
+        Ok(())
+
+        /*
+            Ok(Post {
+                id: reply.id,
+                author: Arc::new(user.get_profile_stub(&*conn).await?),
+                body: reply.body,
+                date: reply.post_date.format(crate::DATE_FMT).to_string(),
+                reactions: vec![],
+                reward: match reply.reward {
+                    Some(drop_id) => ItemDrop::fetch(&*conn, drop_id)
+                        .await?
+                        .get_thumbnail(&*conn)
+                        .await
+                        .ok(),
+                    _ => None,
+                },
+                can_react: false,
+                can_edit: true,
+                hidden: false,
+                image: reply.image,
+                thumbnail: reply.thumbnail,
+                filename: reply.filename,
+        })
+            */
     }
 );
 
@@ -812,5 +845,89 @@ post!(
         transaction.commit().await?;
 
         Ok(())
+    }
+);
+
+/// A post is a generalized reply and thread.
+#[derive(Serialize)]
+pub struct Post {
+    pub id:        i32,
+    pub author:    Arc<ProfileStub>,
+    pub body:      String,
+    pub date:      String,
+    pub reactions: Vec<ItemThumbnail>,
+    pub reward:    Option<ItemThumbnail>,
+    pub can_react: bool,
+    pub can_edit:  bool,
+    pub hidden:    bool,
+    pub image:     Option<String>,
+    pub thumbnail: Option<String>,
+    pub filename:  String,
+}
+
+get!(
+    "/watch/:thread_id",
+    pub async fn watch(
+        conn: Extension<PgPool>,
+        ws: WebSocketUpgrade,
+        Path(thread_id): Path<i32>,
+    ) -> Response {
+        ws.on_upgrade(move |mut socket| async move {
+            let Ok(mut listener) = PgListener::connect_with(&*conn).await else {
+                return;
+            };
+            listener.listen("new_posts").await.unwrap();
+            loop {
+                let Ok(notification) = listener.recv().await else {
+                    println!("Failed to recv");
+                    return;
+                };
+                let payload = notification.payload();
+                let Ok(reply) = serde_json::from_str::<Reply>(&payload) else {
+                    println!("Could not deserialize payload:\n\t'{}'", payload);
+                    return;
+                };
+                if reply.thread_id != thread_id {
+                    continue;
+                }
+                let Ok(user) = User::fetch(&*conn, reply.author_id).await else {
+                    println!("Failed to fetch user from id");
+                    return;
+                };
+                let body = askama::filters::linebreaks(
+                    askama::filters::escape(askama::Html, reply.body).unwrap(),
+                )
+                .unwrap();
+                let post = Post {
+                    id: reply.id,
+                    author: Arc::new(user.get_profile_stub(&*conn).await.unwrap()),
+                    body,
+                    date: reply.post_date.format(crate::DATE_FMT).to_string(),
+                    reactions: vec![],
+                    reward: match reply.reward {
+                        Some(drop_id) => ItemDrop::fetch(&*conn, drop_id)
+                            .await
+                            .unwrap()
+                            .get_thumbnail(&*conn)
+                            .await
+                            .ok(),
+                        _ => None,
+                    },
+                    can_react: false,
+                    can_edit: true,
+                    hidden: false,
+                    image: reply.image,
+                    thumbnail: reply.thumbnail,
+                    filename: reply.filename,
+                };
+                if socket
+                    .send(Message::from(serde_json::to_string(&post).unwrap()))
+                    .await
+                    .is_err()
+                {
+                    return;
+                }
+            }
+        })
     }
 );

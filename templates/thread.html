@@ -142,7 +142,7 @@
         <div style="display: flow-root">
           <div><textarea name="body" id="reply-textarea" rows="12" cols="100" style="width: 100%; resize: none; box-sizing: border-box; padding: 5px"></textarea></div>
           <span id="attached-filename-text-container"></span>
-          <button type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">+ Reply!</button>
+          <button id="submit" type="submit" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-right: 0px; margin-left: 7px; margin-bottom: 0px;">+ Reply!</button>
           <label id="attach-file-to-reply-button" class="action-box action-box-standard-size" style="float: right; margin-top: 15px; margin-bottom: 0px; margin-right: 7px;">
             <input id="attach-file-to-reply-input" style="display: none;" type="file" name="file">
             <span id="attach-file-to-reply-text-container">+ File!</span>
@@ -240,7 +240,61 @@
     function isReplyAreaInView() {
         return $(window).scrollTop() + $(window).height() > $(document).height() - 350;
     }
+    
+    function appendPost(post) {
+        var badges = '';
+
+        // I swear to god, this is what needs to happen to get this thing working
+        let post_html = $($.parseHTML(`\
+<li class="menu-item" id="reply-${post.id}">
+  <div style="display: table" class="reply" id=${post.id} author=${post.author.name}>
+    <div style="display: table-row">
+      <div class="profile"
+           style="${ post.author.background ? post.author.background : "background: #d3d3d3" }">
+        <p><a href="/profile/${post.author.id}" style="color: white; text-decoration: none">${post.author.name}</a></p>
+        ${ post.author.picture ? `<img style="width: 100%; height: auto;" src="${post.author.picture}">` : '<div style="width: 80px; min-height: 100px;"></div>' }
+        <div class="badge-grid">
+          ${badges}
+        </div>
+      </div>
+      <div class="post">
+        <div style="display: grid">
+          <div style="min-height: 80px">
+            ${
+               post.image ? post.thumbnail ? `<p><a href=="${post.image}"><img src="${post.thumbnail}" title="${post.filename}"></a></p>`
+                                           : `<p><img src="${post.image}" title="${post.filename}"></p>`
+                          : ""
+
+            }
+            <span class="post-text" id="post-text-${post.id}"></span>
+            <p style="font-size: 80%; color: grey">Posted on ${post.date}</p>
+            <div style="float: right; text-align: right;">
+              ${ post.reward ? `<div class="rarity-${post.reward.rarity}" style="margin: 5px">
+                                 ⭐ <b>${post.reward.name}</b> was given for this post
+                                </div>`
+                             : '' }
+            </div>               
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</li>`));
+        post_html.find(`#post-text-${post.id}`).html(post.body);
+        $('#content').append(post_html);
+        if (isReplyAreaInView()) {
+            post_html[0].scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+    }
+
     $(document).ready(function () {
+        // Watch this thread via websockets
+        const socket = new WebSocket('ws://cest-le-marche.com/watch/{{id}}');
+
+        socket.addEventListener('message', (event) => {
+            appendPost(JSON.parse(event.data));
+        });
+        
         if (isReplyAreaInView()) {
             $('#toggle-form-button').html("▼ Reply");
             $('#reply-form').slideToggle();
@@ -260,13 +314,17 @@
         $("form#reply").ajaxForm({
             url: '/reply',
             type: 'post',
+            beforeSubmit: function() {
+                $("#submit").prop('disabled', true);
+            },
             success: function(response) {
-                // TODO: Populate a new reply with the contents of the resonse
-                location.href = `/thread/{{id}}?jump_to=${response.ok.id}`;
+                $("form#reply").resetForm();
+                $("#submit").prop('disabled', false);
             },
             error: function(xhr) {
                 $("#error").html(`${xhr.responseJSON.error}`);
                 $("#error").show();
+                $("#submit").prop('disabled', false);
             }
         });
     });

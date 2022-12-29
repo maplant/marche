@@ -882,7 +882,7 @@ impl LoginSession {
 pub struct LoginForm {
     username: String,
     password: String,
- }
+}
 
 post!(
     "/login",
