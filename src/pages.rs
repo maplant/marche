@@ -213,7 +213,7 @@ get! {
             let replies = match thread.num_replies {
                 0 => format!("No replies"),
                 1 => format!("1 reply"),
-                x => format!("{} replies", x - 1),
+                x => format!("{} replies", x),
             };
 
             let read = user.has_read(conn, &thread).await?;
