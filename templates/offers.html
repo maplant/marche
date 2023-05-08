@@ -34,7 +34,7 @@
         {% match offer.note %}
         {% when Some with (note) %}
         <p>
-          <div>
+          <div class="trade-note">
             <p style="text-align: center">“ {{note}} ”</p>
             <p style="text-align: right">— {{offer.sender.name}}</p>
           </div>
