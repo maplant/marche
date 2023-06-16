@@ -24,7 +24,7 @@ use crate::{
     images::{Image, UploadImageError, MAXIMUM_FILE_SIZE},
     items::{ItemDrop, ItemThumbnail},
     post,
-    users::{ProfileStub, Role, User},
+    users::{ProfileStub, Role, User, MIN_LEVEL_TO_UPLOAD_PHOTOS},
     MultipartForm, MultipartFormError,
 };
 
@@ -144,6 +144,8 @@ pub enum SubmitThreadError {
         #[serde(skip)]
         sqlx::Error,
     ),
+    #[error("You must be level {MIN_LEVEL_TO_UPLOAD_PHOTOS} in order to upload photos")]
+    NotAllowedToUploadPictures,
     #[error("Multipart form error: {0}")]
     MultipartFormError(#[from] MultipartFormError),
 }
@@ -171,6 +173,9 @@ post! {
         let post_date = Utc::now().naive_utc();
 
         let (image, thumbnail, filename) = if let Some(file) = file {
+            if !user.can_post_photos() {
+                return Err(SubmitThreadError::NotAllowedToUploadPictures);
+            }
             let Image { filename: image, thumbnail } = Image::upload_image(file.bytes).await?;
             (Some(image), thumbnail, file.name)
         } else {
@@ -577,6 +582,8 @@ pub enum ReplyError {
         #[serde(skip)]
         UploadImageError,
     ),
+    #[error("You must be level {MIN_LEVEL_TO_UPLOAD_PHOTOS} in order to upload photos")]
+    NotAllowedToUploadPictures,
     #[error("Internal database error: {0}")]
     InternalDbError(
         #[from]
@@ -614,6 +621,9 @@ post!(
         let post_date = Utc::now().naive_utc();
 
         let (image, thumbnail, filename) = if let Some(file) = file {
+            if !user.can_post_photos() {
+                return Err(ReplyError::NotAllowedToUploadPictures);
+            }
             let Image {
                 filename: image,
                 thumbnail,

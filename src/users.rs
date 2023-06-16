@@ -4,7 +4,6 @@ use std::{
     string::FromUtf8Error,
     sync::{Arc, Mutex},
 };
-
 use aes_gcm::{aead::Aead, Aes256Gcm, KeyInit, Nonce};
 use askama::Template;
 use axum::{
@@ -100,6 +99,7 @@ pub struct LevelInfo {
 }
 
 pub const MAX_NUM_BADGES: usize = 10;
+pub const MIN_LEVEL_TO_UPLOAD_PHOTOS: u32 = 3;
 
 impl User {
     pub async fn fetch(conn: impl PgExecutor<'_>, user_id: i32) -> Result<Self, sqlx::Error> {
@@ -134,6 +134,10 @@ impl User {
         } else {
             63 - xp.leading_zeros()
         }
+    }
+
+    pub fn can_post_photos(&self) -> bool {
+        self.level() >= MIN_LEVEL_TO_UPLOAD_PHOTOS
     }
 
     pub fn is_banned(&self) -> bool {

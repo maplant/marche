@@ -11,11 +11,11 @@ Everything on the main branch of this repository is automatically deployed to th
 ## What makes Marche different?
 
 The primary difference between Marche and other forum softwares is the inclusion of items. 
-When a user posts a thread of a reply, there is a random chance that the user will be given 
+When a user posts a thread or a reply, there is a random chance that the user will be given 
 an item. These items can include cosmetic items such a profile pictures or backgrounds and 
-badges that the user can equip to show of their personality. 
+badges that the user can equip. 
 
-The other type of item that can drop includes reactions. A user can use a reaction one time 
+The other type of item that can drop are reactions. A user can use a reaction one time 
 on any post other then one of their own to show appreciation or the opposite. Reactions add
 or subtract experience points from the recipient. 
 
@@ -36,6 +36,7 @@ Marche is written in Rust and uses the following tech stack:
  * Axum (web framework)
  * Askama (templating)
  * Jquery 
+ * Postgres
  
 
 
